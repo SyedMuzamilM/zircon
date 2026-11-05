@@ -1,6 +1,17 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const t = std.testing;
+test "retiring a temporary large frame releases capacity above the pool budget" {
+    var harness = try ui.testing.Harness.init(t.allocator);
+    defer harness.deinit();
+    const frame = &harness.frames.staging;
+    const limit = @TypeOf(frame.*).retained_arena_limit;
+    const bytes = try frame.allocator().alloc(u8, limit * 2);
+    @memset(bytes, 0);
+    try t.expect(frame.arena.queryCapacity() > limit);
+    try frame.reset();
+    try t.expect(frame.arena.queryCapacity() <= limit);
+}
 const Counter = struct {
     count: u32 = 0,
     fail_render: bool = false,

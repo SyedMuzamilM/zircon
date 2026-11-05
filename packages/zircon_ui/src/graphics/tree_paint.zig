@@ -35,7 +35,7 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             var style = value.style.text;
             style.color.a *= opacity;
             const content: g.Rect = .{ .x = bounds.x + value.style.padding.left, .y = bounds.y + value.style.padding.top, .width = @max(0, bounds.width - value.style.padding.horizontal()), .height = @max(0, bounds.height - value.style.padding.vertical()) };
-            try painter.drawText(.{ .bounds = content, .text = text, .style = style });
+            if (value.kind == .text or value.children.len == 0) try painter.drawText(.{ .bounds = content, .text = text, .style = style });
         },
     }
     for (value.children) |child| try node(frame, layout, painter, child, opacity, depth + 1, measurer);

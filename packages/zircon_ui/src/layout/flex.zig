@@ -83,8 +83,11 @@ const Engine = struct {
                 natural = try custom.measure(custom.object, &cx);
             },
             .text => |text| natural = try e.measure.text(e.measure.context, text, style.text),
-            .button => |button| natural = try e.measure.text(e.measure.context, button.label, style.text),
-            .container => container: {
+            .container, .button => container: {
+                if (node.kind == .button and node.children.len == 0) {
+                    natural = try e.measure.text(e.measure.context, node.kind.button.label, style.text);
+                    break :container;
+                }
                 if (style.direction == .stack) {
                     for (node.children) |child| {
                         try e.measureNode(child, content, depth + 1);

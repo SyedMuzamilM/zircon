@@ -194,7 +194,7 @@ pub const Window = struct {
         const hit = if (point) |p| hitTest(frame, route_root, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
         const target = if (input == .close) frame.root.?.index else if (point != null) w.capture orelse hit orelse route_root else w.focus orelse route_root;
         if (input == .pointer_down) {
-            w.pressed = hit;
+            w.pressed = buttonTarget(frame, hit);
             var candidate: ?u32 = target;
             while (candidate) |i| : (candidate = frame.nodes.items[i].parent) if (frame.nodes.items[i].focusable) {
                 if (w.focus != i) w.dirty = true;
@@ -231,7 +231,8 @@ pub const Window = struct {
         if (!event.prevented) switch (input) {
             .close => w.acceptClose(),
             .pointer_up => |p| {
-                if (p.button == .primary and hit != null and w.pressed == hit) try w.click(hit.?, p.position);
+                const button = buttonTarget(frame, hit);
+                if (p.button == .primary and button != null and w.pressed == button) try w.click(button.?, p.position);
             },
             .key_down => |key| {
                 if (key.key == .tab) {
@@ -274,6 +275,11 @@ pub const Window = struct {
         };
     }
 };
+fn buttonTarget(frame: *const tree.Frame, hit: ?u32) ?u32 {
+    var current = hit;
+    while (current) |index| : (current = frame.nodes.items[index].parent) if (frame.nodes.items[index].kind == .button) return index;
+    return null;
+}
 fn contains(r: g.Rect, p: g.Point) bool {
     return p.x >= r.x and p.y >= r.y and p.x < r.x + r.width and p.y < r.y + r.height;
 }

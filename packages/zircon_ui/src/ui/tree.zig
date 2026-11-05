@@ -22,6 +22,9 @@ pub const Node = struct {
 pub const Cleanup = struct { object: *anyopaque, destroy: *const fn (*anyopaque) void };
 pub const Dependency = struct { entity: @import("../entity/entity.zig").Token, version: u64 };
 pub const Frame = struct {
+    /// Budget for an arena after retirement. Active frames may exceed it; a
+    /// temporary large text/selection frame must not permanently grow the pool.
+    pub const retained_arena_limit = 8 * 1024 * 1024;
     arena: std.heap.ArenaAllocator,
     nodes: std.ArrayList(Node) = .empty,
     cleanups: std.ArrayList(Cleanup) = .empty,
@@ -49,7 +52,7 @@ pub const Frame = struct {
     pub fn reset(frame: *Frame) !void {
         const next = try epoch();
         frame.retire();
-        _ = frame.arena.reset(.retain_capacity);
+        _ = frame.arena.reset(.{ .retain_with_limit = retained_arena_limit });
         frame.nodes = .empty;
         frame.cleanups = .empty;
         frame.dependencies = .empty;

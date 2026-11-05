@@ -1,6 +1,34 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const t = std.testing;
+const RichButton = struct {
+    clicks: usize = 0,
+    pub fn render(_: *const RichButton, b: *ui.Ui) !ui.Element {
+        return b.column(.{}, &.{try b.listen(try b.button(.{ .label = "Accessible row name", .on_click = b.onClick(click), .children = &.{ try b.styled(try b.text("Title"), .{ .height = .{ .px = 20 } }), try b.styled(try b.text("Metadata"), .{ .height = .{ .px = 20 } }) }, .style = .{ .height = .{ .px = 50 }, .gap = 4, .padding = ui.Insets.all(3) } }), .{})});
+    }
+    fn click(self: *RichButton, _: *ui.Event(ui.Click), cx: *ui.Context(RichButton)) void {
+        self.clicks += 1;
+        cx.notify();
+    }
+    fn count(self: *const RichButton) usize {
+        return self.clicks;
+    }
+};
+test "composed button activates across decorative children and by keyboard" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(RichButton, .{ .visible = false, .width = 300, .height = 150 }, .{});
+    const owner = try app.windowEntity(RichButton, h);
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_down = .{ .position = .{ .x = 10, .y = 10 } } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = .{ .x = 10, .y = 34 } } });
+    try t.expectEqual(@as(usize, 1), try app.read(owner, RichButton.count, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+    try t.expectEqual(@as(usize, 2), try app.read(owner, RichButton.count, .{}));
+    _ = try app.step(1);
+    const frame = &(try app.window(h)).frames.committed;
+    for (frame.scene.items) |item| if (item.kind == .text) try t.expect(!std.mem.eql(u8, item.text, "Accessible row name"));
+}
 const Counter = struct {
     count: u32 = 0,
     fail: bool = false,

@@ -6,7 +6,7 @@ const styles = @import("style.zig");
 const adapter = @import("adapter.zig");
 const runtime = @import("../app/app.zig");
 const identity = @import("../entity/entity.zig");
-pub const Button = struct { label: []const u8, on_click: ?adapter.ClickHandler = null, style: styles.Style = .{} };
+pub const Button = struct { label: []const u8, on_click: ?adapter.ClickHandler = null, style: styles.Style = .{}, children: []const elements.Element = &.{} };
 pub const Ui = struct {
     frame: *tree.Frame,
     owner: identity.Token,
@@ -33,7 +33,15 @@ pub const Ui = struct {
     pub fn button(ui: *Ui, options: Button) !elements.Element {
         try options.style.validate();
         if (!std.unicode.utf8ValidateSlice(options.label)) return error.InvalidUtf8;
-        return ui.frame.append(.{ .style = options.style, .focusable = true, .kind = .{ .button = .{ .label = try ui.frame.allocator().dupe(u8, options.label), .on_click = options.on_click } } });
+        const label = try ui.frame.allocator().dupe(u8, options.label);
+        if (options.children.len > 0) {
+            const element = try ui.div(options.style, options.children);
+            const node = &ui.frame.nodes.items[element.index];
+            node.kind = .{ .button = .{ .label = label, .on_click = options.on_click } };
+            node.focusable = true;
+            return element;
+        }
+        return ui.frame.append(.{ .style = options.style, .focusable = true, .kind = .{ .button = .{ .label = label, .on_click = options.on_click } } });
     }
     pub fn onClick(ui: *Ui, comptime callback: anytype) adapter.ClickHandler {
         return adapter.click(ui.owner, callback);
@@ -47,13 +55,13 @@ pub const Ui = struct {
     pub fn onInputWith(ui: *Ui, value: anytype, comptime callback: anytype) !adapter.InputHandler {
         return adapter.inputWith(ui.allocator(), ui.owner, value, callback);
     }
-    pub const Listeners = struct { on_input: ?adapter.InputHandler = null, on_capture: ?adapter.InputHandler = null, focusable: bool = false };
+    pub const Listeners = struct { on_input: ?adapter.InputHandler = null, on_capture: ?adapter.InputHandler = null, focusable: ?bool = null };
     pub fn listen(ui: *Ui, element: elements.Element, options: Listeners) !elements.Element {
         _ = try ui.frame.get(element);
         const node = &ui.frame.nodes.items[element.index];
         node.on_input = options.on_input;
         node.on_capture = options.on_capture;
-        node.focusable = options.focusable;
+        if (options.focusable) |focusable| node.focusable = focusable;
         return element;
     }
     /// Takes focus when this logical element first enters a committed frame.
