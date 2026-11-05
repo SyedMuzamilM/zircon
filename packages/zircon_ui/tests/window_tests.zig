@@ -255,3 +255,72 @@ fn ownedCustomCase(a: std.mem.Allocator) !void {
     h.frames.committed.discard();
     try t.expectEqual(@as(usize, 1), dropped);
 }
+
+const ModalView = struct {
+    shown: bool = false,
+    count: u32 = 0,
+    pub fn render(self: *const ModalView, b: *ui.Ui) !ui.Element {
+        const base = try b.key(.{ .string = "base" }, try b.button(.{ .label = "Background", .on_click = b.onClick(clicked) }));
+        if (!self.shown) return b.stack(.{}, &.{base});
+        const first = try b.key(.{ .string = "first" }, try b.button(.{ .label = "First" }));
+        const second = try b.autofocus(try b.key(.{ .string = "second" }, try b.button(.{ .label = "Second" })));
+        const modal = try b.modal(try b.key(.{ .string = "modal" }, try b.column(.{ .width = .{ .px = 120 }, .height = .{ .px = 100 } }, &.{ first, second })));
+        return b.stack(.{ .align_items = .center, .justify_content = .center }, &.{ base, modal });
+    }
+    fn show(self: *ModalView, cx: *ui.Context(ModalView), enabled: bool) void {
+        self.shown = enabled;
+        cx.notify();
+    }
+    fn clicked(self: *ModalView, _: *ui.Event(ui.Click), cx: *ui.Context(ModalView)) void {
+        self.count += 1;
+        cx.notify();
+    }
+    fn value(self: *const ModalView) u32 {
+        return self.count;
+    }
+};
+test "modal autofocus traps Tab and outside clicks and restores previous focus" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(ModalView, .{ .visible = false, .width = 300, .height = 200 }, .{});
+    _ = try app.step(0);
+    const root = try app.windowEntity(ModalView, h);
+    const w = try app.window(h);
+    try t.expectEqualStrings("base", w.frames.committed.nodes.items[w.focus.?].key.?.string);
+    try app.update(root, ModalView.show, .{true});
+    _ = try app.step(1);
+    try t.expectEqualStrings("second", w.frames.committed.nodes.items[w.focus.?].key.?.string);
+    try app.dispatch(h, .{ .key_down = .{ .key = .tab } });
+    _ = try app.step(2);
+    try t.expectEqualStrings("first", w.frames.committed.nodes.items[w.focus.?].key.?.string);
+    try app.dispatch(h, .{ .pointer_down = .{ .position = .{ .x = 5, .y = 5 } } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = .{ .x = 5, .y = 5 } } });
+    try t.expectEqual(@as(u32, 0), try app.read(root, ModalView.value, .{}));
+    try app.update(root, ModalView.show, .{false});
+    _ = try app.step(3);
+    try t.expectEqualStrings("base", w.frames.committed.nodes.items[w.focus.?].key.?.string);
+}
+const CloseButton = struct {
+    handle: ?ui.WindowHandle = null,
+    pub fn render(_: *const CloseButton, b: *ui.Ui) !ui.Element {
+        return b.button(.{ .label = "Close", .on_click = b.onClick(close) });
+    }
+    fn set(self: *CloseButton, cx: *ui.Context(CloseButton), handle: ui.WindowHandle) void {
+        self.handle = handle;
+        cx.notify();
+    }
+    fn close(self: *CloseButton, _: *ui.Event(ui.Click), cx: *ui.Context(CloseButton)) !void {
+        try cx.app.requestCloseWindow(self.handle.?);
+    }
+};
+test "a root handler can queue close without reborrowing its mutable state" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(CloseButton, .{ .visible = false }, .{});
+    const root = try app.windowEntity(CloseButton, h);
+    try app.update(root, CloseButton.set, .{h});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+    _ = try app.step(1);
+    try t.expectError(error.WindowNotFound, app.window(h));
+}

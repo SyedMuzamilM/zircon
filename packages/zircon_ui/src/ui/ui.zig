@@ -56,6 +56,18 @@ pub const Ui = struct {
         node.focusable = options.focusable;
         return element;
     }
+    /// Takes focus when this logical element first enters a committed frame.
+    pub fn autofocus(ui: *Ui, element: elements.Element) !elements.Element {
+        _ = try ui.frame.get(element);
+        ui.frame.nodes.items[element.index].autofocus = true;
+        return element;
+    }
+    /// Restricts keyboard traversal and pointer routing to this subtree.
+    pub fn modal(ui: *Ui, element: elements.Element) !elements.Element {
+        _ = try ui.frame.get(element);
+        ui.frame.nodes.items[element.index].modal = true;
+        return element;
+    }
     pub fn custom(ui: *Ui, comptime T: type, value: T, style: styles.Style) !elements.Element {
         try style.validate();
         if (ui.frame.retiring) return error.InvalidFrame;
@@ -71,6 +83,9 @@ pub const Ui = struct {
     }
     pub fn allocator(ui: *Ui) std.mem.Allocator {
         return ui.frame.allocator();
+    }
+    pub fn viewport(ui: *const Ui) @import("../layout/geometry.zig").Size {
+        return ui.frame.viewport;
     }
     pub fn animate(ui: *Ui, key_value: u64, target: f32, transition: @import("../animation/timeline.zig").Transition) !f32 {
         const timeline = ui.frame.timeline orelse return target;

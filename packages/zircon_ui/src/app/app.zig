@@ -20,6 +20,7 @@ const State = struct {
     windows: std.ArrayList(?*windows.Window) = .empty,
     reactive: reactivity.Reactivity = .{},
     jobs: OwnedTasks,
+    close_requests: std.ArrayList(windows.Handle) = .empty,
 };
 pub const Options = struct { allocator: std.mem.Allocator };
 pub const App = struct {
@@ -36,6 +37,7 @@ pub const App = struct {
         for (app.state.windows.items) |entry| if (entry) |w| w.deinit();
         app.state.windows.deinit(allocator);
         app.state.jobs.deinit();
+        app.state.close_requests.deinit(allocator);
         app.state.reactive.deinit(allocator);
         app.state.store.deinit();
         allocator.destroy(app.state);
@@ -79,11 +81,23 @@ pub const App = struct {
     pub fn closeWindow(app: *App, handle: windows.Handle) !void {
         try (try app.window(handle)).dispatch(.close);
     }
+    /// A handler can request close without reborrowing its own root entity.
+    /// The next step routes a cancellable close after the current dispatch.
+    pub fn requestCloseWindow(app: *App, handle: windows.Handle) !void {
+        _ = try app.window(handle);
+        for (app.state.close_requests.items) |queued| if (std.meta.eql(queued, handle)) return;
+        try app.state.close_requests.append(app.state.allocator, handle);
+    }
     /// Advances the same render path used by the native event loop. Tests inject time.
     pub fn step(app: *App, time: f64) !usize {
         try app.check();
         if (app.state.depth != 0) return error.TransactionActive;
         if (!std.math.isFinite(time) or time < 0) return error.InvalidTime;
+        const close_count = app.state.close_requests.items.len;
+        for (0..close_count) |_| {
+            const request = app.state.close_requests.orderedRemove(0);
+            app.closeWindow(request) catch |err| if (err != error.WindowNotFound) return err;
+        }
         try app.state.jobs.drain(app);
         try app.flushEffects();
         if (try app.takeFrameRequest()) for (app.state.windows.items) |entry| {

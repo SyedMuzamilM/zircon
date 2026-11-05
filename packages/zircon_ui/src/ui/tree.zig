@@ -13,6 +13,8 @@ pub const Node = struct {
     on_input: ?@import("adapter.zig").InputHandler = null,
     on_capture: ?@import("adapter.zig").InputHandler = null,
     focusable: bool = false,
+    autofocus: bool = false,
+    modal: bool = false,
     kind: union(enum) { container, custom: @import("custom.zig").Custom, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
 };
 pub const Cleanup = struct { object: *anyopaque, destroy: *const fn (*anyopaque) void };
@@ -30,6 +32,7 @@ pub const Frame = struct {
     scene: @import("../graphics/scene.zig").Frame = .{ .items = &.{}, .background = .black },
     timeline: ?*@import("../animation/timeline.zig").Timeline = null,
     time: f64 = 0,
+    viewport: @import("../layout/geometry.zig").Size = .{ .width = 0, .height = 0 },
     text_input: ?@import("../platform/interface.zig").TextSnapshot = null,
     focused_node: ?u32 = null,
     pub fn init(a: std.mem.Allocator) !Frame {

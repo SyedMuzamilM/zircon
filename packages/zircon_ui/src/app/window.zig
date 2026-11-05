@@ -26,6 +26,7 @@ pub const Window = struct {
     dimensions: g.Size,
     background: g.Color,
     focus: ?u32 = null,
+    restore_focus: ?u32 = null,
     capture: ?u32 = null,
     pressed: ?u32 = null,
     dirty: bool = true,
@@ -71,13 +72,28 @@ pub const Window = struct {
         errdefer w.animations.discardFrame();
         staging.timeline = &w.animations;
         staging.time = w.time;
+        staging.viewport = w.dimensions;
         const root = try w.render_root(&w.app, w.root, staging);
         try staging.setRoot(root);
         const surface = w.surface.?;
         const metrics = surface.measurer();
         const layout = try flex.calculate(staging.allocator(), staging, root, .{ .viewport = w.dimensions }, metrics);
         staging.bounds = layout.bounds;
-        const next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, null, false);
+        var next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, null, false);
+        var next_restore = reconcile(&w.frames.committed, staging, w.restore_focus);
+        if (modalRoot(&w.frames.committed) == null and modalRoot(staging) != null) next_restore = reconcile(&w.frames.committed, staging, w.focus);
+        if (modalRoot(&w.frames.committed) != null and modalRoot(staging) == null) {
+            next_focus = next_restore orelse next_focus;
+            next_restore = null;
+        }
+        if (modalRoot(staging)) |modal| if (next_focus) |focused| {
+            if (!descendant(staging, focused, modal)) next_focus = nextFocus(staging, null, false);
+        };
+        for (staging.nodes.items, 0..) |value, i| {
+            if (!value.autofocus or !value.focusable) continue;
+            if (modalRoot(staging)) |modal| if (!descendant(staging, @intCast(i), modal)) continue;
+            if (reconcile(staging, &w.frames.committed, @intCast(i)) == null) next_focus = @intCast(i);
+        }
         staging.focused_node = if (w.active) next_focus else null;
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
         try @import("../graphics/tree_paint.zig").paint(staging, &layout, &painter, metrics);
@@ -90,7 +106,11 @@ pub const Window = struct {
         // All validation and submission encoding succeeded. No fallible work
         // remains between target reconciliation and the CPU generation swap.
         w.focus = next_focus;
+        w.restore_focus = next_restore;
         w.capture = reconcile(&w.frames.committed, staging, w.capture);
+        if (modalRoot(staging)) |modal| if (w.capture) |captured| {
+            if (!descendant(staging, captured, modal)) w.capture = null;
+        };
         w.pressed = reconcile(&w.frames.committed, staging, w.pressed);
         w.frames.commitPrepared();
         surface.setTextInput(w.frames.committed.text_input);
@@ -149,8 +169,9 @@ pub const Window = struct {
             .scroll => |s| s.position,
             else => null,
         };
-        const hit = if (point) |p| hitTest(frame, frame.root.?.index, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
-        const target = if (input == .close) frame.root.?.index else if (point != null) w.capture orelse hit orelse frame.root.?.index else w.focus orelse frame.root.?.index;
+        const route_root = modalRoot(frame) orelse frame.root.?.index;
+        const hit = if (point) |p| hitTest(frame, route_root, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
+        const target = if (input == .close) frame.root.?.index else if (point != null) w.capture orelse hit orelse route_root else w.focus orelse route_root;
         if (input == .pointer_down) {
             w.pressed = hit;
             var candidate: ?u32 = target;
@@ -276,10 +297,24 @@ fn reconcile(old: *const tree.Frame, new: *const tree.Frame, index: ?u32) ?u32 {
 fn nextFocus(frame: *const tree.Frame, current: ?u32, reverse: bool) ?u32 {
     var order: [1024]u32 = undefined;
     var count: usize = 0;
-    focusOrder(frame, frame.root.?.index, &order, &count);
+    focusOrder(frame, modalRoot(frame) orelse frame.root.?.index, &order, &count);
     if (count == 0) return null;
     if (current) |c| for (order[0..count], 0..) |i, n| if (i == c) return order[if (reverse) (n + count - 1) % count else (n + 1) % count];
     return order[if (reverse) count - 1 else 0];
+}
+fn modalRoot(frame: *const tree.Frame) ?u32 {
+    var result: ?u32 = null;
+    if (frame.root) |root| findModal(frame, root.index, &result);
+    return result;
+}
+fn findModal(frame: *const tree.Frame, index: u32, result: *?u32) void {
+    if (frame.nodes.items[index].modal) result.* = index;
+    for (frame.nodes.items[index].children) |child| findModal(frame, child, result);
+}
+fn descendant(frame: *const tree.Frame, index: u32, ancestor: u32) bool {
+    var current: ?u32 = index;
+    while (current) |i| : (current = frame.nodes.items[i].parent) if (i == ancestor) return true;
+    return false;
 }
 fn focusOrder(frame: *const tree.Frame, index: u32, order: []u32, count: *usize) void {
     if (frame.nodes.items[index].focusable and count.* < order.len) {

@@ -11,7 +11,7 @@ Zircon UI now runs a real native macOS application through `App.openWindow` and 
 | Entity runtime | Generational typed handles, stable storage, ownership scopes including windows, scoped borrows, deferred destruction, observations, typed owned events, coalesced notifications | Broader adversarial/load validation |
 | UI construction | Const views, nested views/watched dependencies, indexed trees, keys, cleanup, three-phase custom elements, committed/staging generations | More stock controls and accessibility metadata |
 | Native layout/render | Flex subset/stacks, CoreText shaping and glyph caret geometry, direct Zig AppKit windows, Metal presentation, clipping, rounding, snapshots | Images/SVG/path effects/shadows, wrapping/grid/baseline, device recovery |
-| Interactive runtime | Hit testing, capture/target/bubble, focus and pointer capture, Tab/button defaults, typed shortcut maps, safe close prevention, idle scheduling | Modal focus trapping, native menus/dialogs, richer shortcut sequences |
+| Interactive runtime | Hit testing, capture/target/bubble, focus and pointer capture, Tab/button defaults, typed shortcut maps, safe close prevention, modal focus trapping/restoration, autofocus, idle scheduling | Native menus/dialogs, richer shortcut sequences |
 | Editor foundations | Editable single-line control, clipboard/selection, bounded revisioned native text input/composition, scrolling/virtual-row math, owned workers, tween/spring/color/geometry/presence motion | Full grapheme movement, OS IME acceptance journey, full-document input geometry, accessibility, stock virtual-list/menu widgets |
 | Optimization/platforms | Resource limits/counters and Linux portable cross-compilation | Application benchmarks, measured comparisons with Zed, scene caching, Windows/Linux native adapters |
 
@@ -31,7 +31,7 @@ The accepted [editor design](design/editor.md) separates document storage/histor
 ./tools/zig build test-build -Dtarget=aarch64-linux-gnu
 ```
 
-Portable checks cover entity lifetimes, transaction rollback, layout, custom phases, routing, focus, keyed reconciliation, animations, observers/events, clipboard/editable controls, revisioned snapshots and worker cleanup. Native tests use real AppKit events, CoreText and Metal, decode GPU-produced PNG pixels, and verify click/resize/close and native range/composition selectors. The integrated checkpoint passes88 portable test-runner cases,20 native cases and three expected compiler-error contracts. Test-runner totals include import aggregation cases.
+Portable checks cover entity lifetimes, transaction rollback, layout, custom phases, routing, focus, keyed reconciliation, animations, observers/events, clipboard/editable controls, revisioned snapshots and worker cleanup. Native tests use real AppKit events, CoreText and Metal, decode GPU-produced PNG pixels, and verify click/resize/close and native range/composition selectors. The integrated checkpoint passes90 portable test-runner cases,20 native cases and three expected compiler-error contracts. Test-runner totals include import aggregation cases.
 
 Native selector tests are not a complete OS input-method journey. The point query resolves the published caret, not arbitrary document coordinates. Emoji glyph coverage is monochrome. Async GPU failure recovery and whole-process performance have not been established.
 
