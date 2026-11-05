@@ -1,0 +1,9 @@
+#!/bin/sh
+# Prefer the project-local compiler; never change the user's global toolchain.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+local_zig="$root/.tools/zig-aarch64-macos-0.17.1/zig"
+if [ -x "$local_zig" ]; then exec "$local_zig" "$@"; fi
+if command -v zig >/dev/null 2>&1 && [ "$(zig version)" = "0.17.1" ]; then exec zig "$@"; fi
+printf '%s\n' 'Zig 0.17.1 is required. Install it from https://ziglang.org/download/ and add it to PATH.' >&2
+exit 1

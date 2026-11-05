@@ -1,7 +1,16 @@
 # Zircon UI
 
-An independent UI framework in Zig, guided by the [framework specification](docs/specification/framework-api-v0.1.md). The first milestone is a GPU-independent entity runtime and headless harness. The editor follows the framework, as described in the [implementation plan](docs/implementation-plan.md).
+An independent UI framework in Zig, following the [supplied framework specification](docs/specification/framework-api-v0.1.md). The name in that document, ZigGPUI, is a placeholder; the package name is `zircon_ui`.
 
-The implementation targets Zig 0.17.1. Native system integration will use direct Zig bindings, with Metal on macOS first. NanoUI and GPUI are architectural references, not dependencies.
+The first verified milestone implements typed generational entities, scope ownership, runtime borrowing, explicit notifications, deferred destruction, and a headless harness. It has no native or GPU dependency. The editor comes after the framework interfaces are verified.
 
-This repository is under construction. See the implementation plan for milestone acceptance criteria; unverified or proposed APIs are not advertised as working features.
+Use Zig 0.17.1:
+
+```sh
+./tools/zig build check
+./tools/zig build test-build -Dtarget=aarch64-linux-gnu
+```
+
+`tools/zig` uses the project-local compiler when present, otherwise Zig 0.17.1 on PATH. It never changes your global compiler. With Zig 0.17.1 on PATH, ordinary `zig build check` works as well.
+
+See the [package usage and lifetime contract](packages/zircon_ui/README.md), [implementation order](docs/implementation-plan.md), and [GPUI/NanoUI research](docs/research/gpui-and-nanoui.md). Native adapters will use direct Zig bindings, with Metal on macOS first. Neither reference framework is a dependency. Smaller/faster-than-Zed claims have not been established.
