@@ -57,6 +57,7 @@ pub const layout = struct {
 pub const Color = @import("layout/geometry.zig").Color;
 pub const TextStyle = @import("text/style.zig").TextStyle;
 pub const graphics = struct {
+    pub const images = @import("graphics/images.zig");
     pub const Painter = @import("graphics/painter.zig").Painter;
     pub const Scene = @import("graphics/scene.zig").Frame;
     pub const paintTree = @import("graphics/tree_paint.zig").paint;

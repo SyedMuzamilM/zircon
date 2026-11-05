@@ -19,6 +19,26 @@ const Counter = struct {
         return self.count;
     }
 };
+test "worker wake interrupts the native idle wait" {
+    var app = try ui.App.init(.{ .allocator = std.testing.allocator });
+    defer app.deinit();
+    _ = try app.openWindow(Counter, .{ .visible = false }, .{});
+    _ = try app.step(0);
+    for (0..64) |_| try native.window.pump(0);
+    var sent = std.atomic.Value(bool).init(false);
+    const Worker = struct {
+        fn run(flag: *std.atomic.Value(bool)) void {
+            std.Io.sleep(std.testing.io, .fromMilliseconds(50), .awake) catch return;
+            flag.store(true, .release);
+            ui.App.wake();
+        }
+    };
+    const thread = try std.Thread.spawn(.{}, Worker.run, .{&sent});
+    defer thread.join();
+    const start = native.window.now();
+    while (!sent.load(.acquire)) try native.window.pump(0.5);
+    try std.testing.expect(native.window.now() - start < 0.3);
+}
 test "public App native window handles queued click resize snapshot and close" {
     const pool = objc.Pool.init();
     defer pool.deinit();

@@ -94,6 +94,11 @@ pub const Ui = struct {
     pub fn viewport(ui: *const Ui) @import("../layout/geometry.zig").Size {
         return ui.frame.viewport;
     }
+    pub fn dragRegion(ui: *Ui, element: elements.Element) !elements.Element {
+        _ = try ui.frame.get(element);
+        ui.frame.nodes.items[element.index].drag_region = true;
+        return element;
+    }
     pub fn animate(ui: *Ui, key_value: u64, target: f32, transition: @import("../animation/timeline.zig").Transition) !f32 {
         const timeline = ui.frame.timeline orelse return target;
         const track = (@as(u128, ui.owner.slot) << 96) | (@as(u128, ui.owner.generation) << 64) | key_value;

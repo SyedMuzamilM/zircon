@@ -42,7 +42,15 @@ fragment float4 fragment_main(Vertex in [[stage_in]],
         in.point.x >= in.clip.x + in.clip.z ||
         in.point.y >= in.clip.y + in.clip.w) discard_fragment();
     float coverage = 1;
-    if (in.mode > 0.5) {
+    if (in.mode > 1.5) {
+        constexpr sampler image_sampler(coord::normalized, address::clamp_to_edge,
+                                        filter::linear);
+        float4 sample = atlas.sample(image_sampler, in.uv.xy + in.local * in.uv.zw);
+        // Image assets are already premultiplied. Opacity scales both their
+        // color and alpha, matching the pipeline's premultiplied blending.
+        return float4(sample.rgb * in.color.rgb * in.color.a,
+                      sample.a * in.color.a);
+    } else if (in.mode > 0.5) {
         constexpr sampler glyph_sampler(coord::normalized, address::clamp_to_edge,
                                  filter::linear);
         coverage = atlas.sample(glyph_sampler, in.uv.xy + in.local * in.uv.zw).r;

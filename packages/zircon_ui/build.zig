@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     if (native) {
         if (target.result.os.tag != .macos) @panic("native windows currently require macOS");
         module.link_libc = true;
-        for ([_][]const u8{ "AppKit", "Metal", "QuartzCore", "CoreText", "CoreGraphics", "CoreFoundation", "Foundation" }) |framework| module.linkFramework(framework, .{});
+        for ([_][]const u8{ "AppKit", "Metal", "QuartzCore", "CoreText", "CoreGraphics", "ImageIO", "CoreFoundation", "Foundation" }) |framework| module.linkFramework(framework, .{});
         module.linkSystemLibrary("objc", .{});
     }
     const tests = b.addTest(.{ .root_module = b.createModule(.{

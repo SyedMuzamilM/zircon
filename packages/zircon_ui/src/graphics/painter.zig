@@ -4,6 +4,7 @@ const std = @import("std");
 const g = @import("../layout/geometry.zig");
 const scene = @import("scene.zig");
 const TextStyle = @import("../text/style.zig").TextStyle;
+const images = @import("images.zig");
 pub const Quad = struct { bounds: g.Rect, color: g.Color, radius: f32 = 0 };
 pub const Text = struct { bounds: g.Rect, text: []const u8, style: TextStyle = .{} };
 pub const Painter = struct {
@@ -59,6 +60,38 @@ pub const Painter = struct {
         var color = options.style.color;
         color.a *= painter.opacity;
         try painter.items.append(painter.allocator, .{ .kind = .text, .rect = options.bounds, .clip = clipped, .color = color, .font_size = options.style.size, .mono = options.style.mono, .text = text });
+    }
+    /// Records a borrowed asset view. An owning Image must remain alive until
+    /// this scene has been submitted; custom elements retain it in frame cleanup.
+    pub fn drawImage(painter: *Painter, asset: images.Image, bounds: g.Rect, fit: images.Fit) !void {
+        try validateRect(bounds);
+        const view = asset.view();
+        try view.validate();
+        if (bounds.width == 0 or bounds.height == 0) return;
+        const clipped = bounds.intersection(painter.clip());
+        if (clipped.width == 0 or clipped.height == 0) return;
+        var rect = bounds;
+        var uv: g.Rect = .{ .width = 1, .height = 1 };
+        const width: f32 = @floatFromInt(view.width);
+        const height: f32 = @floatFromInt(view.height);
+        switch (fit) {
+            .stretch => {},
+            .contain => {
+                const scale = @min(bounds.width / width, bounds.height / height);
+                rect.width = width * scale;
+                rect.height = height * scale;
+                rect.x += (bounds.width - rect.width) / 2;
+                rect.y += (bounds.height - rect.height) / 2;
+            },
+            .cover => {
+                const scale = @max(bounds.width / width, bounds.height / height);
+                uv.width = bounds.width / (width * scale);
+                uv.height = bounds.height / (height * scale);
+                uv.x = (1 - uv.width) / 2;
+                uv.y = (1 - uv.height) / 2;
+            },
+        }
+        try painter.items.append(painter.allocator, .{ .kind = .image, .rect = rect, .clip = clipped, .color = .{ .r = 1, .g = 1, .b = 1, .a = painter.opacity }, .image = view, .uv = uv });
     }
     pub fn finish(painter: *const Painter, background: g.Color) !scene.Frame {
         if (painter.clips.items.len != 0) return error.UnbalancedClip;

@@ -16,6 +16,7 @@ pub const Node = struct {
     autofocus: bool = false,
     focus_request: u64 = 0,
     modal: bool = false,
+    drag_region: bool = false,
     kind: union(enum) { container, custom: @import("custom.zig").Custom, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
 };
 pub const Cleanup = struct { object: *anyopaque, destroy: *const fn (*anyopaque) void };

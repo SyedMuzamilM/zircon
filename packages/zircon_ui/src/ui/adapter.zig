@@ -72,7 +72,8 @@ fn bindWith(comptime E: type, a: std.mem.Allocator, owner: identity.Token, value
 fn requireValue(comptime T: type) void {
     switch (@typeInfo(T)) {
         .pointer => @compileError("handler payloads must be pointer-free copied values"),
-        .@"struct", .@"union" => |info| for (info.field_types) |Field| requireValue(Field),
+        .@"struct" => |info| for (info.field_types) |Field| requireValue(Field),
+        .@"union" => |info| for (info.field_types) |Field| requireValue(Field),
         .array => |info| requireValue(info.child),
         .optional => |info| requireValue(info.child),
         else => {},

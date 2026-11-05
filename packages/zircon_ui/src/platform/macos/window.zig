@@ -33,6 +33,21 @@ extern "c" fn object_setInstanceVariable(Id, [*:0]const u8, ?*anyopaque) ?*anyop
 extern "c" fn sel_registerName([*:0]const u8) Sel;
 var view_class: Id = null;
 var callback_error: ?anyerror = null;
+var application = std.atomic.Value(usize).init(0);
+var wake_pending = std.atomic.Value(bool).init(false);
+const wake_subtype: i16 = 0x5a49;
+
+/// AppKit permits posting events from a worker thread. The application singleton
+/// is captured on the main thread before clients can start. Coalescing bounds
+/// queued wake events even when a server publishes thousands of messages.
+pub fn wake() void {
+    const address = application.load(.acquire);
+    if (address == 0 or wake_pending.swap(true, .acq_rel)) return;
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const event = objc.send(Id, objc.class("NSEvent"), "otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:", .{ @as(usize, 15), objc.CGPoint{}, @as(usize, 0), @as(f64, 0), @as(isize, 0), @as(Id, null), wake_subtype, @as(isize, 0), @as(isize, 0) });
+    if (event) |value| objc.send(void, @as(Id, @ptrFromInt(address)), "postEvent:atStart:", .{ value, false }) else wake_pending.store(false, .release);
+}
 
 const State = struct {
     allocator: std.mem.Allocator,
@@ -90,7 +105,9 @@ pub fn pump(timeout_seconds: f64) !void {
     else
         objc.send(Id, objc.class("NSDate"), "dateWithTimeIntervalSinceNow:", .{@max(0, timeout_seconds)});
     const event = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ @as(usize, std.math.maxInt(usize)), deadline, objc.string("kCFRunLoopDefaultMode"), true });
-    if (event != null) objc.send(void, app, "sendEvent:", .{event});
+    if (event != null) {
+        if (objc.send(usize, event, "type", .{}) == 15 and objc.send(i16, event, "subtype", .{}) == wake_subtype) wake_pending.store(false, .release) else objc.send(void, app, "sendEvent:", .{event});
+    }
     objc.send(void, app, "updateWindows", .{});
     try takeCallbackError();
 }
@@ -108,15 +125,22 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     const pool = objc.Pool.init();
     defer pool.deinit();
     const app = objc.send(Id, objc.class("NSApplication"), "sharedApplication", .{}) orelse return error.AppKitUnavailable;
+    application.store(@intFromPtr(app), .release);
     _ = objc.send(bool, app, "setActivationPolicy:", .{@as(isize, 0)});
     objc.send(void, app, "finishLaunching", .{});
     try registerView();
     const renderer = try metal.create(allocator);
     errdefer metal.destroy(renderer);
     const rect: objc.CGRect = .{ .size = .{ .width = options.width, .height = options.height } };
-    const window = objc.send(Id, objc.send(Id, objc.class("NSWindow"), "alloc", .{}), "initWithContentRect:styleMask:backing:defer:", .{ rect, @as(usize, 1 | 2 | 4 | 8), @as(usize, 2), false }) orelse return error.WindowCreationFailed;
+    const style: usize = 1 | 2 | 4 | 8 | if (options.chrome == .integrated) @as(usize, 1 << 15) else 0;
+    const window = objc.send(Id, objc.send(Id, objc.class("NSWindow"), "alloc", .{}), "initWithContentRect:styleMask:backing:defer:", .{ rect, style, @as(usize, 2), false }) orelse return error.WindowCreationFailed;
     errdefer objc.release(window);
     objc.send(void, window, "setReleasedWhenClosed:", .{false});
+    if (options.chrome == .integrated) {
+        objc.send(void, window, "setTitleVisibility:", .{@as(isize, 1)});
+        objc.send(void, window, "setTitlebarAppearsTransparent:", .{true});
+        objc.send(void, window, "setMovableByWindowBackground:", .{false});
+    }
     const view = objc.send(Id, objc.send(Id, view_class, "alloc", .{}), "initWithFrame:", .{rect}) orelse return error.WindowCreationFailed;
     errdefer objc.release(view);
     const layer = objc.send(Id, objc.class("CAMetalLayer"), "new", .{}) orelse return error.WindowCreationFailed;
@@ -159,10 +183,25 @@ const ops: platform.Surface.Ops = .{
     .clipboard_read = clipboardRead,
     .clipboard_write = clipboardWrite,
     .set_text_input = setTextInput,
+    .set_parent = setParent,
+    .raise = raise,
     .accept_close = acceptClose,
 };
 fn state(raw: *anyopaque) *State {
     return @ptrCast(@alignCast(raw));
+}
+fn setParent(raw: *anyopaque, parent: ?platform.Surface) void {
+    const s = state(raw);
+    const old = objc.send(Id, s.window, "parentWindow", .{});
+    if (old != null) objc.send(void, old, "removeChildWindow:", .{s.window});
+    if (parent) |surface| {
+        std.debug.assert(surface.ops == &ops);
+        objc.send(void, state(surface.context).window, "addChildWindow:ordered:", .{ s.window, @as(isize, 1) });
+    }
+}
+fn raise(raw: *anyopaque) void {
+    const s = state(raw);
+    if (!s.closed) objc.send(void, s.window, "makeKeyAndOrderFront:", .{@as(Id, null)});
 }
 fn nativeState(object: Id) ?*State {
     var raw: ?*anyopaque = null;
@@ -174,6 +213,7 @@ fn deinit(raw: *anyopaque) void {
     const pool = objc.Pool.init();
     defer pool.deinit();
     s.closed = true;
+    setParent(raw, null);
     objc.send(void, s.window, "setDelegate:", .{@as(Id, null)});
     _ = object_setInstanceVariable(s.view, "zirconState", null);
     objc.send(void, s.window, "orderOut:", .{@as(Id, null)});
@@ -343,6 +383,11 @@ fn pointer(s: *State, event: Id) platform.Pointer {
 }
 fn pointerDown(object: Id, _: Sel, event: Id) callconv(.c) void {
     const s = nativeState(object) orelse return;
+    const p = pointer(s, event);
+    if (p.button == .primary) if (s.sink.drag_region) |query| if (query(s.sink.context, p.position)) {
+        if (p.clicks == 2) objc.send(void, s.window, "performZoom:", .{@as(Id, null)}) else objc.send(void, s.window, "performWindowDragWithEvent:", .{event});
+        return;
+    };
     _ = objc.send(bool, s.window, "makeFirstResponder:", .{s.view});
     s.emit(.{ .pointer_down = pointer(s, event) });
 }
@@ -395,6 +440,7 @@ fn key(code: u16) platform.Key {
         37 => .l,
         38 => .j,
         40 => .k,
+        43 => .comma,
         45 => .n,
         46 => .m,
         36, 76 => .enter,

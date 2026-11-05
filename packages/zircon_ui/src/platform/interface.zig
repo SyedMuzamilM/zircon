@@ -9,10 +9,11 @@ pub const WindowOptions = struct {
     width: f32 = 1080,
     height: f32 = 720,
     visible: bool = true,
+    chrome: enum { system, integrated } = .system,
     background: g.Color = .{ .r = 0.07, .g = 0.08, .b = 0.1 },
 };
 pub const Modifiers = packed struct(u8) { shift: bool = false, control: bool = false, alt: bool = false, command: bool = false, _padding: u4 = 0 };
-pub const Key = enum { unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z };
+pub const Key = enum { comma, unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z };
 pub const Pointer = struct { position: g.Point, button: enum { primary, secondary, middle } = .primary, modifiers: Modifiers = .{}, clicks: u8 = 1 };
 /// Ordered UTF-8 byte range. Neither endpoint may split a code point.
 pub const TextRange = struct {
@@ -81,6 +82,7 @@ pub const Input = union(enum) {
 pub const Sink = struct {
     context: *anyopaque,
     event: *const fn (*anyopaque, Input) anyerror!void,
+    drag_region: ?*const fn (*anyopaque, g.Point) bool = null,
 };
 pub const Surface = struct {
     context: *anyopaque,
@@ -95,6 +97,8 @@ pub const Surface = struct {
         clipboard_write: *const fn (*anyopaque, []const u8) anyerror!void,
         set_text_input: ?*const fn (*anyopaque, ?TextSnapshot) void = null,
         accept_close: ?*const fn (*anyopaque) void = null,
+        set_parent: ?*const fn (*anyopaque, ?Surface) void = null,
+        raise: ?*const fn (*anyopaque) void = null,
     };
     pub fn deinit(s: Surface) void {
         s.ops.deinit(s.context);
@@ -118,5 +122,11 @@ pub const Surface = struct {
     /// until ordinary window teardown outside the event callback.
     pub fn acceptClose(s: Surface) void {
         if (s.ops.accept_close) |function| function(s.context);
+    }
+    pub fn setParent(s: Surface, parent: ?Surface) void {
+        if (s.ops.set_parent) |f| f(s.context, parent);
+    }
+    pub fn raise(s: Surface) void {
+        if (s.ops.raise) |f| f(s.context);
     }
 };

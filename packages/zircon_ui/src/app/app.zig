@@ -10,6 +10,7 @@ const task_module = @import("tasks.zig");
 const OwnedTasks = @import("owned_tasks.zig").OwnedTasks;
 pub const Subscription = reactivity.Subscription;
 var next_id = std.atomic.Value(u32).init(1);
+const External = struct { owner: identities.Token, invoke: *const fn (*App, identities.Token) anyerror!void };
 const State = struct {
     allocator: std.mem.Allocator,
     store: Store,
@@ -21,6 +22,7 @@ const State = struct {
     reactive: reactivity.Reactivity = .{},
     jobs: OwnedTasks,
     close_requests: std.ArrayList(windows.Handle) = .empty,
+    external: std.ArrayList(External) = .empty,
 };
 pub const Options = struct { allocator: std.mem.Allocator };
 pub const App = struct {
@@ -34,10 +36,15 @@ pub const App = struct {
     pub fn deinit(app: *App) void {
         std.debug.assert(app.state.thread == std.Thread.getCurrentId() and app.state.depth == 0 and !app.state.reactive.settling);
         const allocator = app.state.allocator;
-        for (app.state.windows.items) |entry| if (entry) |w| w.deinit();
+        var remaining = app.state.windows.items.len;
+        while (remaining > 0) {
+            remaining -= 1;
+            if (app.state.windows.items[remaining]) |w| w.deinit();
+        }
         app.state.windows.deinit(allocator);
         app.state.jobs.deinit();
         app.state.close_requests.deinit(allocator);
+        app.state.external.deinit(allocator);
         app.state.reactive.deinit(allocator);
         app.state.store.deinit();
         allocator.destroy(app.state);
@@ -73,6 +80,17 @@ pub const App = struct {
         if (w.closed) return error.WindowNotFound;
         return w;
     }
+    pub fn openChildWindow(app: *App, parent: windows.Handle, comptime T: type, options: windows.Options, value: T) !windows.Handle {
+        const parent_window = try app.window(parent);
+        const child = try app.openWindow(T, options, value);
+        const w = app.state.windows.items[child.slot].?;
+        w.parent = parent;
+        w.surface.?.setParent(parent_window.surface);
+        return child;
+    }
+    pub fn raiseWindow(app: *App, handle: windows.Handle) !void {
+        (try app.window(handle)).surface.?.raise();
+    }
     pub fn windowEntity(app: *App, comptime T: type, handle: windows.Handle) !identities.Entity(T) {
         const w = try app.window(handle);
         const result = identities.typed(T, w.root);
@@ -94,6 +112,20 @@ pub const App = struct {
         try app.check();
         if (app.state.depth != 0) return error.TransactionActive;
         if (!std.math.isFinite(time) or time < 0) return error.InvalidTime;
+        var external_index: usize = 0;
+        // Copy the registration before calling it: callbacks may register other
+        // recipients and grow the list. Dead generational identities are retired.
+        const external_count = app.state.external.items.len;
+        var visited: usize = 0;
+        while (visited < external_count) : (visited += 1) {
+            const recipient = app.state.external.items[external_index];
+            if (!app.isAlive(recipient.owner)) {
+                _ = app.state.external.orderedRemove(external_index);
+                continue;
+            }
+            external_index += 1;
+            try recipient.invoke(app, recipient.owner);
+        }
         const close_count = app.state.close_requests.items.len;
         for (0..close_count) |_| {
             const request = app.state.close_requests.orderedRemove(0);
@@ -116,7 +148,18 @@ pub const App = struct {
             }
         };
         var count: usize = 0;
-        for (app.state.windows.items) |*entry| if (entry.*) |w| {
+        for (app.state.windows.items) |entry| if (entry) |w| if (w.parent) |parent| {
+            _ = app.window(parent) catch {
+                w.closed = true;
+                w.surface.?.acceptClose();
+                continue;
+            };
+        };
+        var index = app.state.windows.items.len;
+        while (index > 0) {
+            index -= 1;
+            const entry = &app.state.windows.items[index];
+            const w = entry.* orelse continue;
             if (w.closed) {
                 w.deinit();
                 entry.* = null;
@@ -128,7 +171,7 @@ pub const App = struct {
                 w.dirty = true;
             };
             if (try w.draw()) count += 1;
-        };
+        }
         return count;
     }
     pub fn dispatch(app: *App, handle: windows.Handle, input: @import("../platform/interface.zig").Input) !void {
@@ -169,6 +212,25 @@ pub const App = struct {
     pub fn tasksPending(app: *App) !bool {
         try app.check();
         return app.state.jobs.queue.pending();
+    }
+    /// Registers an entity-owned inbox drain. A producer calls wake() after
+    /// publishing owned data; the recipient runs on the UI thread at next step.
+    /// The callback must notify only when its effective state changes.
+    pub fn watchExternal(app: *App, owner: anytype, comptime callback: anytype) !void {
+        try app.check();
+        _ = try app.version(owner);
+        const T = @TypeOf(owner).State;
+        const Adapter = struct {
+            fn invoke(runtime: *App, token: identities.Token) !void {
+                try runtime.update(identities.typed(T, token), callback, .{});
+            }
+        };
+        for (app.state.external.items) |entry| if (std.meta.eql(entry.owner, owner.token()) and entry.invoke == Adapter.invoke) return;
+        try app.state.external.append(app.state.allocator, .{ .owner = owner.token(), .invoke = Adapter.invoke });
+    }
+    /// Thread-safe event-loop signal. It carries no entity or borrowed payload.
+    pub fn wake() void {
+        windows.wake();
     }
     pub fn setReducedMotion(app: *App, reduced: bool) !void {
         try app.check();

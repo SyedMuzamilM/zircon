@@ -56,6 +56,10 @@ const GlyphContext = struct {
     }
 };
 const BufferSlot = struct { buffer: Id = null, command: Id = null, capacity: usize = 0 };
+const ImageTexture = struct { texture: Id, width: u32, height: u32, bytes: usize, touched: u64 };
+const Batch = struct { start: usize, count: usize, texture: Id };
+const image_cache_limit = 64 * 1024 * 1024;
+const image_cache_entries = 64;
 
 pub const Stats = struct {
     frames: u64 = 0,
@@ -67,6 +71,10 @@ pub const Stats = struct {
     atlas_bytes: usize = 0,
     layout_bytes: usize = 0,
     instance_bytes: usize = 0,
+    image_bytes: usize = 0,
+    image_textures: usize = 0,
+    image_uploads: u64 = 0,
+    image_hits: u64 = 0,
 };
 
 pub const Renderer = struct {
@@ -81,9 +89,61 @@ pub const Renderer = struct {
     atlas_row: usize = 0,
     glyphs: std.HashMapUnmanaged(GlyphKey, Glyph, GlyphContext, std.hash_map.default_max_load_percentage) = .empty,
     instances: std.ArrayList(Instance) = .empty,
+    batches: std.ArrayList(Batch) = .empty,
+    images: std.AutoHashMapUnmanaged(u64, ImageTexture) = .empty,
+    image_bytes: usize = 0,
+    image_clock: u64 = 0,
     buffers: [3]BufferSlot = @splat(.{}),
     next_slot: usize = 0,
     counters: Stats = .{},
+
+    fn clearBatches(r: *Renderer) void {
+        for (r.batches.items) |batch| objc.release(batch.texture);
+        r.batches.clearRetainingCapacity();
+    }
+    fn addBatch(r: *Renderer, start: usize, texture: Id) !void {
+        const count = r.instances.items.len - start;
+        if (count == 0) return;
+        if (r.batches.items.len > 0) {
+            const previous = &r.batches.items[r.batches.items.len - 1];
+            if (previous.texture == texture and previous.start + previous.count == start) {
+                previous.count += count;
+                return;
+            }
+        }
+        try r.batches.ensureUnusedCapacity(r.allocator, 1);
+        r.batches.appendAssumeCapacity(.{ .start = start, .count = count, .texture = objc.retain(texture) });
+    }
+    fn imageTexture(r: *Renderer, view: @import("../images.zig").View) !Id {
+        r.image_clock +%= 1;
+        if (r.images.getPtr(view.id)) |cached| {
+            if (cached.width != view.width or cached.height != view.height) return error.InvalidScene;
+            cached.touched = r.image_clock;
+            r.counters.image_hits +%= 1;
+            return cached.texture;
+        }
+        while (r.images.count() >= image_cache_entries or r.image_bytes + view.pixels.len > image_cache_limit) {
+            var oldest: ?u64 = null;
+            var touched: u64 = std.math.maxInt(u64);
+            var iterator = r.images.iterator();
+            while (iterator.next()) |entry| if (oldest == null or entry.value_ptr.touched < touched) {
+                oldest = entry.key_ptr.*;
+                touched = entry.value_ptr.touched;
+            };
+            const removed = r.images.fetchRemove(oldest orelse return error.ImageTooLarge).?.value;
+            r.image_bytes -= removed.bytes;
+            // Batches retain their own references until encoding. Submitted
+            // Metal commands retain resources until GPU completion as well.
+            objc.release(removed.texture);
+        }
+        const texture = objc.send(Id, r.device, "newTextureWithDescriptor:", .{textureDescriptor(70, view.width, view.height, 1)}) orelse return error.MetalAllocationFailed;
+        errdefer objc.release(texture);
+        objc.send(void, texture, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", .{ Region{ .size = .{ .width = view.width, .height = view.height } }, @as(usize, 0), @as(*const anyopaque, view.pixels.ptr), @as(usize, view.width) * 4 });
+        try r.images.put(r.allocator, view.id, .{ .texture = texture, .width = view.width, .height = view.height, .bytes = view.pixels.len, .touched = r.image_clock });
+        r.image_bytes += view.pixels.len;
+        r.counters.image_uploads +%= 1;
+        return texture;
+    }
 
     fn clearGlyphs(r: *Renderer) void {
         var keys = r.glyphs.keyIterator();
@@ -175,38 +235,46 @@ pub const Renderer = struct {
     }
 
     fn build(r: *Renderer, frame: scene.Frame, scale: f32) !void {
+        r.clearBatches();
+        errdefer r.clearBatches();
         r.instances.clearRetainingCapacity();
-        for (frame.items) |item| switch (item.kind) {
-            .rect => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 0),
-            .text => {
-                if (item.text.len == 0) continue;
-                const layout = try r.text.layout(item.text, item.font_size, item.mono);
-                var ascent: f64 = 0;
-                var descent: f64 = 0;
-                _ = text_mod.CTLineGetTypographicBounds(layout.line, &ascent, &descent, null);
-                const baseline: f32 = item.rect.y + @max(0, (item.rect.height - @as(f32, @floatCast(ascent + descent))) * 0.5) + @as(f32, @floatCast(ascent));
-                const runs = text_mod.CTLineGetGlyphRuns(layout.line);
-                var run_index: isize = 0;
-                while (run_index < text_mod.CFArrayGetCount(runs)) : (run_index += 1) {
-                    const run = text_mod.CFArrayGetValueAtIndex(runs, run_index);
-                    const font = text_mod.CFDictionaryGetValue(text_mod.CTRunGetAttributes(run), text_mod.kCTFontAttributeName) orelse return error.NativeFontUnavailable;
-                    const count = text_mod.CTRunGetGlyphCount(run);
-                    var glyph_index: isize = 0;
-                    while (glyph_index < count) : (glyph_index += 1) {
-                        var glyph_id: u16 = 0;
-                        var position: text_mod.CGPoint = undefined;
-                        const range: text_mod.CFRange = .{ .location = glyph_index, .length = 1 };
-                        text_mod.CTRunGetGlyphs(run, range, @ptrCast(&glyph_id));
-                        text_mod.CTRunGetPositions(run, range, @ptrCast(&position));
-                        const at = item.rect.x + @as(f32, @floatCast(position.x));
-                        if (at > item.clip.x + item.clip.width + item.font_size * 2 or at < item.clip.x - item.font_size * 3) continue;
-                        const cached = try r.glyph(font, glyph_id, scale);
-                        const b = cached.bounds;
-                        try r.append(.{ .x = at + b.x, .y = baseline - @as(f32, @floatCast(position.y)) - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1);
+        for (frame.items) |item| {
+            const start = r.instances.items.len;
+            const texture = if (item.kind == .image) try r.imageTexture(item.image.?) else r.atlas;
+            switch (item.kind) {
+                .rect => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 0),
+                .image => try r.append(item.rect, item.clip, item.color, item.uv, 0, 2),
+                .text => {
+                    if (item.text.len == 0) continue;
+                    const layout = try r.text.layout(item.text, item.font_size, item.mono);
+                    var ascent: f64 = 0;
+                    var descent: f64 = 0;
+                    _ = text_mod.CTLineGetTypographicBounds(layout.line, &ascent, &descent, null);
+                    const baseline: f32 = item.rect.y + @max(0, (item.rect.height - @as(f32, @floatCast(ascent + descent))) * 0.5) + @as(f32, @floatCast(ascent));
+                    const runs = text_mod.CTLineGetGlyphRuns(layout.line);
+                    var run_index: isize = 0;
+                    while (run_index < text_mod.CFArrayGetCount(runs)) : (run_index += 1) {
+                        const run = text_mod.CFArrayGetValueAtIndex(runs, run_index);
+                        const font = text_mod.CFDictionaryGetValue(text_mod.CTRunGetAttributes(run), text_mod.kCTFontAttributeName) orelse return error.NativeFontUnavailable;
+                        const count = text_mod.CTRunGetGlyphCount(run);
+                        var glyph_index: isize = 0;
+                        while (glyph_index < count) : (glyph_index += 1) {
+                            var glyph_id: u16 = 0;
+                            var position: text_mod.CGPoint = undefined;
+                            const range: text_mod.CFRange = .{ .location = glyph_index, .length = 1 };
+                            text_mod.CTRunGetGlyphs(run, range, @ptrCast(&glyph_id));
+                            text_mod.CTRunGetPositions(run, range, @ptrCast(&position));
+                            const at = item.rect.x + @as(f32, @floatCast(position.x));
+                            if (at > item.clip.x + item.clip.width + item.font_size * 2 or at < item.clip.x - item.font_size * 3) continue;
+                            const cached = try r.glyph(font, glyph_id, scale);
+                            const b = cached.bounds;
+                            try r.append(.{ .x = at + b.x, .y = baseline - @as(f32, @floatCast(position.y)) - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1);
+                        }
                     }
-                }
-            },
-        };
+                },
+            }
+            try r.addBatch(start, texture);
+        }
     }
 };
 
@@ -276,6 +344,11 @@ fn destroyRenderer(r: *Renderer) void {
     r.clearGlyphs();
     r.glyphs.deinit(r.allocator);
     r.instances.deinit(r.allocator);
+    r.clearBatches();
+    r.batches.deinit(r.allocator);
+    var image_iterator = r.images.valueIterator();
+    while (image_iterator.next()) |image| objc.release(image.texture);
+    r.images.deinit(r.allocator);
     r.text.deinit();
     objc.release(r.atlas);
     objc.release(r.pipeline);
@@ -349,8 +422,11 @@ fn drawFrame(r: *Renderer, frame: scene.Frame, size: Size, scale: f32, texture: 
     objc.send(void, encoder, "setVertexBuffer:offset:atIndex:", .{ slot.buffer, @as(usize, 0), @as(usize, 0) });
     const logical_size = [2]f32{ size.width, size.height };
     objc.send(void, encoder, "setVertexBytes:length:atIndex:", .{ @as(*const anyopaque, &logical_size), @as(usize, @sizeOf(@TypeOf(logical_size))), @as(usize, 1) });
-    objc.send(void, encoder, "setFragmentTexture:atIndex:", .{ r.atlas, @as(usize, 0) });
-    objc.send(void, encoder, "drawPrimitives:vertexStart:vertexCount:instanceCount:", .{ @as(usize, 3), @as(usize, 0), @as(usize, 6), r.instances.items.len });
+    for (r.batches.items) |batch| {
+        objc.send(void, encoder, "setVertexBuffer:offset:atIndex:", .{ slot.buffer, batch.start * @sizeOf(Instance), @as(usize, 0) });
+        objc.send(void, encoder, "setFragmentTexture:atIndex:", .{ batch.texture, @as(usize, 0) });
+        objc.send(void, encoder, "drawPrimitives:vertexStart:vertexCount:instanceCount:", .{ @as(usize, 3), @as(usize, 0), @as(usize, 6), batch.count });
+    }
     objc.send(void, encoder, "endEncoding", .{});
     if (drawable != null) objc.send(void, command, "presentDrawable:", .{drawable});
     slot.command = objc.retain(command);
@@ -401,6 +477,8 @@ fn rendererStats(r: *Renderer) Stats {
     result.atlas_bytes = atlas_side * atlas_side;
     result.layout_bytes = r.text.layout_bytes;
     result.instance_bytes = r.instances.capacity * @sizeOf(Instance);
+    result.image_bytes = r.image_bytes;
+    result.image_textures = r.images.count();
     for (r.buffers) |slot| result.instance_bytes += slot.capacity;
     return result;
 }
@@ -422,5 +500,11 @@ fn validateScene(frame: scene.Frame) !void {
         }
         if (!std.math.isFinite(item.radius) or item.radius < 0) return error.InvalidScene;
         if (item.kind == .text and (!std.math.isFinite(item.font_size) or item.font_size <= 0)) return error.InvalidScene;
+        if (item.kind == .image) {
+            const image = item.image orelse return error.InvalidScene;
+            try image.validate();
+            inline for (.{ "x", "y", "width", "height" }) |field| if (!std.math.isFinite(@field(item.uv, field)) or @field(item.uv, field) < 0 or @field(item.uv, field) > 1) return error.InvalidScene;
+            if (item.uv.x + item.uv.width > 1.00001 or item.uv.y + item.uv.height > 1.00001) return error.InvalidScene;
+        }
     }
 }

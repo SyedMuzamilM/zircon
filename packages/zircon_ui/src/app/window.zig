@@ -16,6 +16,7 @@ const backend = if (native_enabled) @import("../platform/macos/window.zig") else
 pub const Handle = struct { app_id: u32, slot: u32, generation: u32 = 1 };
 pub const Options = platform.WindowOptions;
 pub const Window = struct {
+    parent: ?Handle = null,
     app: runtime.App,
     allocator: std.mem.Allocator,
     scope: @import("../entity/scope.zig").Scope,
@@ -53,8 +54,9 @@ pub const Window = struct {
         errdefer a.destroy(window);
         window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a) };
         errdefer window.frames.deinit();
-        window.surface = try backend.open(a, options, .{ .context = window, .event = receive });
+        window.surface = try backend.open(a, options, .{ .context = window, .event = receive, .drag_region = dragRegion });
         errdefer window.surface.?.deinit();
+        window.dimensions = window.surface.?.size();
         // Ownership of value transfers only here, after native allocation. No
         // further fallible work may follow a successfully created root entity.
         window.root = (try owner.createInScope(scope, T, value)).token();
@@ -135,6 +137,18 @@ pub const Window = struct {
     fn receive(raw: *anyopaque, input: platform.Input) !void {
         const w: *Window = @ptrCast(@alignCast(raw));
         try w.dispatch(input);
+    }
+    fn dragRegion(raw: *anyopaque, point: g.Point) bool {
+        const w: *Window = @ptrCast(@alignCast(raw));
+        const frame = &w.frames.committed;
+        if (w.closed or frame.root == null or modalRoot(frame) != null) return false;
+        var current: ?u32 = hitTest(frame, frame.root.?.index, point, .{ .width = w.dimensions.width, .height = w.dimensions.height });
+        while (current) |i| : (current = frame.nodes.items[i].parent) {
+            const node = frame.nodes.items[i];
+            if (node.on_input != null or node.focusable or node.kind == .button) return false;
+            if (node.drag_region) return true;
+        }
+        return false;
     }
     pub fn dispatch(w: *Window, input: platform.Input) !void {
         if (w.closed) return;
@@ -332,6 +346,9 @@ fn focusOrder(frame: *const tree.Frame, index: u32, order: []u32, count: *usize)
 }
 pub fn pump(timeout: f64) !void {
     if (native_enabled) try backend.pump(timeout) else return error.NativeNotEnabled;
+}
+pub fn wake() void {
+    if (native_enabled) backend.wake();
 }
 pub fn now() f64 {
     return if (native_enabled) backend.now() else 0;
