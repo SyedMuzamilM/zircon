@@ -3,15 +3,54 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize });
+    const dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = false });
     const module = dependency.module("zircon_ui");
+    const text_dependency = b.dependency("zircon_text", .{ .target = target, .optimize = optimize });
+    const text_module = text_dependency.module("zircon_text");
+    const workspace_dependency = b.dependency("zircon_workspace", .{ .target = target, .optimize = optimize });
+    const workspace_module = workspace_dependency.module("zircon_workspace");
+    const editor_dependency = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize });
+    const editor_module = editor_dependency.module("zircon_editor");
+    const app_module = b.createModule(.{
+        .root_source_file = b.path("apps/zircon/src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{ .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = editor_module } },
+    });
+    const app_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("apps/zircon/tests/all.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{ .{ .name = "zircon", .module = app_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module } },
+    }) });
+    const app_run = b.addRunArtifact(app_tests);
+    b.step("test-app", "Exercise editor workspace journeys").dependOn(&app_run.step);
+    const workspace_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("packages/zircon_workspace/tests/all.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "zircon_workspace", .module = workspace_module }},
+    }) });
+    const workspace_run = b.addRunArtifact(workspace_tests);
+    b.step("test-workspace", "Test file identities, saves, and project navigation").dependOn(&workspace_run.step);
+    const text_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("packages/zircon_text/tests/all.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "zircon_text", .module = text_module }},
+    }) });
+    const text_run = b.addRunArtifact(text_tests);
+    b.step("test-text", "Test persistent document storage, history, and search").dependOn(&text_run.step);
     const tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("packages/zircon_ui/tests/all.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "zircon_ui", .module = module }},
     }) });
-    b.step("test-build", "Compile framework tests for the selected target").dependOn(&tests.step);
+    const portable_compile = b.step("test-build", "Compile portable tests for the selected target");
+    portable_compile.dependOn(&tests.step);
+    portable_compile.dependOn(&text_tests.step);
+    portable_compile.dependOn(&workspace_tests.step);
     const run = b.addRunArtifact(tests);
     b.step("test", "Test entity lifetimes and borrowing without native dependencies").dependOn(&run.step);
     const example = b.addExecutable(.{ .name = "counter-tree", .root_module = b.createModule(.{
@@ -25,6 +64,24 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .macos) {
         const native_dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = true });
         const native_ui = native_dependency.module("zircon_ui");
+        const native_editor = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize, .native = true }).module("zircon_editor");
+        const native_app = b.createModule(.{
+            .root_source_file = b.path("apps/zircon/src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor } },
+        });
+        const zircon = b.addExecutable(.{ .name = "zircon", .root_module = b.createModule(.{
+            .root_source_file = b.path("apps/zircon/src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } },
+        }) });
+        b.installArtifact(zircon);
+        const zircon_run = b.addRunArtifact(zircon);
+
+        b.step("run", "Open the Zircon native text editor").dependOn(&zircon_run.step);
+        b.step("build-editor", "Compile the native Zircon editor").dependOn(&zircon.step);
         const counter_native = b.addExecutable(.{ .name = "zircon-counter", .root_module = b.createModule(.{
             .root_source_file = b.path("examples/counter_native/main.zig"),
             .target = target,
@@ -51,7 +108,7 @@ pub fn build(b: *std.Build) void {
         native_run.step.dependOn(&window_run.step);
         b.step("test-native", "Verify native windows, input, CoreText and Metal").dependOn(&native_run.step);
     }
-    const format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("packages/zircon_ui"), b.path("examples") }, .check = true });
+    const format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("packages/zircon_ui"), b.path("packages/zircon_text"), b.path("packages/zircon_workspace"), b.path("examples") }, .check = true });
     b.step("fmt", "Check framework formatting").dependOn(&format.step);
     const contracts = b.step("contracts", "Check compile-time view, handler, and result contracts");
     for ([_][2][]const u8{
@@ -71,6 +128,8 @@ pub fn build(b: *std.Build) void {
     const check = b.step("check", "Run framework tests and formatting checks");
     check.dependOn(contracts);
     check.dependOn(&run.step);
+    check.dependOn(&text_run.step);
+    check.dependOn(&workspace_run.step);
     check.dependOn(&format.step);
     b.getInstallStep().dependOn(check);
 }
