@@ -24,3 +24,12 @@ Entity handles do not own state. Render methods receive `*const T`. UI elements 
 ## Honest status
 
 Only the user-supplied document is a full API specification. This checklist is an implementation plan, not a declaration that all of that API exists. README and commit descriptions report the tested subset. Performance parity with Zed is not established.
+
+## Verified progress
+
+- `e2174d0`: unchanged specification and implementation plan preserved.
+- `f935bed`: entity runtime, scope ownership, borrowing, coalesced notifications, and headless lifecycle tests.
+- `64c971a`: immutable view contracts, frame-owned trees, typed handler adapters, committed/staging storage, and compiler-error contracts.
+- The next tested unit adds deterministic flex layout with injected measurements. Native text and Metal remain isolated from core checks until their dedicated checks are wired.
+
+The native window and event-propagation milestones are still ahead. The headless counter inspects a tree; it is not advertised as a finished native application.

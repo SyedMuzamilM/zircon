@@ -30,3 +30,9 @@ A view implements `pub fn render(self: *const Self, ui: *zircon_ui.Ui) !zircon_u
 Frames invoke registered cleanup hooks in reverse registration order before resetting their arena. Registering a hook transfers cleanup responsibility only on success. Dispatch pins the committed tree; replacing it during active dispatch returns `DispatchActive`.
 
 The root `check` target includes compile-failure fixtures for mutable render methods, invalid click-handler signatures, and borrowed access results. The headless counter example builds and inspects the same tree that a later native window will lay out and paint.
+
+## Flex layout subset
+
+`layout.calculate(allocator, committed_frame, root, constraints, measurer)` produces owned bounds for one frame epoch. `deinit` the result. Rows/columns support padding, positive margins, gaps, flex grow/shrink, min/max freezing, cross-axis alignment, and main-axis justification. Dimensions support logical pixels, rem, viewport units, and percentages against the available parent content box. Intrinsic auto/percentage cycles do not implement browser CSS semantics. Flex wrapping, grid, and baseline alignment are not implemented.
+
+Inject text metrics through `layout.Measurer`. `layout.FixedMetrics` is a deterministic headless-test adapter, not a font shaper. Production layout will use the native shaping module. Invalid/nonfinite dimensions, invalid measurements, arithmetic overflow, excessive depth, and allocation failures return errors. A layout result cannot be reused with another frame epoch.
