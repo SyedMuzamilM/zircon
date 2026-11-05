@@ -15,10 +15,17 @@ pub const Editor = struct {
     scroll: ui.controls.Scroll = .{},
     horizontal: f32 = 0,
     preferred_x: ?f32 = null,
+    theme: @import("theme.zig").Theme = .{},
+    git_changes: []@import("annotations.zig").GitChange = &.{},
+    git_revision: u64 = 0,
+    show_git_gutters: bool = true,
+    inline_blame: ?@import("annotations.zig").Blame = null,
+    show_line_numbers: bool = true,
     font_size: f32 = 14,
     line_height: f32 = 22,
     tab_width: usize = 4,
     language: syntax.Language = .plain,
+    language_profile: ?@import("profile.zig").Profile = null,
     syntax_cache: syntax.Cache,
     history: std.ArrayList(SelectionHistory) = .empty,
     typing_group: u64 = 0,
@@ -33,6 +40,8 @@ pub const Editor = struct {
         return .{ .allocator = a, .selections = try selection.Set.init(a), .syntax_cache = .init(a) };
     }
     pub fn deinit(self: *Editor) void {
+        self.allocator.free(self.git_changes);
+        if (self.inline_blame) |*blame| blame.deinit(self.allocator);
         self.selections.deinit(self.allocator);
         self.syntax_cache.deinit();
         for (self.history.items) |entry| self.allocator.free(entry.items);
@@ -49,6 +58,7 @@ pub const Editor = struct {
     }
     pub fn synchronize(self: *Editor, snapshot: text.Snapshot) void {
         self.selections.synchronize(snapshot);
+        self.syntax_cache.profile = self.language_profile;
         if (self.language == .plain) self.syntax_cache.clear() else if (self.syntax_cache.revision != snapshot.revision() or self.syntax_cache.language != self.language) {
             self.syntax_cache.clear();
             self.syntax_cache.refresh(snapshot, self.language, 0) catch self.syntax_cache.clear();
@@ -66,6 +76,19 @@ pub const Editor = struct {
         self.selections.normalize();
         self.marked = null;
         self.typing_group = 0;
+    }
+    pub fn setBlame(self: *Editor, value: @import("annotations.zig").Blame) !void {
+        const prepared = try value.copy(self.allocator);
+        self.hideBlame();
+        self.inline_blame = prepared;
+    }
+    pub fn hideBlame(self: *Editor) void {
+        if (self.inline_blame) |*value| value.deinit(self.allocator);
+        self.inline_blame = null;
+    }
+    pub fn rowAt(self: *const Editor, y: f32, revision: u64) usize {
+        const blame = if (self.inline_blame != null and self.inline_blame.?.revision == revision) self.inline_blame else null;
+        return @import("annotations.zig").sourceRow(y, self.line_height, blame);
     }
     pub fn primary(self: *const Editor) selection.Selection {
         return self.selections.primary();
@@ -262,8 +285,15 @@ pub const Editor = struct {
     }
     pub fn reveal(self: *Editor, snapshot: text.Snapshot) void {
         const row = (snapshot.pointAt(self.primary().head) catch return).line;
-        const start = @as(f32, @floatFromInt(row)) * self.line_height;
-        self.scroll.reveal(start, start + self.line_height, @as(f32, @floatFromInt(snapshot.lineCount())) * self.line_height, self.last_viewport.height);
+        const start = self.rowY(row, snapshot.revision());
+        self.scroll.reveal(start, start + self.line_height, self.contentHeight(snapshot), self.last_viewport.height);
+    }
+    pub fn rowY(self: *const Editor, row: usize, revision: u64) f32 {
+        const blame = if (self.inline_blame != null and self.inline_blame.?.revision == revision) self.inline_blame else null;
+        return @import("annotations.zig").rowY(row, self.line_height, blame);
+    }
+    pub fn contentHeight(self: *const Editor, snapshot: text.Snapshot) f32 {
+        return self.rowY(snapshot.lineCount(), snapshot.revision());
     }
     pub fn findNext(self: *Editor, document: *const text.Document, query: []const u8, backward: bool) !bool {
         if (query.len == 0) return false;

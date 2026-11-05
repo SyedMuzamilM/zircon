@@ -56,13 +56,13 @@ pub fn vertical(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
 pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), point: ui.Point) !usize {
     const metrics = try e.textMetrics();
     const relative = @max(0, point.y - e.bounds.y + self.scroll.offset);
-    const row = @min(snapshot.lineCount() - 1, @as(usize, @intFromFloat(@floor(relative / self.line_height))));
+    const row = @min(snapshot.lineCount() - 1, self.rowAt(relative, snapshot.revision()));
     const range = try snapshot.lineRange(row);
     if (range.end - range.start > 64 * 1024) return range.start;
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
     const line = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), range), self.tab_width);
-    const gutter = @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size);
+    const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
     return range.start + line.index(metrics, .{ .size = self.font_size, .mono = true }, point.x - e.bounds.x - gutter + self.horizontal);
 }
 fn wordCharacter(byte: u8) bool {
@@ -112,7 +112,8 @@ pub fn revealHorizontal(self: *Editor, snapshot: text.Snapshot, event: *ui.Event
     const line = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), range), self.tab_width);
     const metrics = try event.textMetrics();
     const x = line.caret(metrics, .{ .size = self.font_size, .mono = true }, @min(point.byte_column, range.end - range.start));
-    const available = @max(20, event.bounds.width - @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) - 20);
+    const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
+    const available = @max(20, event.bounds.width - gutter - 20);
     if (x < self.horizontal) self.horizontal = @max(0, x - 12);
     if (x > self.horizontal + available) self.horizontal = x - available;
 }

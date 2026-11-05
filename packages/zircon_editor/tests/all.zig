@@ -3,6 +3,52 @@ const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const editor = @import("zircon_editor");
 const t = std.testing;
+test "inline blame geometry reserves space and ignores obsolete revisions" {
+    var document = try text.Document.init(t.allocator, "one\ntwo\nthree\nfour\nfive\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    try state.setBlame(.{ .line = 1, .revision = snapshot.revision(), .author = "Author", .summary = "Summary", .oid = "01234567", .timestamp = 0 });
+    const y = state.rowY(2, snapshot.revision());
+    try t.expectApproxEqAbs(@as(f32, 2 * 22 + 88), y, 0.01);
+    try t.expectEqual(@as(usize, 2), state.rowAt(y + 1, snapshot.revision()));
+    try t.expectEqual(@as(usize, 1), state.rowAt(2 * 22 + 20, snapshot.revision()));
+    state.last_viewport.height = 22;
+    try state.setSelection(snapshot, .{ .start = 8, .end = 8 });
+    state.reveal(snapshot);
+    try t.expectApproxEqAbs(y, state.scroll.offset, 0.01);
+    var change = try document.apply(document.revision(), &.{.{ .range = .{ .start = 0, .end = 0 }, .text = "new\n" }}, 0);
+    defer change.deinit();
+    try t.expectApproxEqAbs(@as(f32, 44), state.rowY(2, document.revision()), 0.01);
+}
+test "extension lexical profiles classify keywords strings and line comments" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var owned_document = try text.Document.init(t.allocator, "def hello():\n    return 'value' # note\n");
+    var owned_state = try editor.Editor.init(t.allocator);
+    owned_state.language = .custom;
+    owned_state.language_profile = .{ .keywords = &.{ "def", "return" }, .line_comment = "#" };
+    var source = owned_document.snapshot();
+    owned_state.synchronize(source);
+    source.deinit();
+    const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = owned_document, .state = owned_state }) catch |err| {
+        owned_document.deinit();
+        owned_state.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var keyword = false;
+    var comment = false;
+    var string = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
+        if (std.mem.eql(u8, item.text, "def")) keyword = true;
+        if (std.mem.eql(u8, item.text, "# note")) comment = true;
+        if (std.mem.eql(u8, item.text, "'value'")) string = true;
+    };
+    try t.expect(keyword and comment and string);
+}
 fn expectText(document: *const text.Document, expected: []const u8) !void {
     var snapshot = document.snapshot();
     defer snapshot.deinit();

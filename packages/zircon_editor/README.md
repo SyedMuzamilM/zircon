@@ -35,3 +35,9 @@ Run with Zig 0.17.1:
 ```
 
 Tests exercise real document edits, multi-cursor mapping, grouped history, CRLF, composition, syntax invalidation, tab geometry, find/replace, committed framework canvas/input, bounded context, explicit long-line behavior and allocation-failure cleanup.
+
+## Host contributions and decorations
+
+`Theme` contains semantic editor and token colors. `language_profile` supplies immutable keyword/comment/string rules with `language = .custom`. The host retains their source generation; each committed canvas copies its profile into frame storage. This remains lexical highlighting, independent of the language-server process.
+
+`git_changes` and `git_revision` attach source-revision-bound line markers. `setBlame` copies author/commit/summary data; `hideBlame` releases it. An inline blame block reserves vertical space, and `rowAt`, `rowY`, scrolling and caret reveal use the same mapping. Obsolete decorations do not affect a newer document revision. Repository commands and language-server transports belong to separate packages and the host.

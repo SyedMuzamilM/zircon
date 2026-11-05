@@ -200,7 +200,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             return .{ .handled = true };
         },
         .scroll => |wheel| {
-            self.scroll.wheel(wheel.y, @as(f32, @floatFromInt(snapshot.lineCount())) * self.line_height, e.bounds.height);
+            self.scroll.wheel(wheel.y, self.contentHeight(snapshot), e.bounds.height);
             self.horizontal = @max(0, self.horizontal - wheel.x);
             e.preventDefault();
             return .{ .handled = true };
