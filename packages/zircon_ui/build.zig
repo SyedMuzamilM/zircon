@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("tests/entity_tests.zig"),
+        .root_source_file = b.path("tests/all.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "zircon_ui", .module = module }},

@@ -1,6 +1,6 @@
 # Zircon UI
 
-A framework in Zig with explicit ownership. The verified first milestone is a headless entity runtime. It does not load a window system, text engine, or GPU.
+A framework in Zig with explicit ownership. The verified foundations are a headless entity runtime and declarative frame builder. It does not load a window system, text engine, or GPU.
 
 ```zig
 const ui = @import("zircon_ui");
@@ -20,3 +20,13 @@ Callbacks cannot retain entity pointers. Access results must be pointer-free val
 Generation-exhausted slots are retired. Ownership depth is capped at 128 to bound recursive destruction. Destructors may release their own resources but cannot reenter the application.
 
 The full planned API is in the repository specification. Windows, rendering, observers, typed subscriptions, and workers are later milestones and are not implied by the entity API.
+
+## Frame-local rendering
+
+A view implements `pub fn render(self: *const Self, ui: *zircon_ui.Ui) !zircon_ui.Element`. `Ui.column`, `row`, `div`, `text`, `textFmt`, and `button` build indexed trees. Strings and child slices are copied into the staging arena. `ui.onClick(Self.method)` records the owner handle and a generated typed adapter, never a pointer to the render stack.
+
+`testing.Harness.render(entity)` performs a borrowed const render and commits only after successful tree validation. A failed render discards staging storage and preserves the committed tree and its handlers. Element epochs reject foreign or retired handles; keys compare by type and value inside their containing keyed scope. No layout or native drawing is implied by constructing a tree.
+
+Frames invoke registered cleanup hooks in reverse registration order before resetting their arena. Registering a hook transfers cleanup responsibility only on success. Dispatch pins the committed tree; replacing it during active dispatch returns `DispatchActive`.
+
+The root `check` target includes compile-failure fixtures for mutable render methods, invalid click-handler signatures, and borrowed access results. The headless counter example builds and inspects the same tree that a later native window will lay out and paint.

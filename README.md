@@ -2,12 +2,13 @@
 
 An independent UI framework in Zig, following the [supplied framework specification](docs/specification/framework-api-v0.1.md). The name in that document, ZigGPUI, is a placeholder; the package name is `zircon_ui`.
 
-The first verified milestone implements typed generational entities, scope ownership, runtime borrowing, explicit notifications, deferred destruction, and a headless harness. It has no native or GPU dependency. The editor comes after the framework interfaces are verified.
+The verified foundations implement typed generational entities, scope ownership, runtime borrowing, explicit notifications, deferred destruction, frame-local UI trees, and committed/staging frame storage. It has no native or GPU dependency. The editor comes after the framework interfaces are verified.
 
 Use Zig 0.17.1:
 
 ```sh
 ./tools/zig build check
+./tools/zig build counter  # inspect a declarative tree without a window
 ./tools/zig build test-build -Dtarget=aarch64-linux-gnu
 ```
 
