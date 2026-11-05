@@ -1,0 +1,472 @@
+//! Application commands and file policy. Editing is delegated to zircon_editor;
+//! persistence is delegated to zircon_workspace. Errors leave the view usable.
+const std = @import("std");
+const ui = @import("zircon_ui");
+const editing = @import("zircon_editor");
+const text = @import("zircon_text");
+const ws = @import("zircon_workspace");
+const model = @import("shell.zig");
+const Shell = model.Shell;
+const Command = @import("commands.zig").Command;
+pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) !void {
+    self.window = window;
+    if (self.fields == null) {
+        const query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        const replacement = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        const path = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        self.fields = .{ .query = query, .replacement = replacement, .path = path };
+    }
+    try @import("project_index.zig").start(self, cx);
+    cx.notify();
+}
+pub fn loadTree(self: *Shell) !void {
+    const entries = try self.workspace.children(self.workspace.root_path, self.allocator);
+    defer ws.deinitEntries(entries, self.allocator);
+    for (entries) |entry| {
+        const row = try copyRow(self.allocator, entry, 0);
+        errdefer freeRow(self.allocator, row);
+        try self.tree.append(self.allocator, row);
+    }
+}
+fn copyRow(a: std.mem.Allocator, entry: ws.Entry, depth: u16) !model.TreeRow {
+    const name = try a.dupe(u8, entry.name);
+    errdefer a.free(name);
+    return .{ .name = name, .path = try a.dupe(u8, entry.path), .directory = entry.kind == .directory, .depth = depth };
+}
+fn freeRow(a: std.mem.Allocator, row: model.TreeRow) void {
+    a.free(row.name);
+    a.free(row.path);
+}
+pub fn activateTree(self: *Shell, index: usize) !void {
+    if (index >= self.tree.items.len) return;
+    const row = self.tree.items[index];
+    if (!row.directory) return self.openPath(row.path);
+    if (row.expanded) {
+        var end = index + 1;
+        while (end < self.tree.items.len and self.tree.items[end].depth > row.depth) : (end += 1) freeRow(self.allocator, self.tree.items[end]);
+        self.tree.replaceRangeAssumeCapacity(index + 1, end - index - 1, &.{});
+        self.tree.items[index].expanded = false;
+    } else {
+        const entries = try self.workspace.children(row.path, self.allocator);
+        defer ws.deinitEntries(entries, self.allocator);
+        var rows: std.ArrayList(model.TreeRow) = .empty;
+        defer rows.deinit(self.allocator);
+        errdefer for (rows.items) |child| freeRow(self.allocator, child);
+        for (entries) |entry| {
+            const child = try copyRow(self.allocator, entry, row.depth + 1);
+            errdefer freeRow(self.allocator, child);
+            try rows.append(self.allocator, child);
+        }
+        try self.tree.insertSlice(self.allocator, index + 1, rows.items);
+        self.tree.items[index].expanded = true;
+    }
+}
+pub fn openPath(self: *Shell, path: []const u8) !void {
+    const id = try self.workspace.open(path);
+    for (self.tabs.items, 0..) |tab, i| if (std.meta.eql(tab.document, id)) {
+        self.active = i;
+        self.active_pane = .primary;
+        self.editor_focus_request +%= 1;
+        self.overlay = .none;
+        return;
+    };
+    errdefer _ = self.workspace.close(id, .discard) catch {};
+    var view = try editing.Editor.init(self.allocator);
+    errdefer view.deinit();
+    const record = try self.workspace.getConst(id);
+    view.language = editing.syntax.languageForPath(record.path orelse "");
+    var snapshot = record.doc.snapshot();
+    defer snapshot.deinit();
+    view.synchronize(snapshot);
+    try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    self.active = self.tabs.items.len - 1;
+    self.active_pane = .primary;
+    self.editor_focus_request +%= 1;
+    self.overlay = .none;
+}
+pub fn newFile(self: *Shell) !void {
+    const id = try self.workspace.untitled("");
+    errdefer _ = self.workspace.close(id, .discard) catch {};
+    var view = try editing.Editor.init(self.allocator);
+    errdefer view.deinit();
+    try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    self.active = self.tabs.items.len - 1;
+    self.active_pane = .primary;
+    self.editor_focus_request +%= 1;
+}
+fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
+    if (self.active_pane == .secondary) if (self.secondary) |*pane| return .{ .id = pane.document, .editor = &pane.editor };
+    if (self.tabs.items.len == 0) return error.NoDocument;
+    return .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
+}
+fn field(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), a: std.mem.Allocator) ![]u8 {
+    var bytes: []u8 = undefined;
+    try cx.read(handle, ui.controls.TextInput.copy, .{ a, &bytes });
+    return bytes;
+}
+fn setField(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), value: []const u8, placeholder: []const u8) !void {
+    const Update = struct {
+        fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), bytes: []const u8, label: []const u8) !void {
+            try input.bytes.ensureTotalCapacity(input.allocator, bytes.len);
+            input.bytes.clearRetainingCapacity();
+            input.bytes.appendSliceAssumeCapacity(bytes);
+            input.cursor = bytes.len;
+            input.anchor = bytes.len;
+            input.marked = null;
+            input.revision +%= 1;
+            input.placeholder = label;
+            context.notify();
+        }
+    };
+    try cx.update(handle, Update.call, .{ value, placeholder });
+}
+fn show(self: *Shell, cx: *ui.Context(Shell), which: model.Overlay) !void {
+    self.overlay = which;
+    self.overlay_index = 0;
+    if (self.fields) |fields| switch (which) {
+        .palette => try setField(cx, fields.query, "", "Search commands…"),
+        .quick_open => try setField(cx, fields.query, "", "Find a file…"),
+        .open_path => try setField(cx, fields.path, "", "Path relative to the project, or an absolute path"),
+        .save_as => {
+            const selected = try saveTarget(self);
+            const record = try self.workspace.getConst(self.tabs.items[selected].document);
+            try setField(cx, fields.path, record.path orelse "untitled.zig", "Save file as…");
+        },
+        .find, .replace => try setField(cx, fields.query, "", "Find in document…"),
+        else => {},
+    };
+}
+fn firstDirty(self: *const Shell) ?usize {
+    for (self.tabs.items, 0..) |tab, i| {
+        if (self.workspace.dirty(tab.document) catch false) return i;
+    }
+    return null;
+}
+fn saveTarget(self: *const Shell) !usize {
+    if (self.pending) |pending| switch (pending) {
+        .tab => |i| return i,
+        .window => return firstDirty(self) orelse self.active,
+    };
+    if (self.tabs.items.len == 0) return error.NoDocument;
+    if (self.active_pane == .secondary) if (self.secondary) |pane| {
+        for (self.tabs.items, 0..) |tab, i| if (std.meta.eql(tab.document, pane.document)) return i;
+    };
+    return self.active;
+}
+pub fn requestTabClose(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
+    if (index >= self.tabs.items.len) return;
+    if (try self.workspace.dirty(self.tabs.items[index].document)) {
+        self.pending = .{ .tab = index };
+        try show(self, cx, .dirty);
+    } else try closeTab(self, index, .if_clean);
+}
+fn closeTab(self: *Shell, index: usize, decision: ws.CloseDecision) !void {
+    const id = self.tabs.items[index].document;
+    if (!try self.workspace.close(id, decision)) return;
+    if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
+        pane.editor.deinit();
+        self.secondary = null;
+        self.active_pane = .primary;
+    };
+    var removed = self.tabs.orderedRemove(index);
+    removed.editor.deinit();
+    self.active = if (self.tabs.items.len == 0) 0 else @min(self.active, self.tabs.items.len - 1);
+    self.overlay = .none;
+    self.pending = null;
+}
+fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
+    if (self.pending) |pending| switch (pending) {
+        .tab => |i| try closeTab(self, i, .if_clean),
+        .window => {
+            if (firstDirty(self) != null) {
+                try show(self, cx, .dirty);
+            } else {
+                self.allow_close = true;
+                try cx.app.requestCloseWindow(self.window.?);
+            }
+        },
+    } else self.overlay = .none;
+}
+fn applyOutcome(self: *Shell, id: ws.DocumentId, pane: u8, outcome: *editing.Outcome) !void {
+    defer if (outcome.change) |*change| change.deinit();
+    if (outcome.change == null and !outcome.reset) return;
+    var snapshot = try self.workspace.snapshot(id);
+    defer snapshot.deinit();
+    for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id) and pane != 0) {
+        if (outcome.change) |*change| tab.editor.mapChange(change);
+        tab.editor.synchronize(snapshot);
+    };
+    if (self.secondary) |*other| if (std.meta.eql(other.document, id) and pane != 1) {
+        if (outcome.change) |*change| other.editor.mapChange(change);
+        other.editor.synchronize(snapshot);
+    };
+}
+pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !bool {
+    if (pane == 1 and self.secondary == null) return false;
+    if (pane == 0 and self.tabs.items.len == 0) return false;
+    if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
+    const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
+    const record = try self.workspace.get(selected.id);
+    var outcome = try selected.editor.handle(&record.doc, e);
+    if (outcome.change != null or outcome.reset) {
+        self.allocator.free(self.status);
+        self.status = &.{};
+        self.status_is_error = false;
+    }
+    try applyOutcome(self, selected.id, pane, &outcome);
+    if (outcome.handled) cx.notify();
+    return outcome.handled;
+}
+pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
+    switch (which) {
+        .new_file => try newFile(self),
+        .open_path => try show(self, cx, .open_path),
+        .quick_open => try show(self, cx, .quick_open),
+        .palette => try show(self, cx, .palette),
+        .find => try show(self, cx, .find),
+        .replace => try show(self, cx, .replace),
+        .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
+        .split => {
+            if (self.secondary) |*pane| {
+                pane.editor.deinit();
+                self.secondary = null;
+                self.active_pane = .primary;
+            } else {
+                const current = try active(self);
+                var other = try editing.Editor.init(self.allocator);
+                errdefer other.deinit();
+                other.language = current.editor.language;
+                var snapshot = try self.workspace.snapshot(current.id);
+                defer snapshot.deinit();
+                other.synchronize(snapshot);
+                self.secondary = .{ .document = current.id, .editor = other };
+            }
+        },
+        .save => {
+            const index = try saveTarget(self);
+            const record = try self.workspace.getConst(self.tabs.items[index].document);
+            if (record.path == null) try show(self, cx, .save_as) else {
+                try self.workspace.save(self.tabs.items[index].document, null);
+                historyBoundary(self, self.tabs.items[index].document);
+                try self.setStatus(try self.allocator.dupe(u8, "Saved"));
+            }
+        },
+        .save_as => try show(self, cx, .save_as),
+        .close_tab => if (self.tabs.items.len > 0) {
+            try requestTabClose(self, cx, self.active);
+        },
+        .quit => try cx.app.requestCloseWindow(self.window.?),
+        .dismiss => {
+            self.overlay = .none;
+            self.pending = null;
+        },
+        .discard_dirty => {
+            if (self.pending) |pending| switch (pending) {
+                .tab => |i| try closeTab(self, i, .discard),
+                .window => {
+                    self.allow_close = true;
+                    try cx.app.requestCloseWindow(self.window.?);
+                },
+            };
+        },
+        .save_dirty => {
+            const index = try saveTarget(self);
+            const id = self.tabs.items[index].document;
+            const record = try self.workspace.getConst(id);
+            if (record.path == null) try show(self, cx, .save_as) else {
+                try self.workspace.save(id, null);
+                historyBoundary(self, id);
+                try finishPending(self, cx);
+            }
+        },
+        .submit_path => {
+            const bytes = try field(cx, self.fields.?.path, self.allocator);
+            defer self.allocator.free(bytes);
+            const path = std.mem.trim(u8, bytes, " \t");
+            if (path.len == 0) return error.InvalidPath;
+            if (self.overlay == .open_path) {
+                try openPath(self, path);
+            } else {
+                const index = try saveTarget(self);
+                const id = self.tabs.items[index].document;
+                try self.workspace.save(id, path);
+                historyBoundary(self, id);
+                const record = try self.workspace.getConst(id);
+                self.tabs.items[index].editor.language = editing.syntax.languageForPath(record.path.?);
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                self.tabs.items[index].editor.synchronize(snapshot);
+                self.overlay = .none;
+                try finishPending(self, cx);
+            }
+        },
+        .find_next, .find_previous, .replace_one, .replace_all => {
+            const current = try active(self);
+            const record = try self.workspace.get(current.id);
+            const query = try field(cx, self.fields.?.query, self.allocator);
+            defer self.allocator.free(query);
+            if (query.len == 0) return;
+            if (which == .replace_all) {
+                const replacement = try field(cx, self.fields.?.replacement, self.allocator);
+                defer self.allocator.free(replacement);
+                var result = try current.editor.replaceAll(&record.doc, query, replacement);
+                try applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+            } else if (which == .replace_one) {
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                const range = current.editor.primary().range();
+                const selected = try snapshot.copy(self.allocator, range);
+                defer self.allocator.free(selected);
+                if (std.mem.eql(u8, selected, query)) {
+                    const replacement = try field(cx, self.fields.?.replacement, self.allocator);
+                    defer self.allocator.free(replacement);
+                    var result = try current.editor.execute(&record.doc, .{ .insert = replacement });
+                    try applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+                }
+                _ = try current.editor.findNext(&record.doc, query, false);
+            } else {
+                const found = try current.editor.findNext(&record.doc, query, which == .find_previous);
+                if (!found) try self.setStatus(try self.allocator.dupe(u8, "No matches"));
+            }
+        },
+        .undo, .redo, .select_all => {
+            const current = try active(self);
+            const record = try self.workspace.get(current.id);
+            var result = try current.editor.execute(&record.doc, switch (which) {
+                .undo => .undo,
+                .redo => .redo,
+                else => .select_all,
+            });
+            try applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+        },
+        .zoom_in, .zoom_out => {
+            const current = try active(self);
+            current.editor.font_size = std.math.clamp(current.editor.font_size + @as(f32, if (which == .zoom_in) 1 else -1), 10, 26);
+            current.editor.line_height = current.editor.font_size + 8;
+        },
+    }
+    _ = event;
+}
+pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data == .close and !self.allow_close and firstDirty(self) != null) {
+        self.pending = .window;
+        try show(self, cx, .dirty);
+        e.preventDefault();
+        cx.notify();
+    }
+}
+pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data != .key_down) return;
+    const key = e.data.key_down;
+    if (self.overlay != .none) {
+        if (key.key == .escape) {
+            self.overlay = .none;
+            self.pending = null;
+            e.preventDefault();
+            e.stopPropagation();
+            cx.notify();
+            return;
+        }
+        if (key.key == .enter) {
+            const which: Command = switch (self.overlay) {
+                .open_path, .save_as => .submit_path,
+                .find, .replace => if (key.modifiers.shift) .find_previous else .find_next,
+                else => .dismiss,
+            };
+            if (self.overlay == .palette or self.overlay == .quick_open) try activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
+            e.preventDefault();
+            e.stopPropagation();
+            cx.notify();
+            return;
+        }
+        if ((key.key == .down or key.key == .up) and (self.overlay == .palette or self.overlay == .quick_open)) {
+            const count = try filteredCount(self, cx);
+            if (count > 0) self.overlay_index = if (key.key == .down) (self.overlay_index + 1) % count else (self.overlay_index + count - 1) % count;
+            e.preventDefault();
+            e.stopPropagation();
+            cx.notify();
+        }
+        return;
+    }
+    const map: ui.Keymap(Command) = .{ .bindings = &@import("commands.zig").bindings };
+    if (map.resolve(e.data)) |which| {
+        execute(self, cx, which, e) catch |err| try self.reportError(err);
+        e.preventDefault();
+        e.stopPropagation();
+        cx.notify();
+    }
+}
+fn filteredCount(self: *Shell, cx: *ui.Context(Shell)) !usize {
+    const query = try field(cx, self.fields.?.query, self.allocator);
+    defer self.allocator.free(query);
+    var count: usize = 0;
+    if (self.overlay == .palette) {
+        for (@import("commands.zig").commands) |entry| {
+            if (@import("view.zig").matches(query, entry.label)) count += 1;
+        }
+    } else {
+        for (self.file_index.items) |entry| {
+            if (@import("view.zig").matches(query, entry.label)) count += 1;
+        }
+    }
+    return count;
+}
+fn activateSelected(self: *Shell, cx: *ui.Context(Shell)) !void {
+    const query = try field(cx, self.fields.?.query, self.allocator);
+    defer self.allocator.free(query);
+    var n: usize = 0;
+    if (self.overlay == .palette) {
+        for (@import("commands.zig").commands) |entry| {
+            if (!@import("view.zig").matches(query, entry.label)) continue;
+            if (n == self.overlay_index) {
+                self.overlay = .none;
+                execute(self, cx, entry.command, null) catch |err| try self.reportError(err);
+                return;
+            }
+            n += 1;
+        }
+    } else {
+        for (self.file_index.items) |entry| {
+            if (!@import("view.zig").matches(query, entry.label)) continue;
+            if (n == self.overlay_index) {
+                try openPath(self, entry.path);
+                return;
+            }
+            n += 1;
+        }
+    }
+}
+pub fn drag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: u8) !void {
+    switch (e.data) {
+        .pointer_down => {
+            self.dragging = if (kind == 0) .sidebar else .split;
+            e.capturePointer();
+        },
+        .pointer_move => |pointer| {
+            if (self.dragging == .none) return;
+            const size = try e.windowSize();
+            if (self.dragging == .sidebar) self.sidebar_width = std.math.clamp(pointer.position.x, 140, @min(420, @max(140, size.width - 200))) else {
+                const start = if (self.sidebar_visible) self.sidebar_width + 5 else 0;
+                self.split_ratio = std.math.clamp((pointer.position.x - start) / @max(1, size.width - start), 0.2, 0.8);
+            }
+        },
+        .pointer_up => {
+            self.dragging = .none;
+            e.releasePointer();
+        },
+        else => return,
+    }
+    e.preventDefault();
+    cx.notify();
+}
+
+fn historyBoundary(self: *Shell, id: ws.DocumentId) void {
+    const record = self.workspace.get(id) catch return;
+    record.doc.breakHistoryGroup();
+    for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
+        tab.editor.typing_group = 0;
+    };
+    if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
+        pane.editor.typing_group = 0;
+    };
+}

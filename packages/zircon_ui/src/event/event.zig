@@ -14,8 +14,13 @@ pub fn Event(comptime T: type) type {
         capture_requested: bool = false,
         release_requested: bool = false,
         _surface: ?@import("../platform/interface.zig").Surface = null,
+        _window_size: ?g.Size = null,
         pub fn textMetrics(e: *const @This()) !@import("../layout/measure.zig").Measurer {
             return (e._surface orelse return error.NoWindow).measurer();
+        }
+        pub fn windowSize(e: *const @This()) !g.Size {
+            if (e._window_size) |size| return size;
+            return (e._surface orelse return error.NoWindow).size();
         }
         pub fn readClipboard(e: *const @This(), allocator: @import("std").mem.Allocator) ![]u8 {
             const s = e._surface orelse return error.NoWindow;

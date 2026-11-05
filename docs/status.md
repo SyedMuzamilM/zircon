@@ -19,20 +19,25 @@ The first four milestones have working foundations. Editor capabilities are part
 
 ## Editor work
 
-The accepted [editor design](design/editor.md) separates document storage/history, workspace persistence, editor commands/canvas and application chrome. Implementation is underway. Native framework tests do not establish a completed editor or Zed feature parity. LSP, Git, terminal emulation, debugging, extensions and collaboration require their own real implementations and tests.
+The accepted [editor design](design/editor.md) separates document storage/history, workspace persistence, editor commands/canvas and application chrome. The editing core now runs as a native application. Separate text, workspace and editor packages provide persistent snapshots/history, safe file saves, multi-cursor editing, lexical syntax, clipboard, find/replace and a custom canvas. The application composes tabs, split panes, project navigation, palette, path dialogs and dirty-close controls. A native journey verifies real editing, undo/redo, replacement, saves and close cancellation against disk bytes. These capabilities do not establish Zed feature parity. The [expanded screenshot requirements](specification/editor-experience.md) add integrated titlebars/settings, extension contributions, Git panels/history/blame, multi-buffer search, image/Markdown content and language servers. Their implementation is next. Terminal emulation, debugging and collaboration also require their own real integrations.
 
 ## Verified commands
 
 ```sh
 ./tools/zig build check
+./tools/zig build test-editor-native
 ./tools/zig build test-native
 ./tools/zig build build-native
 ./tools/zig build counter-native
 ./tools/zig build test-build -Dtarget=aarch64-linux-gnu
 ```
 
-Portable checks cover entity lifetimes, transaction rollback, layout, custom phases, routing, focus, keyed reconciliation, animations, observers/events, clipboard/editable controls, revisioned snapshots and worker cleanup. Native tests use real AppKit events, CoreText and Metal, decode GPU-produced PNG pixels, and verify click/resize/close and native range/composition selectors. The integrated checkpoint passes90 portable test-runner cases,20 native cases and three expected compiler-error contracts. Test-runner totals include import aggregation cases.
+Portable checks cover entity lifetimes, transaction rollback, layout, custom phases, routing, focus, keyed reconciliation, animations, observers/events, clipboard/editable controls, revisioned snapshots and worker cleanup. Native tests use real AppKit events, CoreText and Metal, decode GPU-produced PNG pixels, and verify click/resize/close and native range/composition selectors. The integrated checkpoint passes93 UI portable test-runner cases,20 framework native cases and three expected compiler-error contracts. Test-runner totals include import aggregation cases.
 
 Native selector tests are not a complete OS input-method journey. The point query resolves the published caret, not arbitrary document coordinates. Emoji glyph coverage is monochrome. Async GPU failure recovery and whole-process performance have not been established.
 
 The original specification, source research and design candidates remain for future reference. Rejected NanoUI/editor adapters and C/Objective-C bridge files remain removed. Active dependencies do not contain NanoUI or GPUI.
+
+## Verified review corrections
+
+Independent portable probes found and verified fixes for selection mutation on failed native replacement, tab-click focus loss, unchanged-composition cancellation undoing prior typing, and synthetic resize reporting old window dimensions. Their regressions now live in the package/application suites. Window/custom-element ownership transfers only on successful construction; allocation-failure tests cover cleanup. Saving breaks typing history groups so undo can return to saved content. Native suites are sequenced to avoid stealing each other's focus, and input checks wait for actual native focus rather than assuming activation is synchronous.

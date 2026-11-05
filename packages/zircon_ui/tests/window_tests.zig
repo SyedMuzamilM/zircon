@@ -324,3 +324,83 @@ test "a root handler can queue close without reborrowing its mutable state" {
     _ = try app.step(1);
     try t.expectError(error.WindowNotFound, app.window(h));
 }
+
+const Clocked = struct {
+    pub const LayoutState = void;
+    pub const PrepaintState = void;
+    pub fn requestLayout(_: *@This(), _: *ui.LayoutCx) !ui.LayoutResult(void) {
+        return .{ .size = .{ .width = 100, .height = 100 }, .state = {} };
+    }
+    pub fn prepaint(_: *@This(), cx: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {
+        if (cx.focused) try cx.requestFrameAfter(0.5);
+    }
+    pub fn paint(_: *@This(), _: *ui.PaintCx, _: ui.Rect, _: *void, _: *void) !void {}
+};
+const ClockView = struct {
+    pub fn render(_: *const ClockView, b: *ui.Ui) !ui.Element {
+        return b.listen(try b.custom(Clocked, .{}, .{}), .{ .focusable = true });
+    }
+};
+test "custom deadlines coalesce and stop when the native window loses focus" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(ClockView, .{ .visible = false }, .{});
+    try t.expectEqual(@as(usize, 1), try app.step(0));
+    try t.expectEqual(@as(usize, 0), try app.step(0.25));
+    try t.expectEqual(@as(usize, 1), try app.step(0.5));
+    try t.expectEqual(@as(f64, 1), (try app.window(h)).deadline.?);
+    try app.dispatch(h, .{ .focus = false });
+    _ = try app.step(0.75);
+    try t.expect((try app.window(h)).deadline == null);
+    try t.expectEqual(@as(usize, 0), try app.step(100));
+}
+
+const DimensionsView = struct {
+    width: f32 = 0,
+    pub fn render(_: *const @This(), b: *ui.Ui) !ui.Element {
+        return b.listen(try b.div(.{}, &.{}), .{ .on_input = b.onInput(input) });
+    }
+    fn input(self: *@This(), e: *ui.Event(ui.Input), _: *ui.Context(@This())) !void {
+        self.width = (try e.windowSize()).width;
+    }
+    fn read(self: *const @This()) f32 {
+        return self.width;
+    }
+};
+test "event window geometry uses current logical runtime size after synthetic resize" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(DimensionsView, .{ .visible = false, .width = 200, .height = 100 }, .{});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .resize = .{ .width = 500, .height = 300 } });
+    _ = try app.step(1);
+    try app.dispatch(h, .{ .text = "x" });
+    const owner = try app.windowEntity(DimensionsView, h);
+    try t.expectEqual(@as(f32, 500), try app.read(owner, DimensionsView.read, .{}));
+}
+const OwnedWindow = struct {
+    releases: *usize,
+    pub fn render(_: *const @This(), b: *ui.Ui) !ui.Element {
+        return b.text("owned");
+    }
+    pub fn deinit(self: *@This(), _: std.mem.Allocator) void {
+        self.releases.* += 1;
+    }
+};
+test "opening a window transfers entity ownership only on success" {
+    try t.checkAllAllocationFailures(t.allocator, ownedWindowCase, .{});
+}
+fn ownedWindowCase(a: std.mem.Allocator) !void {
+    var app = try ui.App.init(.{ .allocator = a });
+    defer app.deinit();
+    var releases: usize = 0;
+    var state: OwnedWindow = .{ .releases = &releases };
+    const h = app.openWindow(OwnedWindow, .{ .visible = false }, state) catch |err| {
+        state.deinit(a);
+        try t.expectEqual(@as(usize, 1), releases);
+        return err;
+    };
+    try app.closeWindow(h);
+    _ = try app.step(0);
+    try t.expectEqual(@as(usize, 1), releases);
+}

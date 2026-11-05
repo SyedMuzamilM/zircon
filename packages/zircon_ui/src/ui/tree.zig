@@ -14,6 +14,7 @@ pub const Node = struct {
     on_capture: ?@import("adapter.zig").InputHandler = null,
     focusable: bool = false,
     autofocus: bool = false,
+    focus_request: u64 = 0,
     modal: bool = false,
     kind: union(enum) { container, custom: @import("custom.zig").Custom, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
 };
@@ -32,6 +33,7 @@ pub const Frame = struct {
     scene: @import("../graphics/scene.zig").Frame = .{ .items = &.{}, .background = .black },
     timeline: ?*@import("../animation/timeline.zig").Timeline = null,
     time: f64 = 0,
+    next_deadline: ?f64 = null,
     viewport: @import("../layout/geometry.zig").Size = .{ .width = 0, .height = 0 },
     text_input: ?@import("../platform/interface.zig").TextSnapshot = null,
     focused_node: ?u32 = null,
@@ -60,6 +62,7 @@ pub const Frame = struct {
         frame.time = 0;
         frame.text_input = null;
         frame.focused_node = null;
+        frame.next_deadline = null;
     }
     pub fn discard(frame: *Frame) void {
         frame.retire();
@@ -76,6 +79,7 @@ pub const Frame = struct {
         frame.time = 0;
         frame.text_input = null;
         frame.focused_node = null;
+        frame.next_deadline = null;
     }
     fn retire(frame: *Frame) void {
         frame.retiring = true;

@@ -9,7 +9,14 @@ pub const LayoutCx = struct { allocator: std.mem.Allocator, available: g.Size, m
 pub const PrepaintCx = struct {
     allocator: std.mem.Allocator,
     focused: bool = false,
+    time: f64 = 0,
+    next_deadline: ?*?f64 = null,
     text_input: ?*?platform.TextSnapshot = null,
+    /// Request one future frame, for example the next caret-blink edge.
+    pub fn requestFrameAfter(cx: *PrepaintCx, seconds: f64) !void {
+        if (!std.math.isFinite(seconds) or seconds <= 0 or !std.math.isFinite(cx.time + seconds)) return error.InvalidFrameDeadline;
+        if (cx.next_deadline) |target| target.* = @min(target.* orelse std.math.inf(f64), cx.time + seconds);
+    }
     pub fn setTextInput(cx: *PrepaintCx, snapshot: platform.TextSnapshot) !void {
         if (!cx.focused) return;
         const target = cx.text_input orelse return error.NoTextInputTarget;
@@ -20,7 +27,7 @@ pub const PrepaintCx = struct {
         target.* = owned;
     }
 };
-pub const PaintCx = struct { painter: *Painter, measurer: measure.Measurer, focused: bool = false, text_input: ?*?platform.TextSnapshot = null };
+pub const PaintCx = struct { painter: *Painter, measurer: measure.Measurer, focused: bool = false, text_input: ?*?platform.TextSnapshot = null, time: f64 = 0, next_deadline: ?*?f64 = null };
 pub fn LayoutResult(comptime State: type) type {
     return struct { size: g.Size, state: State };
 }
@@ -46,7 +53,7 @@ pub fn create(comptime T: type, a: std.mem.Allocator, value: T) !Custom {
         }
         fn paint(raw: *anyopaque, cx: *PaintCx, bounds: g.Rect) !void {
             const self: *@This() = @ptrCast(@alignCast(raw));
-            var before: PrepaintCx = .{ .allocator = cx.painter.allocator, .focused = cx.focused, .text_input = cx.text_input };
+            var before: PrepaintCx = .{ .allocator = cx.painter.allocator, .focused = cx.focused, .text_input = cx.text_input, .time = cx.time, .next_deadline = cx.next_deadline };
             self.prepaint = try self.value.prepaint(&before, bounds, &self.layout.?);
             try self.value.paint(cx, bounds, &self.layout.?, &self.prepaint.?);
         }

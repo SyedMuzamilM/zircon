@@ -57,11 +57,12 @@ pub const App = struct {
     }
     pub fn openWindow(app: *App, comptime T: type, options: windows.Options, value: T) !windows.Handle {
         try app.check();
-        const record = try windows.Window.create(app.*, app.state.allocator, T, options, value);
-        errdefer record.deinit();
         const slot = app.state.windows.items.len;
         if (slot >= std.math.maxInt(u32)) return error.WindowCapacityExceeded;
-        try app.state.windows.append(app.state.allocator, record);
+        try app.state.windows.ensureUnusedCapacity(app.state.allocator, 1);
+        const record = try windows.Window.create(app.*, app.state.allocator, T, options, value);
+        errdefer record.deinit();
+        app.state.windows.appendAssumeCapacity(record);
         return .{ .app_id = app.state.store.app_id, .slot = @intCast(slot) };
     }
     pub fn window(app: *App, handle: windows.Handle) !*windows.Window {
@@ -123,6 +124,9 @@ pub const App = struct {
             }
             w.time = time;
             if (w.animating) w.dirty = true;
+            if (w.deadline) |deadline| if (time >= deadline) {
+                w.dirty = true;
+            };
             if (try w.draw()) count += 1;
         };
         return count;
@@ -135,15 +139,19 @@ pub const App = struct {
             _ = try app.step(windows.now());
             var open = false;
             var animated = false;
+            var deadline: ?f64 = null;
             for (app.state.windows.items) |entry| if (entry) |w| {
                 if (!w.closed) {
                     open = true;
                     animated = animated or w.animating;
+                    if (w.deadline) |time| deadline = @min(deadline orelse std.math.inf(f64), time);
                 }
             };
             if (!open) return;
             if (app.state.dirty) continue;
-            try windows.pump(if (animated or app.state.jobs.queue.pending()) 1.0 / 120.0 else -1);
+            const next = if (deadline) |time| @max(0, time - windows.now()) else std.math.inf(f64);
+            const interval = if (animated or app.state.jobs.queue.pending()) @min(next, 1.0 / 120.0) else next;
+            try windows.pump(if (std.math.isFinite(interval)) interval else -1);
         }
     }
     pub fn createEntity(app: *App, comptime T: type, value: T) !identities.Entity(T) {

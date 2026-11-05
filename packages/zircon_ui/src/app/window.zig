@@ -36,6 +36,7 @@ pub const Window = struct {
     animations: @import("../animation/timeline.zig").Timeline,
     time: f64 = 0,
     animating: bool = false,
+    deadline: ?f64 = null,
     pub fn create(app: runtime.App, a: std.mem.Allocator, comptime T: type, options: Options, value: T) !*Window {
         comptime adapter.requireView(T);
         if (!std.math.isFinite(options.width) or !std.math.isFinite(options.height) or options.width <= 0 or options.height <= 0 or options.width > 32768 or options.height > 32768) return error.InvalidWindowSize;
@@ -43,7 +44,6 @@ pub const Window = struct {
         var owner = app;
         const scope = try owner.createScope();
         errdefer owner.destroyScope(scope) catch {};
-        const root = try owner.createInScope(scope, T, value);
         const Render = struct {
             fn call(target: *runtime.App, token: entity.Token, frame: *tree.Frame) !@import("../ui/element.zig").Element {
                 return builder.render(target, entity.typed(T, token), frame);
@@ -51,9 +51,13 @@ pub const Window = struct {
         };
         const window = try a.create(Window);
         errdefer a.destroy(window);
-        window.* = .{ .app = app, .allocator = a, .scope = scope, .root = root.token(), .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a) };
+        window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a) };
         errdefer window.frames.deinit();
         window.surface = try backend.open(a, options, .{ .context = window, .event = receive });
+        errdefer window.surface.?.deinit();
+        // Ownership of value transfers only here, after native allocation. No
+        // further fallible work may follow a successfully created root entity.
+        window.root = (try owner.createInScope(scope, T, value)).token();
         return window;
     }
     pub fn deinit(w: *Window) void {
@@ -90,9 +94,11 @@ pub const Window = struct {
             if (!descendant(staging, focused, modal)) next_focus = nextFocus(staging, null, false);
         };
         for (staging.nodes.items, 0..) |value, i| {
-            if (!value.autofocus or !value.focusable) continue;
+            if ((!value.autofocus and value.focus_request == 0) or !value.focusable) continue;
             if (modalRoot(staging)) |modal| if (!descendant(staging, @intCast(i), modal)) continue;
-            if (reconcile(staging, &w.frames.committed, @intCast(i)) == null) next_focus = @intCast(i);
+            if (reconcile(staging, &w.frames.committed, @intCast(i))) |old| {
+                if (value.focus_request != 0 and value.focus_request != w.frames.committed.nodes.items[old].focus_request) next_focus = @intCast(i);
+            } else next_focus = @intCast(i);
         }
         staging.focused_node = if (w.active) next_focus else null;
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
@@ -116,6 +122,7 @@ pub const Window = struct {
         surface.setTextInput(w.frames.committed.text_input);
         w.animations.commitFrame();
         w.animating = w.animations.active(w.time);
+        w.deadline = w.frames.committed.next_deadline;
         w.dirty = false;
         w.frame_count += 1;
         return true;
@@ -189,7 +196,7 @@ pub const Window = struct {
             path[count] = i;
             count += 1;
         }
-        var event: events.Event(events.Input) = .{ .data = input, ._surface = w.surface };
+        var event: events.Event(events.Input) = .{ .data = input, ._surface = w.surface, ._window_size = w.dimensions };
         var cursor = count;
         while (cursor > 0) {
             cursor -= 1;
@@ -248,7 +255,7 @@ pub const Window = struct {
     fn click(w: *Window, index: u32, point: g.Point) !void {
         const node = w.frames.committed.nodes.items[index];
         if (node.kind == .button) if (node.kind.button.on_click) |handler| {
-            var e: events.Event(events.Click) = .{ .data = .{ .position = point }, .bounds = w.frames.committed.bounds[index], ._surface = w.surface };
+            var e: events.Event(events.Click) = .{ .data = .{ .position = point }, .bounds = w.frames.committed.bounds[index], ._surface = w.surface, ._window_size = w.dimensions };
             try handler.dispatch(&w.app, &e);
         };
     }

@@ -169,7 +169,10 @@ const Field = struct {
     }
     pub fn prepaint(self: *Field, cx: *custom.PrepaintCx, bounds: g.Rect, metrics: *LayoutState) !g.Rect {
         const caret: g.Rect = .{ .x = bounds.x + 10 + metrics.caret(self.text, .{}, self.cursor), .y = bounds.y + 10, .width = 1.5, .height = 18 };
-        if (cx.focused) try cx.setTextInput(.{ .text = self.text, .revision = self.revision, .selection = self.selection, .marked = self.marked, .caret = caret });
+        if (cx.focused) {
+            try cx.setTextInput(.{ .text = self.text, .revision = self.revision, .selection = self.selection, .marked = self.marked, .caret = caret });
+            try cx.requestFrameAfter(0.5 - @mod(cx.time, 0.5));
+        }
         return caret;
     }
     pub fn paint(self: *Field, cx: *custom.PaintCx, bounds: g.Rect, metrics: *LayoutState, caret: *g.Rect) !void {
@@ -183,7 +186,7 @@ const Field = struct {
             try cx.painter.fillRect(.{ .bounds = .{ .x = content.x + left, .y = content.y, .width = right - left, .height = 18 }, .color = g.Color.rgb(0x365a91) });
         }
         try cx.painter.drawText(.{ .bounds = content, .text = if (self.text.len == 0) self.placeholder else self.text, .style = .{ .color = g.Color.rgb(if (self.text.len == 0) @as(u24, 0x7c879b) else 0xe0e6f0) } });
-        if (cx.focused) try cx.painter.fillRect(.{ .bounds = caret.*, .color = g.Color.rgb(0x8abaff) });
+        if (cx.focused and @mod(cx.time, 1.0) < 0.5) try cx.painter.fillRect(.{ .bounds = caret.*, .color = g.Color.rgb(0x8abaff) });
     }
 };
 fn validLine(bytes: []const u8) bool {

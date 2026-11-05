@@ -1,0 +1,311 @@
+//! Persistent editor presentation state. The document is supplied for each
+//! operation, so split views share bytes/history while keeping selections/scroll.
+const std = @import("std");
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const selection = @import("selections.zig");
+const commands = @import("commands.zig");
+const syntax = @import("syntax.zig");
+pub const Outcome = struct { handled: bool = false, change: ?text.Change = null, reset: bool = false };
+const SelectionHistory = struct { state: u64, items: []selection.Selection };
+var next_group = std.atomic.Value(u64).init(1);
+pub const Editor = struct {
+    allocator: std.mem.Allocator,
+    selections: selection.Set,
+    scroll: ui.controls.Scroll = .{},
+    horizontal: f32 = 0,
+    preferred_x: ?f32 = null,
+    font_size: f32 = 14,
+    line_height: f32 = 22,
+    tab_width: usize = 4,
+    language: syntax.Language = .plain,
+    syntax_cache: syntax.Cache,
+    history: std.ArrayList(SelectionHistory) = .empty,
+    typing_group: u64 = 0,
+    composition_group: u64 = 0,
+    composition_changed: bool = false,
+    marked: ?text.Range = null,
+    dragging: bool = false,
+    last_viewport: ui.Size = .{ .width = 800, .height = 500 },
+    search_query: []u8 = &.{},
+    search_case_sensitive: bool = true,
+    pub fn init(a: std.mem.Allocator) !Editor {
+        return .{ .allocator = a, .selections = try selection.Set.init(a), .syntax_cache = .init(a) };
+    }
+    pub fn deinit(self: *Editor) void {
+        self.selections.deinit(self.allocator);
+        self.syntax_cache.deinit();
+        for (self.history.items) |entry| self.allocator.free(entry.items);
+        self.history.deinit(self.allocator);
+        self.allocator.free(self.search_query);
+        self.* = undefined;
+    }
+    pub fn render(self: *const Editor, document: *const text.Document, builder: *ui.Ui) !ui.Element {
+        try self.validate();
+        return @import("canvas.zig").render(self, document, builder);
+    }
+    pub fn validate(self: *const Editor) !void {
+        if (!std.math.isFinite(self.font_size) or self.font_size <= 0 or self.font_size > 128 or !std.math.isFinite(self.line_height) or self.line_height < self.font_size or !std.math.isFinite(self.scroll.offset) or self.scroll.offset < 0 or !std.math.isFinite(self.horizontal) or self.horizontal < 0 or self.tab_width == 0 or self.tab_width > 32) return error.InvalidEditorOptions;
+    }
+    pub fn synchronize(self: *Editor, snapshot: text.Snapshot) void {
+        self.selections.synchronize(snapshot);
+        if (self.language == .plain) self.syntax_cache.clear() else if (self.syntax_cache.revision != snapshot.revision() or self.syntax_cache.language != self.language) {
+            self.syntax_cache.clear();
+            self.syntax_cache.refresh(snapshot, self.language, 0) catch self.syntax_cache.clear();
+        }
+        if (self.marked) |range| if (range.end > snapshot.byteLen()) {
+            self.marked = null;
+            self.composition_group = 0;
+        };
+    }
+    pub fn mapChange(self: *Editor, change: *const text.Change) void {
+        for (self.selections.items.items) |*item| {
+            item.anchor = change.map(item.anchor, .after);
+            item.head = change.map(item.head, .after);
+        }
+        self.selections.normalize();
+        self.marked = null;
+        self.typing_group = 0;
+    }
+    pub fn primary(self: *const Editor) selection.Selection {
+        return self.selections.primary();
+    }
+    pub fn setSelection(self: *Editor, snapshot: text.Snapshot, range: text.Range) !void {
+        try snapshot.validateRange(range);
+        self.selections.single(.{ .anchor = range.start, .head = range.end });
+        self.typing_group = 0;
+    }
+    pub fn freshGroup() !u64 {
+        const id = next_group.fetchAdd(1, .monotonic);
+        if (id == 0 or id == std.math.maxInt(u64)) return error.HistoryGroupExhausted;
+        return id;
+    }
+    fn remember(self: *Editor, state: u64, items: []const selection.Selection) !void {
+        for (self.history.items) |entry| if (entry.state == state) return;
+        const copy = try self.allocator.dupe(selection.Selection, items);
+        errdefer self.allocator.free(copy);
+        try self.history.append(self.allocator, .{ .state = state, .items = copy });
+        if (self.history.items.len > 1024) {
+            const old = self.history.orderedRemove(0);
+            self.allocator.free(old.items);
+        }
+    }
+    fn restoreSelections(self: *Editor, snapshot: text.Snapshot) !void {
+        for (self.history.items) |entry| if (entry.state == snapshot.stateId()) {
+            try self.selections.items.ensureTotalCapacity(self.allocator, entry.items.len);
+            self.selections.items.clearRetainingCapacity();
+            self.selections.items.appendSliceAssumeCapacity(entry.items);
+            self.selections.synchronize(snapshot);
+            return;
+        };
+        self.selections.synchronize(snapshot);
+    }
+    pub fn applyEdits(self: *Editor, document: *text.Document, edits: []const text.Edit, group: u64) !Outcome {
+        if (edits.len == 0) return .{ .handled = true };
+        var before = document.snapshot();
+        defer before.deinit();
+        try self.remember(before.stateId(), self.selections.items.items);
+        // Reserve selection history and its payload before document mutation.
+        try self.history.ensureUnusedCapacity(self.allocator, 1);
+        const after_selections = try self.allocator.alloc(selection.Selection, edits.len);
+        errdefer self.allocator.free(after_selections);
+        try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
+        var change = try document.apply(document.revision(), edits, group);
+        for (edits, 0..) |edit, i| {
+            const end = change.map(edit.range.end, .after);
+            after_selections[i] = .{ .anchor = end, .head = end };
+        }
+        self.selections.items.clearRetainingCapacity();
+        self.selections.items.appendSliceAssumeCapacity(after_selections);
+        if (self.selections.items.items.len == 0) self.selections.items.appendAssumeCapacity(.{ .anchor = 0, .head = 0 });
+        self.selections.normalize();
+        self.history.appendAssumeCapacity(.{ .state = change.state, .items = after_selections });
+        if (self.history.items.len > 1024) {
+            const old = self.history.orderedRemove(0);
+            self.allocator.free(old.items);
+        }
+        var snapshot = document.snapshot();
+        defer snapshot.deinit();
+        const row = if (edits.len > 0) (before.pointAt(edits[0].range.start) catch unreachable).line else 0;
+        if (self.language == .plain) self.syntax_cache.clear() else {
+            if (self.syntax_cache.revision != before.revision() or edits.len > 1) self.syntax_cache.clear();
+            self.syntax_cache.refresh(snapshot, self.language, row) catch self.syntax_cache.clear();
+        }
+        self.reveal(snapshot);
+        return .{ .handled = true, .change = change };
+    }
+    pub fn insert(self: *Editor, document: *text.Document, bytes: []const u8) !Outcome {
+        self.preferred_x = null;
+        if (!std.unicode.utf8ValidateSlice(bytes)) return error.InvalidUtf8;
+        self.selections.normalize();
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
+        for (self.selections.items.items, 0..) |item, i| edits[i] = .{ .range = item.range(), .text = bytes };
+        if (self.typing_group == 0) self.typing_group = try freshGroup();
+        return self.applyEdits(document, edits, self.typing_group);
+    }
+    pub fn execute(self: *Editor, document: *text.Document, command: commands.Command) !Outcome {
+        try self.validate();
+        if (command != .move or (command.move.direction != .up and command.move.direction != .down and command.move.direction != .page_up and command.move.direction != .page_down)) self.preferred_x = null;
+        var snapshot = document.snapshot();
+        defer snapshot.deinit();
+        switch (command) {
+            .insert => |bytes| return self.insert(document, bytes),
+            .select_all => {
+                self.selections.single(.{ .anchor = 0, .head = snapshot.byteLen() });
+                self.typing_group = 0;
+            },
+            .move => |request| {
+                try @import("navigation.zig").move(self, snapshot, request);
+                self.typing_group = 0;
+            },
+            .delete_backward, .delete_forward => {
+                self.selections.normalize();
+                var arena = std.heap.ArenaAllocator.init(self.allocator);
+                defer arena.deinit();
+                const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
+                for (self.selections.items.items, 0..) |item, i| {
+                    var range = item.range();
+                    if (range.start == range.end) {
+                        if (command == .delete_backward) range.start = try snapshot.previousBoundary(range.start) else range.end = try snapshot.nextBoundary(range.end);
+                    }
+                    edits[i] = .{ .range = range, .text = "" };
+                }
+                self.typing_group = 0;
+                return self.applyEdits(document, edits, 0);
+            },
+            .undo, .redo => {
+                self.typing_group = 0;
+                self.marked = null;
+                self.composition_group = 0;
+                var capacity = self.selections.items.items.len;
+                for (self.history.items) |entry| capacity = @max(capacity, entry.items.len);
+                try self.selections.items.ensureTotalCapacity(self.allocator, capacity);
+                const changed = if (command == .undo) try document.undo() else try document.redo();
+                if (changed) {
+                    var current = document.snapshot();
+                    defer current.deinit();
+                    try self.restoreSelections(current);
+                    self.synchronize(current);
+                    self.reveal(current);
+                }
+                return .{ .handled = true, .reset = changed };
+            },
+            .indent, .outdent => return self.indent(document, snapshot, command == .outdent),
+            .newline => return self.newline(document, snapshot),
+            .duplicate_line => {
+                const row = (try snapshot.pointAt(self.primary().head)).line;
+                const range = try snapshot.lineRangeIncludingEnding(row);
+                const bytes = try snapshot.copy(self.allocator, range);
+                defer self.allocator.free(bytes);
+                var arena = std.heap.ArenaAllocator.init(self.allocator);
+                defer arena.deinit();
+                const insertion = if (row + 1 < snapshot.lineCount()) bytes else try std.mem.concat(arena.allocator(), u8, &.{ "\n", bytes });
+                return self.applyEdits(document, &.{.{ .range = .{ .start = range.end, .end = range.end }, .text = insertion }}, 0);
+            },
+        }
+        self.reveal(snapshot);
+        return .{ .handled = true };
+    }
+    fn indent(self: *Editor, document: *text.Document, snapshot: text.Snapshot, remove: bool) !Outcome {
+        if (!remove and self.selections.items.items.len == 1 and self.primary().empty()) return self.insert(document, "    ");
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        var edits: std.ArrayList(text.Edit) = .empty;
+        var last_row: ?usize = null;
+        self.selections.normalize();
+        for (self.selections.items.items) |item| {
+            const first = (try snapshot.pointAt(item.range().start)).line;
+            var end = (try snapshot.pointAt(item.range().end)).line;
+            if (item.range().end > item.range().start and item.range().end == try snapshot.lineStart(end)) end -|= 1;
+            var row = first;
+            while (row <= end) : (row += 1) {
+                if (last_row != null and row <= last_row.?) continue;
+                last_row = row;
+                const start = try snapshot.lineStart(row);
+                var n: usize = 0;
+                if (remove) while (n < self.tab_width and start + n < snapshot.byteLen()) {
+                    const ch = try snapshot.byteAt(start + n);
+                    if (ch == '\t' and n == 0) {
+                        n = 1;
+                        break;
+                    }
+                    if (ch != ' ') break;
+                    n += 1;
+                };
+                try edits.append(arena.allocator(), .{ .range = .{ .start = start, .end = start + n }, .text = if (remove) "" else "    " });
+            }
+        }
+        self.typing_group = 0;
+        return self.applyEdits(document, edits.items, 0);
+    }
+    fn newline(self: *Editor, document: *text.Document, snapshot: text.Snapshot) !Outcome {
+        self.selections.normalize();
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
+        const ending = if (snapshot.lineCount() > 1 and (try snapshot.lineRangeIncludingEnding(0)).end - (try snapshot.lineRange(0)).end == 2) "\r\n" else "\n";
+        for (self.selections.items.items, 0..) |item, i| {
+            const range = try snapshot.lineRange((try snapshot.pointAt(item.head)).line);
+            var end = range.start;
+            while (end < @min(range.end, item.head)) : (end += 1) {
+                const ch = try snapshot.byteAt(end);
+                if (ch != ' ' and ch != '\t') break;
+            }
+            const prefix = try snapshot.copy(arena.allocator(), .{ .start = range.start, .end = end });
+            const extra = if (item.head > range.start and (try snapshot.byteAt(item.head - 1)) == '{') "    " else "";
+            edits[i] = .{ .range = item.range(), .text = try std.mem.concat(arena.allocator(), u8, &.{ ending, prefix, extra }) };
+        }
+        self.typing_group = 0;
+        return self.applyEdits(document, edits, 0);
+    }
+    pub fn reveal(self: *Editor, snapshot: text.Snapshot) void {
+        const row = (snapshot.pointAt(self.primary().head) catch return).line;
+        const start = @as(f32, @floatFromInt(row)) * self.line_height;
+        self.scroll.reveal(start, start + self.line_height, @as(f32, @floatFromInt(snapshot.lineCount())) * self.line_height, self.last_viewport.height);
+    }
+    pub fn findNext(self: *Editor, document: *const text.Document, query: []const u8, backward: bool) !bool {
+        if (query.len == 0) return false;
+        const owned = try self.allocator.dupe(u8, query);
+        errdefer self.allocator.free(owned);
+        var snapshot = document.snapshot();
+        defer snapshot.deinit();
+        const start = if (backward) self.primary().range().start else self.primary().range().end;
+        const direction: text.Direction = if (backward) .backward else .forward;
+        const found = (try snapshot.find(query, start, direction, self.search_case_sensitive)) orelse (try snapshot.find(query, if (backward) snapshot.byteLen() else 0, direction, self.search_case_sensitive));
+        self.allocator.free(self.search_query);
+        self.search_query = owned;
+        if (found) |range| {
+            self.selections.single(.{ .anchor = range.start, .head = range.end });
+            self.typing_group = 0;
+            self.reveal(snapshot);
+            return true;
+        }
+        return false;
+    }
+    pub fn replaceAll(self: *Editor, document: *text.Document, query: []const u8, replacement: []const u8) !Outcome {
+        if (query.len == 0) return .{ .handled = true };
+        if (!std.unicode.utf8ValidateSlice(replacement)) return error.InvalidUtf8;
+        var snapshot = document.snapshot();
+        defer snapshot.deinit();
+        var edits: std.ArrayList(text.Edit) = .empty;
+        defer edits.deinit(self.allocator);
+        var at: usize = 0;
+        while (try snapshot.find(query, at, .forward, self.search_case_sensitive)) |range| {
+            try edits.append(self.allocator, .{ .range = range, .text = replacement });
+            at = range.end;
+        }
+        self.typing_group = 0;
+        return self.applyEdits(document, edits.items, 0);
+    }
+    pub fn handle(self: *Editor, document: *text.Document, event: *ui.Event(ui.Input)) !Outcome {
+        const result = try @import("input.zig").handle(self, document, event);
+        if (result.handled and event._surface != null and (event.data == .text or event.data == .edit or event.data == .key_down)) {
+            var snapshot = document.snapshot();
+            defer snapshot.deinit();
+            @import("navigation.zig").revealHorizontal(self, snapshot, event) catch {};
+        }
+        return result;
+    }
+};

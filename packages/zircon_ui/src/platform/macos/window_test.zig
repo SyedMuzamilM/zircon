@@ -40,6 +40,11 @@ test "native window presents and routes queued pointer, text, resize and close e
     const list = objc.send(objc.Id, app, "windows", .{});
     const native_window = objc.send(objc.Id, list, "objectAtIndex:", .{@as(usize, 0)});
     const view = objc.send(objc.Id, native_window, "contentView", .{});
+    objc.send(void, native_window, "makeKeyWindow", .{});
+    _ = objc.send(bool, native_window, "makeFirstResponder:", .{view});
+    const focus_deadline = window.now() + 1;
+    while (!objc.send(bool, native_window, "isKeyWindow", .{}) and window.now() < focus_deadline) try window.pump(0.01);
+    try std.testing.expect(objc.send(bool, native_window, "isKeyWindow", .{}));
     const number = objc.send(isize, native_window, "windowNumber", .{});
     const point = objc.send(objc.CGPoint, view, "convertPoint:toView:", .{ objc.CGPoint{ .x = 32, .y = 40 }, @as(objc.Id, null) });
     for ([_]usize{ 1, 2 }) |kind| {
@@ -48,9 +53,10 @@ test "native window presents and routes queued pointer, text, resize and close e
     }
     const e = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, @as(usize, 0), window.now(), number, @as(objc.Id, null), objc.string("x"), objc.string("x"), false, @as(u16, 7) });
     objc.send(void, app, "postEvent:atStart:", .{ e, false });
-    for (0..256) |_| {
+    const input_deadline = window.now() + 1;
+    while (window.now() < input_deadline) {
         if (log.down == 1 and log.up == 1 and log.text == 1) break;
-        try window.pump(0);
+        try window.pump(0.01);
     }
     if (log.down != 1 or log.up != 1 or log.position.x != 32 or log.position.y != 40) return error.PointerDispatchFailed;
     if (log.keys != 1 or log.text != 1) return error.TextDispatchFailed;

@@ -62,6 +62,13 @@ pub const Ui = struct {
         ui.frame.nodes.items[element.index].autofocus = true;
         return element;
     }
+    /// Changing this generation requests focus after a successful frame. It is
+    /// useful when a command activates an already existing logical control.
+    pub fn requestFocus(ui: *Ui, element: elements.Element, generation: u64) !elements.Element {
+        _ = try ui.frame.get(element);
+        ui.frame.nodes.items[element.index].focus_request = generation;
+        return element;
+    }
     /// Restricts keyboard traversal and pointer routing to this subtree.
     pub fn modal(ui: *Ui, element: elements.Element) !elements.Element {
         _ = try ui.frame.get(element);

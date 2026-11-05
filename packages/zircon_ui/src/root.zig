@@ -28,6 +28,11 @@ pub const Entity = @import("entity/entity.zig").Entity;
 pub const Scope = @import("entity/scope.zig").Scope;
 pub const testing = struct {
     pub const Harness = @import("testing/headless.zig").Harness;
+    pub const native = if (@import("zircon_options").native) struct {
+        pub const objc = @import("platform/macos/objc.zig");
+        pub const pump = @import("platform/macos/window.zig").pump;
+        pub const now = @import("platform/macos/window.zig").now;
+    } else void;
 };
 pub const Ui = @import("ui/ui.zig").Ui;
 pub const Element = @import("ui/element.zig").Element;
