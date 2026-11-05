@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "org.zircon.oxide",
+  "name": "Oxide contributions",
+  "version": "1.0.0",
+  "description": "A local theme, symbol icon theme, Python lexical profile and ZLS configuration.",
+  "contributes": {
+    "themes": [{
+      "id": "oxide-night", "name": "Oxide night",
+      "colors": { "document": "#242b33", "chrome": "#303944", "sidebar": "#29323c", "panel": "#35414f", "accent": "#e6b77d", "selected": "#51463b", "primary": "#70583f" },
+      "syntax": { "keyword": "#e4a184", "string": "#a9c995", "number": "#dfc681", "comment": "#8d9caa" }
+    }],
+    "icon_themes": [{
+      "id": "oxide-symbols", "name": "Oxide symbols",
+      "extensions": [{ "key": "zig", "icon": { "symbol": "Z" } }, { "key": "py", "icon": { "symbol": "Py" } }, { "key": "md", "icon": { "symbol": "M" } }],
+      "files": [{ "key": "README.md", "icon": { "symbol": "▤" } }],
+      "folders": [{ "key": "src", "icon": { "symbol": "◇" } }],
+      "default_file": { "symbol": "·" }, "default_folder": { "symbol": "▸" }
+    }],
+    "languages": [{
+      "id": "python", "name": "Python", "extensions": ["py", "pyi"], "filenames": [],
+      "keywords": ["def", "class", "return", "import", "from", "if", "else", "for", "while", "in", "True", "False", "None"],
+      "line_comment": "#", "string_delimiters": "\"'"
+    }],
+    "language_servers": [{ "id": "zls", "languages": ["zig"], "command": "zls", "args": [] }]
+  }
+}

@@ -1,0 +1,1 @@
+.{ .name = .zircon_search, .version = "0.1.0", .fingerprint = 0x30ae415e7271dbb6, .minimum_zig_version = "0.17.1", .dependencies = .{ .zircon_text = .{ .path = "../zircon_text" } }, .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "README.md" } }
