@@ -1,58 +1,38 @@
-# Framework implementation status
+# Implementation status
 
-Status audited on 2026-11-05 against the [supplied specification](specification/framework-api-v0.1.md) and the current source and tests.
+Audited on 2026-11-05 against the unchanged [supplied specification](specification/framework-api-v0.1.md), current source and executable checks.
 
-The entity runtime and frame-tree foundations work. Layout, CoreText shaping, and offscreen Metal rendering work as separate subsystems. The framework cannot yet run a desktop application through its public API: `App.openWindow`, `App.run`, the native window loop, and the integrated render/input pipeline do not exist.
+Zircon UI now runs a real native macOS application through `App.openWindow` and `App.run`. The native counter uses the same entity, tree, layout, paint, input and animation path exercised by portable tests. The framework is usable for the editor implementation; it is not the full specification or a production equivalent of GPUI yet.
 
-## Milestone coverage
+## Coverage by milestone
 
-| Specification milestone | Current state | What works | What remains |
-| --- | --- | --- | --- |
-| 1. Entity runtime and headless harness | Foundation implemented | Typed generational handles, stable state allocations, application/entity/explicit-scope ownership, read/update borrows, destruction, notifications, lifecycle tests | Automatic window-scope integration comes with windows; observations/subscriptions are not implemented |
-| 2. Frame-local UI builder | Foundation implemented | Const render contracts, indexed element trees, copied strings/children, logical keys, typed click adapters, cleanup hooks, committed/staging storage | Custom elements and their layout/prepaint/paint adapters, `Ui.view`, and `Ui.watch` |
-| 3. Layout, rendering, native window | Partly implemented | Flex subset, injected measurements, CoreText shaping/caret metrics, glyph atlas, offscreen Metal quads/text, clipping, PNG snapshots, GPU buffer leases | Native windows/surfaces and high-level connection of trees, layout, text, paint, and presentation |
-| 4. Interactive application runtime | Not implemented | Direct invocation of a typed entity-handler adapter is tested; frame lifetime guards exist | Hit testing, capture/target/bubble dispatch, focus, keyboard/actions/menus, dependency tracking, event-loop scheduling, a native counter/settings app |
-| 5. Editor-grade capabilities | Not implemented | Text metrics and UTF-8/UTF-16 conversion are reusable foundations | Native text input/IME, editable controls, selections, undo, scrolling, virtualization, owned worker tasks, accessibility, editor |
-| 6. Optimization and other platforms | Not implemented | Cache limits, GPU timings and resource counters exist | Repeatable application benchmarks, startup/memory measurements, scene caching, Windows/Linux native adapters, measured Zed comparison |
+| Milestone | Implemented behavior | Remaining work |
+| --- | --- | --- |
+| Entity runtime | Generational typed handles, stable storage, ownership scopes including windows, scoped borrows, deferred destruction, observations, typed owned events, coalesced notifications | Broader adversarial/load validation |
+| UI construction | Const views, nested views/watched dependencies, indexed trees, keys, cleanup, three-phase custom elements, committed/staging generations | More stock controls and accessibility metadata |
+| Native layout/render | Flex subset/stacks, CoreText shaping and glyph caret geometry, direct Zig AppKit windows, Metal presentation, clipping, rounding, snapshots | Images/SVG/path effects/shadows, wrapping/grid/baseline, device recovery |
+| Interactive runtime | Hit testing, capture/target/bubble, focus and pointer capture, Tab/button defaults, typed shortcut maps, safe close prevention, idle scheduling | Modal focus trapping, native menus/dialogs, richer shortcut sequences |
+| Editor foundations | Editable single-line control, clipboard/selection, bounded revisioned native text input/composition, scrolling/virtual-row math, owned workers, tween/spring/color/geometry/presence motion | Full grapheme movement, OS IME acceptance journey, full-document input geometry, accessibility, stock virtual-list/menu widgets |
+| Optimization/platforms | Resource limits/counters and Linux portable cross-compilation | Application benchmarks, measured comparisons with Zed, scene caching, Windows/Linux native adapters |
 
-The first two milestone foundations are in place, and the third is partial. These milestones have different sizes; this count is not a percentage of the full implementation effort.
+The first four milestones have working foundations. Editor capabilities are partial. Milestones differ greatly in size, so a percentage would imply precision the project does not have. Exporting a type or compiling a target is not counted as complete behavior.
 
-## Available API and limits
+## Editor work
 
-`App` currently supports initialization/destruction, typed entity creation/read/update, explicit ownership scopes, destruction, versions, and coalesced invalidation requests. It does not open windows or run a native event loop. `Context(T)` supports notification, scoped access, child creation, and deferred destruction. Observer/event subscription and worker-task APIs are absent.
+The accepted [editor design](design/editor.md) separates document storage/history, workspace persistence, editor commands/canvas and application chrome. Implementation is underway. Native framework tests do not establish a completed editor or Zed feature parity. LSP, Git, terminal emulation, debugging, extensions and collaboration require their own real implementations and tests.
 
-`Ui` builds `div`, `row`, `column`, `text`, `textFmt`, and `button` nodes and assigns keys. `onClick` creates a typed adapter that resolves its owner entity when explicitly invoked. A button node is not yet an OS-interactive control. Typed event payloads do not provide propagation controls until an actual dispatcher exists.
-
-Tree construction uses committed/staging arenas. Failed staging tree construction preserves the committed tree. Layout calculation and GPU submission are still separate operations, so a complete window frame is not yet one integrated transaction.
-
-Layout supports rows/columns, padding, positive margins, gaps, grow/shrink with min/max limits, alignment, and typed dimensions. It does not implement wrapping, grid, or baseline alignment. Headless tests inject fixed metrics; the native CoreText measurer has not been connected to the high-level pipeline.
-
-Native text/graphics are currently reached through a private test module, separately from the portable package API. They use direct Zig system bindings and a Metal shader. There is no C/Objective-C implementation source or NanoUI/GPUI dependency. The shaping cache is bounded by estimated cost; that is not a process-memory cap. Color emoji render as monochrome coverage. Shaders compile at renderer creation, and recycling a busy GPU buffer can wait.
-
-## Verification
-
-Run from the repository root with Zig 0.17.1:
+## Verified commands
 
 ```sh
 ./tools/zig build check
 ./tools/zig build test-native
+./tools/zig build build-native
+./tools/zig build counter-native
 ./tools/zig build test-build -Dtarget=aarch64-linux-gnu
-./tools/zig build counter
 ```
 
-- Core: 36 test-runner cases plus three expected compiler-error contracts.
-- Native: 12 test-runner cases on macOS with Metal, including decoded PNG pixel checks and buffer reuse.
-- Linux: the headless tests compile for `aarch64-linux-gnu`; this is not a Linux native UI implementation or a Linux runtime test.
-- Counter: constructs and inspects a headless tree. It opens no window.
+Portable checks cover entity lifetimes, transaction rollback, layout, custom phases, routing, focus, keyed reconciliation, animations, observers/events, clipboard/editable controls, revisioned snapshots and worker cleanup. Native tests use real AppKit events, CoreText and Metal, decode GPU-produced PNG pixels, and verify click/resize/close and native range/composition selectors. The integrated checkpoint passes88 portable test-runner cases,20 native cases and three expected compiler-error contracts. Test-runner totals include import aggregation cases.
 
-Test-runner totals include each test suite's import aggregation case. The counts establish behavior coverage for the implemented pieces, not completion of the specification.
+Native selector tests are not a complete OS input-method journey. The point query resolves the published caret, not arbitrary document coordinates. Emoji glyph coverage is monochrome. Async GPU failure recovery and whole-process performance have not been established.
 
-## Cleanup in this revision
-
-Removed ignored `App.init` I/O/renderer options, event propagation controls without a dispatcher, unused scene text-input metadata, an unread entity change flag, unused native bindings/imports, and a geometry helper with no callers. Updated current call sites and docs. Kept functional public utilities and the native backend used by the rendering tests.
-
-Deleted the ignored rejected-editor/framework source archive, old dependency copy, stale output binaries, and the downloaded compiler archive. The installed Zig compiler, active build cache, original specification, research, and historical design notes remain.
-
-## Next deliverable
-
-A native window driven by the existing const-render entities and committed/staging trees, with measured text layout and Metal presentation. Event dispatch and focus follow through the committed tree. The editor starts after that framework path is verified.
+The original specification, source research and design candidates remain for future reference. Rejected NanoUI/editor adapters and C/Objective-C bridge files remain removed. Active dependencies do not contain NanoUI or GPUI.

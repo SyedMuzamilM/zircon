@@ -3,7 +3,7 @@ const std = @import("std");
 pub const Insets = @import("../layout/geometry.zig").Insets;
 pub const Color = @import("../layout/geometry.zig").Color;
 pub const Length = union(enum) { auto, px: f32, percent: f32, rem: f32, viewport_width: f32, viewport_height: f32 };
-pub const Direction = enum { row, column };
+pub const Direction = enum { row, column, stack };
 pub const Align = enum { start, center, end, stretch };
 pub const Justify = enum { start, center, end, space_between };
 pub const Style = struct {
@@ -24,7 +24,10 @@ pub const Style = struct {
     background: ?Color = null,
     radius: f32 = 0,
     opacity: f32 = 1,
+    overflow: enum { visible, hidden } = .visible,
+    text: @import("../text/style.zig").TextStyle = .{},
     pub fn validate(style: Style) !void {
+        try style.text.validate();
         inline for (.{ "width", "height", "min_width", "min_height", "max_width", "max_height" }) |field| switch (@field(style, field)) {
             .auto => {},
             inline else => |n| if (!std.math.isFinite(n) or n < 0) return error.InvalidStyle,

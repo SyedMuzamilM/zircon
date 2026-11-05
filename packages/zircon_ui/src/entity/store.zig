@@ -29,6 +29,7 @@ pub const Store = struct {
     scopes: std.ArrayList(ScopeSlot) = .empty,
     destroying: bool = false,
     next_lease: u64 = 1,
+    destruction_version: u64 = 0,
     pub fn init(a: Allocator, app_id: u32) Store {
         return .{ .allocator = a, .app_id = app_id };
     }
@@ -157,6 +158,17 @@ pub const Store = struct {
     pub fn version(s: *Store, handle: anytype) !u64 {
         return (try s.resolve(handle.token(), entity.typeTag(@TypeOf(handle).State))).version;
     }
+    /// Untyped identities are used only for lifecycle checks and dependency
+    /// versions. Access to entity storage still requires a typed handle.
+    pub fn rawVersion(s: *Store, token: entity.Token) !u64 {
+        const slot = try s.resolve(token, null);
+        if (slot.pending_destroy) return error.EntityNotFound;
+        return slot.version;
+    }
+    pub fn isAlive(s: *Store, token: entity.Token) bool {
+        _ = s.rawVersion(token) catch return false;
+        return true;
+    }
     pub fn requestDestroy(s: *Store, handle: anytype) !void {
         const slot = try s.resolve(handle.token(), entity.typeTag(@TypeOf(handle).State));
         slot.pending_destroy = true;
@@ -198,6 +210,7 @@ pub const Store = struct {
         slot.pointer = null;
         slot.pending_destroy = false;
         slot.pending_notify = false;
+        s.destruction_version +%= 1;
         retire(&slot.generation, &slot.retired);
         vtable.destroy(pointer, s.allocator);
     }

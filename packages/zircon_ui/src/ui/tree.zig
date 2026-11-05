@@ -10,16 +10,28 @@ pub const Node = struct {
     children: []const u32 = &.{},
     style: Style = .{},
     key: ?elements.Key = null,
-    kind: union(enum) { container, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
+    on_input: ?@import("adapter.zig").InputHandler = null,
+    on_capture: ?@import("adapter.zig").InputHandler = null,
+    focusable: bool = false,
+    kind: union(enum) { container, custom: @import("custom.zig").Custom, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
 };
 pub const Cleanup = struct { object: *anyopaque, destroy: *const fn (*anyopaque) void };
+pub const Dependency = struct { entity: @import("../entity/entity.zig").Token, version: u64 };
 pub const Frame = struct {
     arena: std.heap.ArenaAllocator,
     nodes: std.ArrayList(Node) = .empty,
     cleanups: std.ArrayList(Cleanup) = .empty,
+    dependencies: std.ArrayList(Dependency) = .empty,
+    app: ?*@import("../app/app.zig").App = null,
     epoch: u64,
     root: ?elements.Element = null,
     retiring: bool = false,
+    bounds: []const @import("../layout/geometry.zig").Rect = &.{},
+    scene: @import("../graphics/scene.zig").Frame = .{ .items = &.{}, .background = .black },
+    timeline: ?*@import("../animation/timeline.zig").Timeline = null,
+    time: f64 = 0,
+    text_input: ?@import("../platform/interface.zig").TextSnapshot = null,
+    focused_node: ?u32 = null,
     pub fn init(a: std.mem.Allocator) !Frame {
         return .{ .arena = .init(a), .epoch = try epoch() };
     }
@@ -34,17 +46,33 @@ pub const Frame = struct {
         _ = frame.arena.reset(.retain_capacity);
         frame.nodes = .empty;
         frame.cleanups = .empty;
+        frame.dependencies = .empty;
+        frame.app = null;
         frame.root = null;
         frame.epoch = next;
         frame.retiring = false;
+        frame.bounds = &.{};
+        frame.scene = .{ .items = &.{}, .background = .black };
+        frame.timeline = null;
+        frame.time = 0;
+        frame.text_input = null;
+        frame.focused_node = null;
     }
     pub fn discard(frame: *Frame) void {
         frame.retire();
         _ = frame.arena.reset(.retain_capacity);
         frame.nodes = .empty;
         frame.cleanups = .empty;
+        frame.dependencies = .empty;
+        frame.app = null;
         frame.root = null;
         frame.retiring = false;
+        frame.bounds = &.{};
+        frame.scene = .{ .items = &.{}, .background = .black };
+        frame.timeline = null;
+        frame.time = 0;
+        frame.text_input = null;
+        frame.focused_node = null;
     }
     fn retire(frame: *Frame) void {
         frame.retiring = true;
@@ -62,6 +90,13 @@ pub const Frame = struct {
     pub fn cleanup(frame: *Frame, entry: Cleanup) !void {
         if (frame.retiring) return error.InvalidFrame;
         try frame.cleanups.append(frame.allocator(), entry);
+    }
+    pub fn watch(frame: *Frame, token: @import("../entity/entity.zig").Token, version: u64) !void {
+        for (frame.dependencies.items) |*dependency| if (std.meta.eql(dependency.entity, token)) {
+            dependency.version = version;
+            return;
+        };
+        try frame.dependencies.append(frame.allocator(), .{ .entity = token, .version = version });
     }
     pub fn get(frame: *const Frame, handle: elements.Element) !*const Node {
         if (frame.retiring or handle.frame_epoch != frame.epoch) return error.InvalidFrame;
@@ -115,6 +150,11 @@ pub const Frames = struct {
     pub fn commit(frames: *Frames, root: elements.Element) !void {
         if (frames.dispatch_depth != 0) return error.DispatchActive;
         try frames.staging.setRoot(root);
+        frames.commitPrepared();
+    }
+    /// Validation and all fallible preparation must precede native submission.
+    pub fn commitPrepared(frames: *Frames) void {
+        std.debug.assert(frames.dispatch_depth == 0 and frames.staging.root != null);
         std.mem.swap(Frame, &frames.committed, &frames.staging);
     }
     pub fn beginDispatch(frames: *Frames) !void {

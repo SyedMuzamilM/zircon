@@ -25,6 +25,6 @@ pub fn main(init: std.process.Init) !void {
     for (frame.nodes.items) |node| switch (node.kind) {
         .text => |text| std.debug.print("text: {s}\n", .{text}),
         .button => |button| std.debug.print("button: {s}\n", .{button.label}),
-        .container => {},
+        .container, .custom => {},
     };
 }

@@ -1,5 +1,28 @@
 //! Verified framework foundations. This module has no native or GPU imports.
+pub const Subscription = @import("app/app.zig").Subscription;
 pub const App = @import("app/app.zig").App;
+pub const WindowHandle = @import("app/window.zig").Handle;
+pub const WindowOptions = @import("app/window.zig").Options;
+pub const Input = @import("event/event.zig").Input;
+pub const Point = @import("layout/geometry.zig").Point;
+pub const Key = @import("platform/interface.zig").Key;
+pub const Modifiers = @import("platform/interface.zig").Modifiers;
+pub const LayoutCx = @import("ui/custom.zig").LayoutCx;
+pub const LayoutResult = @import("ui/custom.zig").LayoutResult;
+pub const PrepaintCx = @import("ui/custom.zig").PrepaintCx;
+pub const PaintCx = @import("ui/custom.zig").PaintCx;
+pub const animation = @import("animation/timeline.zig");
+pub const tasks = @import("app/tasks.zig");
+pub const TextRange = @import("platform/interface.zig").TextRange;
+pub const TextSnapshot = @import("platform/interface.zig").TextSnapshot;
+pub const TextEdit = @import("platform/interface.zig").TextEdit;
+pub const Keymap = @import("event/actions.zig").Keymap;
+pub const Chord = @import("event/actions.zig").Chord;
+pub const controls = struct {
+    pub const TextInput = @import("controls/text_input.zig").TextInput;
+    pub const Scroll = @import("controls/scroll.zig").Scroll;
+    pub const visibleRows = @import("controls/scroll.zig").visibleRows;
+};
 pub const Context = @import("app/app.zig").Context;
 pub const Entity = @import("entity/entity.zig").Entity;
 pub const Scope = @import("entity/scope.zig").Scope;
@@ -27,3 +50,9 @@ pub const layout = struct {
     pub const FixedMetrics = @import("layout/measure.zig").FixedMetrics;
 };
 pub const Color = @import("layout/geometry.zig").Color;
+pub const TextStyle = @import("text/style.zig").TextStyle;
+pub const graphics = struct {
+    pub const Painter = @import("graphics/painter.zig").Painter;
+    pub const Scene = @import("graphics/scene.zig").Frame;
+    pub const paintTree = @import("graphics/tree_paint.zig").paint;
+};

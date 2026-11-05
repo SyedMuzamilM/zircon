@@ -32,7 +32,7 @@ pub fn calculate(a: std.mem.Allocator, frame: *const tree.Frame, root: elements.
     defer arena.deinit();
     const intrinsic = try arena.allocator().alloc(geometry.Size, frame.nodes.items.len);
     @memset(intrinsic, .{ .width = 0, .height = 0 });
-    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator() };
+    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a };
     try engine.measureNode(root.index, constraints.viewport, 0);
     const style = frame.nodes.items[root.index].style;
     const size = try engine.resolveSize(style, constraints.viewport, .{ .width = @max(0, constraints.viewport.width - style.margin.horizontal()), .height = @max(0, constraints.viewport.height - style.margin.vertical()) });
@@ -46,6 +46,7 @@ const Engine = struct {
     bounds: []geometry.Rect,
     intrinsic: []geometry.Size,
     scratch: std.mem.Allocator,
+    frame_allocator: std.mem.Allocator,
     fn length(e: *Engine, value: styles.Length, parent: f32) ?f32 {
         return switch (value) {
             .auto => null,
@@ -77,9 +78,22 @@ const Engine = struct {
         const content: geometry.Size = .{ .width = @max(0, declared.width - style.padding.horizontal()), .height = @max(0, declared.height - style.padding.vertical()) };
         var natural: geometry.Size = .{ .width = 0, .height = 0 };
         switch (node.kind) {
-            .text => |text| natural = try e.measure.text(e.measure.context, text, 14),
-            .button => |button| natural = try e.measure.text(e.measure.context, button.label, 14),
-            .container => {
+            .custom => |custom| {
+                var cx: @import("../ui/custom.zig").LayoutCx = .{ .allocator = e.frame_allocator, .available = content, .measurer = e.measure };
+                natural = try custom.measure(custom.object, &cx);
+            },
+            .text => |text| natural = try e.measure.text(e.measure.context, text, style.text),
+            .button => |button| natural = try e.measure.text(e.measure.context, button.label, style.text),
+            .container => container: {
+                if (style.direction == .stack) {
+                    for (node.children) |child| {
+                        try e.measureNode(child, content, depth + 1);
+                        const child_style = e.frame.nodes.items[child].style;
+                        natural.width = @max(natural.width, e.intrinsic[child].width + child_style.margin.horizontal());
+                        natural.height = @max(natural.height, e.intrinsic[child].height + child_style.margin.vertical());
+                    }
+                    break :container;
+                }
                 var main: f32 = 0;
                 var cross: f32 = 0;
                 for (node.children) |child| {
@@ -112,6 +126,26 @@ const Engine = struct {
         const horizontal = style.direction == .row;
         const content: geometry.Rect = .{ .x = rect.x + style.padding.left, .y = rect.y + style.padding.top, .width = @max(0, rect.width - style.padding.horizontal()), .height = @max(0, rect.height - style.padding.vertical()) };
         const available: geometry.Size = .{ .width = content.width, .height = content.height };
+        if (style.direction == .stack) {
+            for (node.children) |child| {
+                const cs = e.frame.nodes.items[child].style;
+                const size = try e.resolveSize(cs, available, .{ .width = @max(0, available.width - cs.margin.horizontal()), .height = @max(0, available.height - cs.margin.vertical()) });
+                const free_x = @max(0, content.width - size.width - cs.margin.horizontal());
+                const free_y = @max(0, content.height - size.height - cs.margin.vertical());
+                const x: f32 = switch (style.align_items) {
+                    .center => free_x / 2,
+                    .end => free_x,
+                    else => 0,
+                };
+                const y: f32 = switch (style.justify_content) {
+                    .center => free_y / 2,
+                    .end => free_y,
+                    else => 0,
+                };
+                try e.arrange(child, .{ .x = content.x + cs.margin.left + x, .y = content.y + cs.margin.top + y, .width = size.width, .height = size.height }, depth + 1);
+            }
+            return;
+        }
         const bases = try e.scratch.alloc(f32, node.children.len);
         const sizes = try e.scratch.alloc(f32, node.children.len);
         const frozen = try e.scratch.alloc(bool, node.children.len);

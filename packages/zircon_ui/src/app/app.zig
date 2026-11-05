@@ -4,20 +4,39 @@ const std = @import("std");
 const identities = @import("../entity/entity.zig");
 const Store = @import("../entity/store.zig").Store;
 const Scope = @import("../entity/scope.zig").Scope;
+const windows = @import("window.zig");
+const reactivity = @import("reactivity.zig");
+const task_module = @import("tasks.zig");
+const OwnedTasks = @import("owned_tasks.zig").OwnedTasks;
+pub const Subscription = reactivity.Subscription;
 var next_id = std.atomic.Value(u32).init(1);
-const State = struct { allocator: std.mem.Allocator, store: Store, thread: std.Thread.Id, depth: usize = 0, dirty: bool = false, scheduled_frames: u64 = 0 };
+const State = struct {
+    allocator: std.mem.Allocator,
+    store: Store,
+    thread: std.Thread.Id,
+    depth: usize = 0,
+    dirty: bool = false,
+    scheduled_frames: u64 = 0,
+    windows: std.ArrayList(?*windows.Window) = .empty,
+    reactive: reactivity.Reactivity = .{},
+    jobs: OwnedTasks,
+};
 pub const Options = struct { allocator: std.mem.Allocator };
 pub const App = struct {
     state: *State,
     pub fn init(options: Options) !App {
         const app_id = try reserveId();
         const state = try options.allocator.create(State);
-        state.* = .{ .allocator = options.allocator, .store = .init(options.allocator, app_id), .thread = std.Thread.getCurrentId() };
+        state.* = .{ .allocator = options.allocator, .store = .init(options.allocator, app_id), .thread = std.Thread.getCurrentId(), .jobs = .init(options.allocator) };
         return .{ .state = state };
     }
     pub fn deinit(app: *App) void {
-        std.debug.assert(app.state.thread == std.Thread.getCurrentId() and app.state.depth == 0);
+        std.debug.assert(app.state.thread == std.Thread.getCurrentId() and app.state.depth == 0 and !app.state.reactive.settling);
         const allocator = app.state.allocator;
+        for (app.state.windows.items) |entry| if (entry) |w| w.deinit();
+        app.state.windows.deinit(allocator);
+        app.state.jobs.deinit();
+        app.state.reactive.deinit(allocator);
         app.state.store.deinit();
         allocator.destroy(app.state);
         app.* = undefined;
@@ -26,9 +45,115 @@ pub const App = struct {
         if (app.state.thread != std.Thread.getCurrentId()) return error.WrongThread;
         if (app.state.store.destroying) return error.AppIsDestroying;
     }
+    pub fn beginTransaction(app: *App) !void {
+        try app.check();
+        app.state.depth += 1;
+    }
+    pub fn endTransaction(app: *App) void {
+        std.debug.assert(app.state.depth > 0);
+        app.finishTransaction();
+    }
+    pub fn openWindow(app: *App, comptime T: type, options: windows.Options, value: T) !windows.Handle {
+        try app.check();
+        const record = try windows.Window.create(app.*, app.state.allocator, T, options, value);
+        errdefer record.deinit();
+        const slot = app.state.windows.items.len;
+        if (slot >= std.math.maxInt(u32)) return error.WindowCapacityExceeded;
+        try app.state.windows.append(app.state.allocator, record);
+        return .{ .app_id = app.state.store.app_id, .slot = @intCast(slot) };
+    }
+    pub fn window(app: *App, handle: windows.Handle) !*windows.Window {
+        try app.check();
+        if (handle.app_id != app.state.store.app_id) return error.WrongApplication;
+        if (handle.generation != 1 or handle.slot >= app.state.windows.items.len) return error.WindowNotFound;
+        const w = app.state.windows.items[handle.slot] orelse return error.WindowNotFound;
+        if (w.closed) return error.WindowNotFound;
+        return w;
+    }
+    pub fn windowEntity(app: *App, comptime T: type, handle: windows.Handle) !identities.Entity(T) {
+        const w = try app.window(handle);
+        const result = identities.typed(T, w.root);
+        _ = try app.state.store.version(result);
+        return result;
+    }
+    pub fn closeWindow(app: *App, handle: windows.Handle) !void {
+        try (try app.window(handle)).dispatch(.close);
+    }
+    /// Advances the same render path used by the native event loop. Tests inject time.
+    pub fn step(app: *App, time: f64) !usize {
+        try app.check();
+        if (app.state.depth != 0) return error.TransactionActive;
+        if (!std.math.isFinite(time) or time < 0) return error.InvalidTime;
+        try app.state.jobs.drain(app);
+        try app.flushEffects();
+        if (try app.takeFrameRequest()) for (app.state.windows.items) |entry| {
+            if (entry) |w| {
+                for (w.frames.committed.dependencies.items) |dependency| {
+                    const current_version = app.rawVersion(dependency.entity) catch {
+                        w.dirty = true;
+                        break;
+                    };
+                    if (current_version != dependency.version) {
+                        w.dirty = true;
+                        break;
+                    }
+                }
+            }
+        };
+        var count: usize = 0;
+        for (app.state.windows.items) |*entry| if (entry.*) |w| {
+            if (w.closed) {
+                w.deinit();
+                entry.* = null;
+                continue;
+            }
+            w.time = time;
+            if (w.animating) w.dirty = true;
+            if (try w.draw()) count += 1;
+        };
+        return count;
+    }
+    pub fn dispatch(app: *App, handle: windows.Handle, input: @import("../platform/interface.zig").Input) !void {
+        try (try app.window(handle)).dispatch(input);
+    }
+    pub fn run(app: *App) !void {
+        while (true) {
+            _ = try app.step(windows.now());
+            var open = false;
+            var animated = false;
+            for (app.state.windows.items) |entry| if (entry) |w| {
+                if (!w.closed) {
+                    open = true;
+                    animated = animated or w.animating;
+                }
+            };
+            if (!open) return;
+            if (app.state.dirty) continue;
+            try windows.pump(if (animated or app.state.jobs.queue.pending()) 1.0 / 120.0 else -1);
+        }
+    }
     pub fn createEntity(app: *App, comptime T: type, value: T) !identities.Entity(T) {
         try app.check();
         return app.state.store.create(T, value, .application);
+    }
+    pub fn spawn(app: *App, owner: anytype, comptime Job: type, job: Job, comptime callback: anytype) !task_module.Handle {
+        try app.check();
+        return app.state.jobs.spawn(app, owner, Job, job, callback);
+    }
+    pub fn cancelTask(app: *App, handle: task_module.Handle) !void {
+        try app.check();
+        try app.state.jobs.queue.cancel(handle);
+    }
+    pub fn tasksPending(app: *App) !bool {
+        try app.check();
+        return app.state.jobs.queue.pending();
+    }
+    pub fn setReducedMotion(app: *App, reduced: bool) !void {
+        try app.check();
+        for (app.state.windows.items) |entry| if (entry) |w| {
+            w.animations.reduced_motion = reduced;
+            w.dirty = true;
+        };
     }
     pub fn createScope(app: *App) !Scope {
         try app.check();
@@ -41,10 +166,14 @@ pub const App = struct {
     pub fn destroyEntity(app: *App, handle: anytype) !void {
         try app.check();
         try app.state.store.destroy(handle);
+        app.state.reactive.settle(app);
+        app.state.jobs.cancelDead(app);
     }
     pub fn destroyScope(app: *App, scope: Scope) !void {
         try app.check();
         try app.state.store.destroyScope(scope);
+        app.state.reactive.settle(app);
+        app.state.jobs.cancelDead(app);
     }
     pub fn read(app: *App, handle: anytype, comptime function: anytype, args: anytype) Result(@TypeOf(function)) {
         try app.check();
@@ -83,12 +212,43 @@ pub const App = struct {
     }
     fn finishTransaction(app: *App) void {
         app.state.depth -= 1;
-        if (app.state.depth != 0) return;
-        app.state.store.flushDestruction();
-        if (app.state.store.flushNotifications() and !app.state.dirty) {
-            app.state.dirty = true;
-            app.state.scheduled_frames += 1;
+        if (app.state.depth == 0) {
+            app.state.reactive.settle(app);
+            app.state.jobs.cancelDead(app);
         }
+    }
+    /// Drains effects after all callback borrows end. Deferred callback failures
+    /// are reported once here or by step(), without panicking in a defer block.
+    pub fn flushEffects(app: *App) !void {
+        try app.check();
+        if (app.state.depth != 0 or app.state.reactive.settling) return error.TransactionActive;
+        app.state.reactive.settle(app);
+        if (app.state.reactive.takeError()) |err| return err;
+    }
+    pub fn isAlive(app: *App, token: identities.Token) bool {
+        app.check() catch return false;
+        return app.state.store.isAlive(token);
+    }
+    pub fn rawVersion(app: *App, token: identities.Token) !u64 {
+        try app.check();
+        return app.state.store.rawVersion(token);
+    }
+    pub fn observe(app: *App, owner: anytype, target: anytype, comptime callback: anytype) !Subscription {
+        try app.check();
+        return app.state.reactive.observe(app, owner, target, callback);
+    }
+    pub fn subscribe(app: *App, owner: anytype, target: anytype, comptime E: type, comptime callback: anytype) !Subscription {
+        try app.check();
+        return app.state.reactive.subscribe(app, owner, target, E, callback);
+    }
+    /// Event payloads copy by value or provide explicit clone/deinit ownership.
+    pub fn emit(app: *App, source: anytype, value: anytype) !void {
+        try app.check();
+        try app.state.reactive.emit(app, source, value);
+    }
+    pub fn unsubscribe(app: *App, subscription: Subscription) !void {
+        try app.check();
+        try app.state.reactive.unsubscribe(app, subscription);
     }
     pub fn version(app: *App, handle: anytype) !u64 {
         try app.check();
@@ -127,6 +287,22 @@ pub fn Context(comptime T: type) type {
         pub fn update(cx: *@This(), handle: anytype, comptime function: anytype, args: anytype) Result(@TypeOf(function)) {
             try cx.check();
             return cx.app.update(handle, function, args);
+        }
+        pub fn observe(cx: *@This(), target: anytype, comptime callback: anytype) !Subscription {
+            try cx.check();
+            return cx.app.observe(cx.owner, target, callback);
+        }
+        pub fn subscribe(cx: *@This(), target: anytype, comptime E: type, comptime callback: anytype) !Subscription {
+            try cx.check();
+            return cx.app.subscribe(cx.owner, target, E, callback);
+        }
+        pub fn emit(cx: *@This(), value: anytype) !void {
+            try cx.check();
+            try cx.app.emit(cx.owner, value);
+        }
+        pub fn spawn(cx: *@This(), comptime Job: type, job: Job, comptime callback: anytype) !task_module.Handle {
+            try cx.check();
+            return cx.app.spawn(cx.owner, Job, job, callback);
         }
         pub fn createChild(cx: *@This(), comptime U: type, value: U) !identities.Entity(U) {
             try cx.check();

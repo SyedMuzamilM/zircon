@@ -93,7 +93,7 @@ test "invalid measurements and arithmetic overflow are reported" {
     const node = try b.text("test");
     try h.frames.commit(node);
     const Bad = struct {
-        fn measure(_: ?*anyopaque, _: []const u8, _: f32) !ui.Size {
+        fn measure(_: ?*anyopaque, _: []const u8, _: ui.TextStyle) !ui.Size {
             return .{ .width = std.math.nan(f32), .height = 10 };
         }
     };

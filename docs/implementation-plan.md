@@ -27,6 +27,6 @@ Only the user-supplied document is a full API specification. This checklist is a
 
 ## Current coverage
 
-See [implementation status](status.md) for the audited milestone/API coverage, limitations, validation commands, and cleanup record. The first two milestone foundations and separate layout/text/graphics subsystems are verified; the native window and integrated application runtime are next.
+See [implementation status](status.md) for the audited milestone/API coverage, limitations, validation commands, and cleanup record. The native window and integrated application runtime now work, including custom elements, reactive state, text-input snapshots, animation and worker foundations. The editor implementation follows the accepted editor design; remaining advanced framework capabilities stay explicit in the status report.
 
 The implementation history is recorded in Git. The specification above remains unchanged; future API examples there are proposals until the corresponding capability appears in the status report.
