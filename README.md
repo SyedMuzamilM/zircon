@@ -11,7 +11,8 @@ Use Zig 0.17.1 through the project-local wrapper:
 ./tools/zig build run              # open the editor
 ./zig-out/bin/zircon path/to/file.zig
 ./tools/zig build check
-./tools/zig build test-editor-native # full native editor journey
+./tools/zig build test-editor-native # native editor and feature journeys
+./tools/zig build test-language-real # optional, installed Apple clangd
 ./tools/zig build test-native        # macOS, actual AppKit/CoreText/Metal tests
 ./tools/zig build counter-native     # interactive native counter with spring animation
 ./tools/zig build counter            # inspect a tree without a window
@@ -22,4 +23,8 @@ The Linux command compiles portable tests; it does not provide a Linux native ad
 
 Read [implementation status](docs/status.md) for tested coverage and limitations, [package usage](packages/zircon_ui/README.md), [runtime design](docs/design/runtime.md), [editor design](docs/design/editor.md), and [source research](docs/research/gpui-and-nanoui.md). Full Zed feature parity and performance advantages have not been established.
 
-The editor currently provides real file opening/saving, project navigation, tabs and split views, multi-cursor editing, grouped undo/redo, clipboard/selection, lexical highlighting, find/replace, a command palette and unsaved-close protection. The [expanded experience requirements](docs/specification/editor-experience.md) preserve the supplied Zed screenshots and track the next UI, extension, Git, search and content work. Those integrations are not implied by the current editing core.
+The editor provides real file opening/saving, project navigation, draggable tabs and two editor panes, multi-cursor editing, grouped undo/redo, clipboard/selection, lexical highlighting, find/replace, a command palette and unsaved-close protection. Integrated macOS chrome retains the native traffic lights. Settings opens in a separate child window and persists appearance/editor preferences.
+
+Independent Git, extension, search, Markdown and language-server packages now power real editor views. Git supports working/staged diffs, staging, commits, history, unsaved gutters and inline blame. Local extensions change themes, icons, language profiles and server configurations. Project search includes unsaved buffers and opens source matches. Markdown previews update beside their source; images use the framework's retained image renderer. Stdio language servers provide versioned diagnostics and completion edits.
+
+See the [editor guide](docs/editor-guide.md) for controls, installation paths and limits. Search excerpts currently open the original document for editing; arbitrary pane trees, a remote extension marketplace and broad LSP coverage remain work. The [implementation status](docs/status.md) distinguishes tested behavior from the remaining framework/editor scope.
