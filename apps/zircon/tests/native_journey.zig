@@ -5,6 +5,9 @@ const zircon = @import("zircon");
 const t = std.testing;
 const native = ui.testing.native;
 const objc = native.objc;
+test {
+    _ = @import("experience_tests.zig");
+}
 fn bytes(self: *const zircon.Shell, a: std.mem.Allocator, out: *[]u8) !void {
     const tab = self.tabs.items[self.active];
     var snapshot = try self.workspace.snapshot(tab.document);
@@ -18,7 +21,10 @@ fn nativeKey(window: objc.Id, code: u16, characters: []const u8, flags: usize) !
     const number = objc.send(isize, window, "windowNumber", .{});
     const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
     const event = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, flags, native.now(), number, @as(objc.Id, null), objc.string(characters), objc.string(characters), false, code });
-    objc.send(void, app, "postEvent:atStart:", .{ event, false });
+    if (objc.send(bool, window, "isKeyWindow", .{})) objc.send(void, app, "postEvent:atStart:", .{ event, false }) else {
+        try std.Io.Dir.cwd().writeFile(t.io, .{ .sub_path = "/tmp/zircon-editor-input-mode.txt", .data = "macOS did not grant foreground activation. Native keys dispatched through NSWindow.sendEvent and its real first responder.\n" });
+        objc.send(void, window, "sendEvent:", .{event});
+    }
     for (0..32) |_| try native.pump(0);
 }
 fn command(app: *ui.App, owner: ui.Entity(zircon.Shell), which: zircon.Command) !void {
@@ -40,7 +46,7 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
     var shell = try zircon.Shell.init(t.allocator, t.io, root_path, "hello.zig");
-    const h = app.openWindow(zircon.Shell, .{ .title = "Zircon · Native verification", .width = 1160, .height = 760 }, shell) catch |err| {
+    const h = app.openWindow(zircon.Shell, .{ .title = "Zircon · Native verification", .chrome = .integrated, .width = 1160, .height = 760 }, shell) catch |err| {
         shell.deinit(t.allocator);
         return err;
     };
@@ -54,6 +60,39 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
     const window = objc.send(objc.Id, list, "objectAtIndex:", .{@as(usize, 0)});
     const view = objc.send(objc.Id, window, "contentView", .{});
     try (try app.window(h)).snapshot("/tmp/zircon-editor-initial.png");
+    try t.expectEqual(@as(isize, 1), objc.send(isize, window, "titleVisibility", .{}));
+    try t.expect(objc.send(usize, window, "styleMask", .{}) & (1 << 15) != 0);
+    for ([_]usize{ 0, 1, 2 }) |button| {
+        const control = objc.send(objc.Id, window, "standardWindowButton:", .{button});
+        try t.expect(control != null);
+        try t.expect(!objc.send(bool, control, "isHidden", .{}));
+    }
+    try command(&app, owner, .settings);
+    _ = try app.step(0.1);
+    const Read = struct {
+        fn child(self: *const zircon.Shell) ui.WindowHandle {
+            return self.settings_window.?;
+        }
+    };
+    const child = try app.read(owner, Read.child, .{});
+    try (try app.window(child)).snapshot("/tmp/zircon-settings.png");
+    const native_windows = objc.send(objc.Id, nsapp, "windows", .{});
+    var child_window: objc.Id = null;
+    for (0..objc.send(usize, native_windows, "count", .{})) |index| {
+        const candidate = objc.send(objc.Id, native_windows, "objectAtIndex:", .{index});
+        if (std.mem.eql(u8, objc.fromString(objc.send(objc.Id, candidate, "title", .{})), "Zircon Settings")) {
+            child_window = candidate;
+            break;
+        }
+    }
+    try t.expect(child_window != null);
+    try t.expectEqual(window, objc.send(objc.Id, child_window, "parentWindow", .{}));
+    try app.closeWindow(child);
+    _ = try app.step(0.2);
+    _ = try app.window(h);
+    objc.send(void, window, "makeKeyAndOrderFront:", .{@as(objc.Id, null)});
+    _ = objc.send(bool, window, "makeFirstResponder:", .{view});
+
     try nativeKey(window, 0, "a", 1 << 20);
     _ = try app.step(1);
     objc.send(void, view, "insertText:replacementRange:", .{ objc.string("const answer = 42;\n"), Range{ .location = std.math.maxInt(usize), .length = 0 } });

@@ -5,3 +5,7 @@ pub const Command = @import("commands.zig").Command;
 pub const commands = @import("commands.zig").commands;
 
 pub const view = @import("view.zig");
+pub const Settings = @import("settings/model.zig").Settings;
+pub const SettingsStore = @import("settings/store.zig").Store;
+pub const SettingsPatch = @import("settings/store.zig").Patch;
+pub const SettingsView = @import("settings/view.zig").View;

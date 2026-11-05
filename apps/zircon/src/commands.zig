@@ -1,8 +1,17 @@
 //! One command catalogue drives shortcuts, toolbar controls and the palette.
 const ui = @import("zircon_ui");
-pub const Command = enum { new_file, open_path, quick_open, save, save_as, close_tab, split, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
+pub const Command = enum { project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
+    .{ .command = .project_files, .label = "Show project files" },
+    .{ .command = .markdown_preview, .label = "Open Markdown preview" },
+    .{ .command = .complete, .label = "Request language completion", .shortcut = "⌃Space" },
+    .{ .command = .git_changes, .label = "Git: show changes" },
+    .{ .command = .git_history, .label = "Git: show history" },
+    .{ .command = .git_refresh, .label = "Git: refresh" },
+    .{ .command = .extensions, .label = "Open extensions" },
+    .{ .command = .project_search, .label = "Search project buffers", .shortcut = "⇧⌘F" },
+    .{ .command = .settings, .label = "Open settings", .shortcut = "⌘," },
     .{ .command = .new_file, .label = "New file", .shortcut = "⌘N" },
     .{ .command = .open_path, .label = "Open file by path", .shortcut = "⌘O" },
     .{ .command = .quick_open, .label = "Go to file", .shortcut = "⌘P" },
@@ -20,6 +29,9 @@ pub const commands = [_]Entry{
     .{ .command = .zoom_out, .label = "Decrease font size" },
 };
 pub const bindings = [_]ui.Keymap(Command).Binding{
+    .{ .chord = .{ .key = .space, .modifiers = .{ .control = true } }, .action = .complete },
+    .{ .chord = .{ .key = .f, .modifiers = .{ .command = true, .shift = true } }, .action = .project_search },
+    .{ .chord = .{ .key = .comma, .modifiers = .{ .command = true } }, .action = .settings },
     .{ .chord = .{ .key = .n, .modifiers = .{ .command = true } }, .action = .new_file },
     .{ .chord = .{ .key = .o, .modifiers = .{ .command = true } }, .action = .open_path },
     .{ .chord = .{ .key = .p, .modifiers = .{ .command = true } }, .action = .quick_open },

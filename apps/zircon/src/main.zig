@@ -34,11 +34,25 @@ pub fn main(init: std.process.Init) !void {
     var app = try ui.App.init(.{ .allocator = init.gpa });
     defer app.deinit();
     var shell = try Shell.init(init.gpa, init.io, root, file);
-    const handle = app.openWindow(Shell, .{ .title = "Zircon", .width = 1240, .height = 820, .visible = snapshot_path == null }, shell) catch |err| {
+    const handle = app.openWindow(Shell, .{ .title = "Zircon", .chrome = .integrated, .width = 1240, .height = 820, .visible = snapshot_path == null }, shell) catch |err| {
         shell.deinit(init.gpa);
         return err;
     };
     const owner = try app.windowEntity(Shell, handle);
+    if (init.environ_map.get("HOME")) |user_directory| {
+        const extension_home = try std.fs.path.join(init.arena.allocator(), &.{ user_directory, "Library", "Application Support", "Zircon", "extensions" });
+        try app.update(owner, Shell.loadExtensions, .{extension_home});
+        const settings_path = try std.fs.path.join(init.arena.allocator(), &.{ user_directory, "Library", "Application Support", "Zircon", "settings.json" });
+        app.update(owner, Shell.loadSettings, .{@as(?[]const u8, settings_path)}) catch |err| {
+            const Report = struct {
+                fn call(self: *Shell, cx: *ui.Context(Shell), failure: anyerror) !void {
+                    try self.reportError(failure);
+                    cx.notify();
+                }
+            };
+            try app.update(owner, Report.call, .{err});
+        };
+    }
     try app.update(owner, Shell.bootstrap, .{handle});
     if (snapshot_path) |path| {
         _ = try app.step(ui.testing.native.now());

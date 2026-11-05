@@ -10,13 +10,25 @@ const Shell = model.Shell;
 const Command = @import("commands.zig").Command;
 pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) !void {
     self.window = window;
+    if (self.settings == null) try self.loadSettings(cx, null);
+    _ = try cx.observe(self.settings.?, Shell.onSettings);
+    try self.onSettings(cx, self.settings.?);
     if (self.fields == null) {
         const query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        const project_query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         const replacement = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         const path = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
-        self.fields = .{ .query = query, .replacement = replacement, .path = path };
+        var commit_input = try ui.controls.TextInput.init(self.allocator, "");
+        commit_input.placeholder = "Commit message…";
+        const commit = cx.createChild(ui.controls.TextInput, commit_input) catch |err| {
+            commit_input.deinit(self.allocator);
+            return err;
+        };
+        self.fields = .{ .query = query, .project_query = project_query, .replacement = replacement, .path = path, .commit = commit };
     }
     try @import("project_index.zig").start(self, cx);
+    try @import("services/git.zig").start(self, cx, .refresh);
+    try cx.app.watchExternal(cx.owner, Shell.pollLanguage);
     cx.notify();
 }
 pub fn loadTree(self: *Shell) !void {
@@ -62,6 +74,17 @@ pub fn activateTree(self: *Shell, index: usize) !void {
     }
 }
 pub fn openPath(self: *Shell, path: []const u8) !void {
+    if (@import("views/image.zig").supported(path)) {
+        const absolute = try std.fs.path.resolve(self.allocator, &.{ self.workspace.root_path, path });
+        defer self.allocator.free(absolute);
+        const asset = try @import("views/image.zig").Asset.init(self.allocator, self.workspace.io, absolute);
+        if (self.image) |*old| old.deinit(self.allocator);
+        self.image = asset;
+        self.panel = .image;
+        self.overlay = .none;
+        return;
+    }
+    self.panel = .editor;
     const id = try self.workspace.open(path);
     for (self.tabs.items, 0..) |tab, i| if (std.meta.eql(tab.document, id)) {
         self.active = i;
@@ -74,7 +97,7 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
     var view = try editing.Editor.init(self.allocator);
     errdefer view.deinit();
     const record = try self.workspace.getConst(id);
-    view.language = editing.syntax.languageForPath(record.path orelse "");
+    self.configureEditor(&view, record.path orelse "");
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
     view.synchronize(snapshot);
@@ -89,12 +112,13 @@ pub fn newFile(self: *Shell) !void {
     errdefer _ = self.workspace.close(id, .discard) catch {};
     var view = try editing.Editor.init(self.allocator);
     errdefer view.deinit();
+    self.configureEditor(&view, "");
     try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
     self.active = self.tabs.items.len - 1;
     self.active_pane = .primary;
     self.editor_focus_request +%= 1;
 }
-fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
+pub fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
     if (self.active_pane == .secondary) if (self.secondary) |*pane| return .{ .id = pane.document, .editor = &pane.editor };
     if (self.tabs.items.len == 0) return error.NoDocument;
     return .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
@@ -127,6 +151,7 @@ fn show(self: *Shell, cx: *ui.Context(Shell), which: model.Overlay) !void {
         .palette => try setField(cx, fields.query, "", "Search commands…"),
         .quick_open => try setField(cx, fields.query, "", "Find a file…"),
         .open_path => try setField(cx, fields.path, "", "Path relative to the project, or an absolute path"),
+        .extension_path => try setField(cx, fields.path, "", "Directory containing extension.json"),
         .save_as => {
             const selected = try saveTarget(self);
             const record = try self.workspace.getConst(self.tabs.items[selected].document);
@@ -163,6 +188,11 @@ pub fn requestTabClose(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
 fn closeTab(self: *Shell, index: usize, decision: ws.CloseDecision) !void {
     const id = self.tabs.items[index].document;
     if (!try self.workspace.close(id, decision)) return;
+    if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) {
+        preview.view.deinit();
+        self.preview = null;
+        if (self.panel == .markdown) self.panel = .editor;
+    };
     if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
         pane.editor.deinit();
         self.secondary = null;
@@ -187,9 +217,10 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
         },
     } else self.overlay = .none;
 }
-fn applyOutcome(self: *Shell, id: ws.DocumentId, pane: u8, outcome: *editing.Outcome) !void {
+pub fn applyOutcome(self: *Shell, id: ws.DocumentId, pane: u8, outcome: *editing.Outcome) !void {
     defer if (outcome.change) |*change| change.deinit();
     if (outcome.change == null and !outcome.reset) return;
+    self.language.clearCompletion();
     var snapshot = try self.workspace.snapshot(id);
     defer snapshot.deinit();
     for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id) and pane != 0) {
@@ -200,6 +231,7 @@ fn applyOutcome(self: *Shell, id: ws.DocumentId, pane: u8, outcome: *editing.Out
         if (outcome.change) |*change| other.editor.mapChange(change);
         other.editor.synchronize(snapshot);
     };
+    if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) try preview.view.refresh(snapshot);
 }
 pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !bool {
     if (pane == 1 and self.secondary == null) return false;
@@ -207,11 +239,25 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
+    if (e.data == .pointer_down and self.git.repository) {
+        var snap = record.doc.snapshot();
+        defer snap.deinit();
+        const x = e.data.pointer_down.position.x - e.bounds.x;
+        const gutter = if (selected.editor.show_line_numbers) @import("zircon_editor").gutterWidth(snap.lineCount(), selected.editor.font_size) else 20;
+        if (x >= 0 and x < gutter - 8) {
+            const line = @min(snap.lineCount() - 1, selected.editor.rowAt(e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset, snap.revision()));
+            if (selected.editor.inline_blame != null and selected.editor.inline_blame.?.line == line) selected.editor.hideBlame() else try @import("services/git.zig").start(self, cx, .{ .blame = line + 1 });
+            e.preventDefault();
+            cx.notify();
+            return true;
+        }
+    }
     var outcome = try selected.editor.handle(&record.doc, e);
     if (outcome.change != null or outcome.reset) {
         self.allocator.free(self.status);
         self.status = &.{};
         self.status_is_error = false;
+        if (self.git.repository) try @import("services/git.zig").start(self, cx, .refresh);
     }
     try applyOutcome(self, selected.id, pane, &outcome);
     if (outcome.handled) cx.notify();
@@ -219,6 +265,76 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 }
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     switch (which) {
+        .project_files => {
+            self.left_panel = .project;
+            self.sidebar_visible = true;
+        },
+        .markdown_preview => {
+            const current = try active(self);
+            const record = try self.workspace.getConst(current.id);
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            var preview = try @import("views/markdown.zig").Preview.init(self.allocator, self.workspace.io, record.path, snapshot);
+            preview.colors = self.previewColors();
+            if (self.preview) |*old| old.view.deinit();
+            self.preview = .{ .document = current.id, .view = preview };
+            self.panel = .markdown;
+        },
+        .complete => try @import("services/language.zig").request(self, cx),
+        .git_changes => {
+            self.left_panel = .git_changes;
+            self.sidebar_visible = true;
+            try @import("services/git.zig").start(self, cx, .refresh);
+        },
+        .git_history => {
+            self.left_panel = .git_history;
+            self.sidebar_visible = true;
+            try @import("services/git.zig").start(self, cx, .refresh);
+        },
+        .git_refresh => try @import("services/git.zig").start(self, cx, .refresh),
+        .git_stage => try @import("services/git.zig").start(self, cx, .{ .stage = self.git.selected_path }),
+        .git_unstage => try @import("services/git.zig").start(self, cx, .{ .unstage = self.git.selected_path }),
+        .git_stage_all => try @import("services/git.zig").start(self, cx, .stage_all),
+        .git_unstage_all => try @import("services/git.zig").start(self, cx, .unstage_all),
+        .git_commit => {
+            const message = try field(cx, self.fields.?.commit, self.allocator);
+            defer self.allocator.free(message);
+            if (std.mem.trim(u8, message, " \t\r\n").len == 0) return error.EmptyCommitMessage;
+            try @import("services/git.zig").start(self, cx, .{ .commit = message });
+        },
+        .git_working_diff, .git_staged_diff => {
+            std.heap.page_allocator.free(self.git.selected_commit);
+            self.git.selected_commit = &.{};
+            self.panel = .git_diff;
+            try @import("services/git.zig").start(self, cx, .{ .diff = .{ .path = self.git.selected_path, .staged = which == .git_staged_diff } });
+        },
+        .git_open_file => {
+            const absolute = try std.fs.path.join(self.allocator, &.{ self.workspace.root_path, self.git.selected_path });
+            defer self.allocator.free(absolute);
+            try self.openPath(absolute);
+            self.panel = .editor;
+        },
+        .back_to_editor => self.panel = .editor,
+        .extensions => self.panel = .extensions,
+        .install_extension => try show(self, cx, .extension_path),
+        .install_bundled_extension => try @import("services/extensions.zig").installBundled(self, cx),
+        .project_search => {
+            self.panel = .search;
+            self.overlay = .project_search;
+            self.overlay_index = 0;
+            try setField(cx, self.fields.?.project_query, "", "Search all project files and unsaved buffers…");
+        },
+        .run_project_search => try @import("services/search.zig").start(self, cx),
+
+        .settings => {
+            if (self.settings_window) |handle| {
+                if (cx.app.raiseWindow(handle)) |_| return else |err| if (err != error.WindowNotFound) return err;
+            }
+            const View = @import("settings/view.zig").View;
+            const handle = try cx.app.openChildWindow(self.window.?, View, .{ .title = "Zircon Settings", .chrome = .integrated, .width = 1000, .height = 700 }, .{ .allocator = self.allocator, .settings = self.settings.?, .workspace = cx.owner });
+            self.settings_window = handle;
+            try cx.app.update(try cx.app.windowEntity(View, handle), View.bootstrap, .{});
+        },
         .new_file => try newFile(self),
         .open_path => try show(self, cx, .open_path),
         .quick_open => try show(self, cx, .quick_open),
@@ -235,7 +351,8 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 const current = try active(self);
                 var other = try editing.Editor.init(self.allocator);
                 errdefer other.deinit();
-                other.language = current.editor.language;
+                const record = try self.workspace.getConst(current.id);
+                self.configureEditor(&other, record.path orelse "");
                 var snapshot = try self.workspace.snapshot(current.id);
                 defer snapshot.deinit();
                 other.synchronize(snapshot);
@@ -252,8 +369,12 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             }
         },
         .save_as => try show(self, cx, .save_as),
-        .close_tab => if (self.tabs.items.len > 0) {
-            try requestTabClose(self, cx, self.active);
+        .close_tab => {
+            if (self.panel == .image) {
+                if (self.image) |*asset| asset.deinit(self.allocator);
+                self.image = null;
+                self.panel = .editor;
+            } else if (self.tabs.items.len > 0) try requestTabClose(self, cx, self.active);
         },
         .quit => try cx.app.requestCloseWindow(self.window.?),
         .dismiss => {
@@ -284,7 +405,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             defer self.allocator.free(bytes);
             const path = std.mem.trim(u8, bytes, " \t");
             if (path.len == 0) return error.InvalidPath;
-            if (self.overlay == .open_path) {
+            if (self.overlay == .extension_path) {
+                try @import("services/extensions.zig").install(self, cx, path);
+                self.overlay = .none;
+            } else if (self.overlay == .open_path) {
                 try openPath(self, path);
             } else {
                 const index = try saveTarget(self);
@@ -292,7 +416,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 try self.workspace.save(id, path);
                 historyBoundary(self, id);
                 const record = try self.workspace.getConst(id);
-                self.tabs.items[index].editor.language = editing.syntax.languageForPath(record.path.?);
+                self.configureEditor(&self.tabs.items[index].editor, record.path.?);
                 var snapshot = record.doc.snapshot();
                 defer snapshot.deinit();
                 self.tabs.items[index].editor.synchronize(snapshot);
@@ -358,6 +482,21 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (e.data != .key_down) return;
     const key = e.data.key_down;
+    if (self.tab_drag != null and key.key == .escape) {
+        @import("panes.zig").cancel(self);
+        e.releasePointer();
+        e.preventDefault();
+        e.stopPropagation();
+        cx.notify();
+        return;
+    }
+    if (self.overlay == .none and self.language.completions != null and (key.key == .escape or key.key == .enter)) {
+        if (key.key == .enter) @import("services/language.zig").accept(self, cx, 0) catch |err| try self.reportError(err) else self.language.clearCompletion();
+        e.preventDefault();
+        e.stopPropagation();
+        cx.notify();
+        return;
+    }
     if (self.overlay != .none) {
         if (key.key == .escape) {
             self.overlay = .none;
@@ -369,8 +508,9 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         }
         if (key.key == .enter) {
             const which: Command = switch (self.overlay) {
-                .open_path, .save_as => .submit_path,
+                .open_path, .save_as, .extension_path => .submit_path,
                 .find, .replace => if (key.modifiers.shift) .find_previous else .find_next,
+                .project_search => .run_project_search,
                 else => .dismiss,
             };
             if (self.overlay == .palette or self.overlay == .quick_open) try activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);

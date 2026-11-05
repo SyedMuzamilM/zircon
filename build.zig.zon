@@ -3,6 +3,6 @@
     .version = "0.1.0",
     .fingerprint = 0x4c91bc61ee1da9c4,
     .minimum_zig_version = "0.17.1",
-    .dependencies = .{ .zircon_ui = .{ .path = "packages/zircon_ui" }, .zircon_text = .{ .path = "packages/zircon_text" }, .zircon_workspace = .{ .path = "packages/zircon_workspace" }, .zircon_editor = .{ .path = "packages/zircon_editor" } },
+    .dependencies = .{ .zircon_ui = .{ .path = "packages/zircon_ui" }, .zircon_text = .{ .path = "packages/zircon_text" }, .zircon_workspace = .{ .path = "packages/zircon_workspace" }, .zircon_editor = .{ .path = "packages/zircon_editor" }, .zircon_git = .{ .path = "packages/zircon_git" }, .zircon_extensions = .{ .path = "packages/zircon_extensions" }, .zircon_search = .{ .path = "packages/zircon_search" }, .zircon_language = .{ .path = "packages/zircon_language" }, .zircon_markdown = .{ .path = "packages/zircon_markdown" } },
     .paths = .{ "build.zig", "build.zig.zon", "packages", "apps", "examples", "README.md", "docs", "tools", ".zigversion" },
 }

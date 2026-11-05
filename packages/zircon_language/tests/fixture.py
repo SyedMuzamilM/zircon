@@ -71,7 +71,7 @@ while True:
     elif method == "textDocument/completion":
         assert params["position"]["character"] == 3
         completions.append(message)
-        if len(completions) == 2:
+        if len(completions) == 2 or mode == "host":
             for request in reversed(completions):
                 send({"jsonrpc": "2.0", "id": request["id"], "result": {"isIncomplete": False, "items": [{"label": "answer🙂", "insertText": "answer", "detail": "fixture completion", "textEdit": {"range": {"start": {"line": 0, "character": 3}, "end": {"line": 0, "character": 3}}, "newText": "answer"}}]}})
             completions.clear()
