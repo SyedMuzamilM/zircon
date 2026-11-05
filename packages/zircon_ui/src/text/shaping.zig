@@ -11,8 +11,6 @@ pub const CTFontRef = CFRef;
 pub const CTRunRef = CFRef;
 pub const CFIndex = isize;
 pub const CGPoint = extern struct { x: f64, y: f64 };
-pub const CGSize = extern struct { width: f64, height: f64 };
-pub const CGRect = extern struct { origin: CGPoint, size: CGSize };
 pub const CFRange = extern struct { location: CFIndex, length: CFIndex };
 
 pub extern "c" fn CFRelease(value: CFRef) void;

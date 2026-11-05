@@ -11,9 +11,6 @@ pub const Rect = struct {
         const y = @max(a.y, b.y);
         return .{ .x = x, .y = y, .width = @max(0, @min(a.x + a.width, b.x + b.width) - x), .height = @max(0, @min(a.y + a.height, b.y + b.height) - y) };
     }
-    pub fn contains(rect: Rect, point: Point) bool {
-        return point.x >= rect.x and point.y >= rect.y and point.x < rect.x + rect.width and point.y < rect.y + rect.height;
-    }
 };
 pub const Insets = struct {
     top: f32 = 0,

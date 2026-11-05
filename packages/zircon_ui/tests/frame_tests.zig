@@ -34,8 +34,7 @@ test "const entity rendering builds inspectable frame-owned trees and typed hand
     try t.expectEqual(@as(usize, 2), root.children.len);
     try t.expectEqualStrings("Count: 0", frame.nodes.items[root.children[0]].kind.text);
     const button = frame.nodes.items[root.children[1]].kind.button;
-    var control: ui.DispatchControl = .{};
-    var event: ui.Event(ui.Click) = .{ .data = .{}, .control = &control };
+    var event: ui.Event(ui.Click) = .{ .data = .{} };
     try button.on_click.?.dispatch(&harness.app, &event);
     try t.expectEqual(@as(u32, 1), try harness.app.read(counter, Counter.value, .{}));
     try harness.render(counter);
@@ -53,8 +52,7 @@ test "failed staging keeps the committed tree and handler alive" {
     try t.expectError(error.DeliberateRenderFailure, h.render(counter));
     try t.expectEqual(epoch, h.frames.committed.epoch);
     _ = try h.frames.committed.get(root);
-    var control: ui.DispatchControl = .{};
-    var event: ui.Event(ui.Click) = .{ .data = .{}, .control = &control };
+    var event: ui.Event(ui.Click) = .{ .data = .{} };
     try handler.dispatch(&h.app, &event);
     try t.expectEqual(@as(u32, 1), try h.app.read(counter, Counter.value, .{}));
 }
@@ -152,8 +150,7 @@ test "a committed frame's typed handler cannot access a destroyed entity" {
     try h.render(entity);
     const handler = h.frames.committed.nodes.items[1].kind.button.on_click.?;
     try h.app.destroyEntity(entity);
-    var control: ui.DispatchControl = .{};
-    var event: ui.Event(ui.Click) = .{ .data = .{}, .control = &control };
+    var event: ui.Event(ui.Click) = .{ .data = .{} };
     try t.expectError(error.EntityNotFound, handler.dispatch(&h.app, &event));
 }
 test "invalid dimensions and malformed UTF8 fail at the builder seam" {

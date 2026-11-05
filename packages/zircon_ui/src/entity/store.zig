@@ -19,7 +19,6 @@ const Slot = struct {
     lease: u64 = 0,
     version: u64 = 0,
     pending_notify: bool = false,
-    changed: bool = false,
     pending_destroy: bool = false,
 };
 const ScopeSlot = struct { generation: u32 = 1, alive: bool = false, retired: bool = false };
@@ -150,7 +149,6 @@ pub const Store = struct {
         for (s.slots.items) |*slot| if (slot.pointer != null and slot.pending_notify) {
             std.debug.assert(!slot.borrow.active());
             slot.pending_notify = false;
-            slot.changed = true;
             slot.version +%= 1;
             changed = true;
         };
@@ -200,7 +198,6 @@ pub const Store = struct {
         slot.pointer = null;
         slot.pending_destroy = false;
         slot.pending_notify = false;
-        slot.changed = false;
         retire(&slot.generation, &slot.retired);
         vtable.destroy(pointer, s.allocator);
     }

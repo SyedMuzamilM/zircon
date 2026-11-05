@@ -2,7 +2,9 @@
 
 An independent UI framework in Zig, following the [supplied framework specification](docs/specification/framework-api-v0.1.md). The name in that document, ZigGPUI, is a placeholder; the package name is `zircon_ui`.
 
-The verified foundations implement typed generational entities, scope ownership, runtime borrowing, explicit notifications, deferred destruction, frame-local UI trees, and committed/staging frame storage. It has no native or GPU dependency. The editor comes after the framework interfaces are verified.
+The portable foundations implement typed generational entities, scope ownership, runtime borrowing, explicit notifications, deferred destruction, frame-local UI trees, and committed/staging frame storage. The core has no native or GPU dependency. Native graphics are tested separately. The editor comes after the framework interfaces are verified.
+
+Read the [implementation status](docs/status.md) for what works and what remains. The framework does not yet open windows or run desktop applications through its public API.
 
 Use Zig 0.17.1:
 

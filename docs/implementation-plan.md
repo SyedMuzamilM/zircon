@@ -25,15 +25,8 @@ Entity handles do not own state. Render methods receive `*const T`. UI elements 
 
 Only the user-supplied document is a full API specification. This checklist is an implementation plan, not a declaration that all of that API exists. README and commit descriptions report the tested subset. Performance parity with Zed is not established.
 
-## Verified progress
+## Current coverage
 
-- `e2174d0`: unchanged specification and implementation plan preserved.
-- `f935bed`: entity runtime, scope ownership, borrowing, coalesced notifications, and headless lifecycle tests.
-- `64c971a`: immutable view contracts, frame-owned trees, typed handler adapters, committed/staging storage, and compiler-error contracts.
-- The next tested unit adds deterministic flex layout with injected measurements. Native text and Metal remain isolated from core checks until their dedicated checks are wired.
+See [implementation status](status.md) for the audited milestone/API coverage, limitations, validation commands, and cleanup record. The first two milestone foundations and separate layout/text/graphics subsystems are verified; the native window and integrated application runtime are next.
 
-The native window and event-propagation milestones are still ahead. The headless counter inspects a tree; it is not advertised as a finished native application.
-
-The flex layout unit is committed as `993ed57`. Core validation now runs 36 behavior tests plus three expected compile failures. Direct Zig CoreText and Metal modules have a separate macOS test target with 12 tests, including rendered-pixel checks and asynchronous buffer reuse. The native implementation files follow the requested `text/`, `graphics/backends/`, and `platform/macos/` separation. The former `.h`/`.m` bridge is absent from the source tree.
-
-The next verifiable unit is the native window and high-level frame pipeline. It must integrate the existing committed/staging trees and const-render entities, rather than reintroducing the superseded immediate-frame application interface. Capture/target/bubble dispatch, persistent focus, observer dependency tracking, worker tasks, and editor integration remain later work.
+The implementation history is recorded in Git. The specification above remains unchanged; future API examples there are proposals until the corresponding capability appears in the status report.

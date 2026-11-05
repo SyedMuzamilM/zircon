@@ -1,5 +1,4 @@
 //! Typed adapters bind entity identities, not pointers to rendered view state.
-const std = @import("std");
 const runtime = @import("../app/app.zig");
 const identity = @import("../entity/entity.zig");
 const event = @import("../event/event.zig");

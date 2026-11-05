@@ -4,10 +4,9 @@ const std = @import("std");
 const identities = @import("../entity/entity.zig");
 const Store = @import("../entity/store.zig").Store;
 const Scope = @import("../entity/scope.zig").Scope;
-const Owner = @import("../entity/scope.zig").Owner;
 var next_id = std.atomic.Value(u32).init(1);
 const State = struct { allocator: std.mem.Allocator, store: Store, thread: std.Thread.Id, depth: usize = 0, dirty: bool = false, scheduled_frames: u64 = 0 };
-pub const Options = struct { allocator: std.mem.Allocator, io: ?std.Io = null, renderer: enum { auto, headless } = .auto };
+pub const Options = struct { allocator: std.mem.Allocator };
 pub const App = struct {
     state: *State,
     pub fn init(options: Options) !App {

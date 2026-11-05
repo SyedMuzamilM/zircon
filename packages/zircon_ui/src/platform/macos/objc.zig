@@ -4,14 +4,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 pub const Id = ?*anyopaque;
-pub const SEL = *opaque {};
+const SEL = *opaque {};
 pub const CGPoint = extern struct { x: f64 = 0, y: f64 = 0 };
 pub const CGSize = extern struct { width: f64 = 0, height: f64 = 0 };
 pub const CGRect = extern struct { origin: CGPoint = .{}, size: CGSize = .{} };
-pub const NSRange = extern struct { location: usize, length: usize };
 extern "c" fn objc_getClass([*:0]const u8) Id;
 extern "c" fn sel_registerName([*:0]const u8) SEL;
-extern "c" fn sel_getName(SEL) [*:0]const u8;
 extern "c" fn objc_msgSend() void;
 extern "c" fn objc_msgSend_stret() void;
 extern "c" fn objc_autoreleasePoolPush() ?*anyopaque;
@@ -19,11 +17,8 @@ extern "c" fn objc_autoreleasePoolPop(?*anyopaque) void;
 pub fn class(name: [:0]const u8) Id {
     return objc_getClass(name.ptr);
 }
-pub fn sel(name: [:0]const u8) SEL {
+fn sel(name: [:0]const u8) SEL {
     return sel_registerName(name.ptr);
-}
-pub fn selectorName(value: SEL) []const u8 {
-    return std.mem.span(sel_getName(value));
 }
 pub fn send(comptime R: type, target: Id, selector: [:0]const u8, args: anytype) R {
     const Arguments = @typeInfo(@TypeOf(args)).@"struct".field_types;
@@ -62,7 +57,7 @@ pub const Pool = struct {
         objc_autoreleasePoolPop(pool.handle);
     }
 };
-pub extern "c" fn clock_gettime_nsec_np(u32) u64;
+extern "c" fn clock_gettime_nsec_np(u32) u64;
 pub fn clockNs() u64 {
     return clock_gettime_nsec_np(8);
 }

@@ -7,7 +7,7 @@ pub const Harness = struct {
     app: app.App,
     frames: tree.Frames,
     pub fn init(allocator: std.mem.Allocator) !Harness {
-        var runtime = try app.App.init(.{ .allocator = allocator, .renderer = .headless });
+        var runtime = try app.App.init(.{ .allocator = allocator });
         errdefer runtime.deinit();
         return .{ .app = runtime, .frames = try tree.Frames.init(allocator) };
     }

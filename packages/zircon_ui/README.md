@@ -1,10 +1,10 @@
 # Zircon UI
 
-A framework in Zig with explicit ownership. The verified foundations are a headless entity runtime and declarative frame builder. It does not load a window system, text engine, or GPU.
+A framework in Zig with explicit ownership. The public package currently provides a headless entity runtime, declarative frame builder, and layout. This core loads no native window system, text engine, or GPU. The text/Metal modules are tested separately; see the [implementation status](../../docs/status.md).
 
 ```zig
 const ui = @import("zircon_ui");
-var app = try ui.App.init(.{ .allocator = allocator, .renderer = .headless });
+var app = try ui.App.init(.{ .allocator = allocator });
 defer app.deinit();
 const counter = try app.createEntity(Counter, .{});
 try app.update(counter, Counter.increment, .{});
@@ -22,6 +22,8 @@ Generation-exhausted slots are retired. Ownership depth is capped at 128 to boun
 The full planned API is in the repository specification. Windows, rendering, observers, typed subscriptions, and workers are later milestones and are not implied by the entity API.
 
 ## Frame-local rendering
+
+Typed event payloads and direct handler calls work. Propagation controls, hit testing, and automatic input dispatch will be added with the dispatcher. `App.init` currently accepts only an allocator; I/O scheduling and renderer selection are not exposed yet.
 
 A view implements `pub fn render(self: *const Self, ui: *zircon_ui.Ui) !zircon_ui.Element`. `Ui.column`, `row`, `div`, `text`, `textFmt`, and `button` build indexed trees. Strings and child slices are copied into the staging arena. `ui.onClick(Self.method)` records the owner handle and a generated typed adapter, never a pointer to the render stack.
 

@@ -14,7 +14,6 @@ pub const Length = @import("ui/style.zig").Length;
 pub const Insets = @import("layout/geometry.zig").Insets;
 pub const Event = @import("event/event.zig").Event;
 pub const Click = @import("event/event.zig").Click;
-pub const DispatchControl = @import("event/event.zig").DispatchControl;
 pub const Rect = @import("layout/geometry.zig").Rect;
 pub const Size = @import("layout/geometry.zig").Size;
 pub const layout = struct {
