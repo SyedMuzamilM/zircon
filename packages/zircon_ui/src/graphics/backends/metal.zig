@@ -1,0 +1,426 @@
+//! Native Metal rendering through direct Zig bindings. The renderer owns its
+//! glyph atlas, shaped text cache and three leased instance buffers. Applications
+//! submit platform-neutral scenes and never handle Objective-C or GPU objects.
+const std = @import("std");
+const objc = @import("../../platform/macos/objc.zig");
+const text_mod = @import("../../text/shaping.zig");
+const scene = @import("../scene.zig");
+const geometry = @import("../../layout/geometry.zig");
+const Allocator = std.mem.Allocator;
+const Id = objc.Id;
+const CFRef = text_mod.CFRef;
+const Rect = geometry.Rect;
+const Color = geometry.Color;
+const Size = geometry.Size;
+const atlas_side = 2048;
+const max_instances = 262144;
+
+extern "c" fn MTLCreateSystemDefaultDevice() Id;
+extern "c" fn CFHash(CFRef) usize;
+extern "c" fn CFEqual(CFRef, CFRef) u8;
+extern "c" fn CTFontCreateCopyWithAttributes(CFRef, f64, ?*const anyopaque, ?CFRef) ?CFRef;
+extern "c" fn CTFontGetBoundingRectsForGlyphs(CFRef, u32, [*]const u16, ?[*]objc.CGRect, isize) objc.CGRect;
+extern "c" fn CTFontDrawGlyphs(CFRef, [*]const u16, [*]const objc.CGPoint, usize, *anyopaque) void;
+extern "c" fn CGBitmapContextCreate(?*anyopaque, usize, usize, usize, usize, ?CFRef, u32) ?*anyopaque;
+extern "c" fn CGContextRelease(*anyopaque) void;
+extern "c" fn CGContextSetGrayFillColor(*anyopaque, f64, f64) void;
+extern "c" fn CGContextSetShouldAntialias(*anyopaque, bool) void;
+extern "c" fn CGContextTranslateCTM(*anyopaque, f64, f64) void;
+
+const Origin = extern struct { x: usize = 0, y: usize = 0, z: usize = 0 };
+const TextureSize = extern struct { width: usize, height: usize, depth: usize = 1 };
+const Region = extern struct { origin: Origin = .{}, size: TextureSize };
+const ClearColor = extern struct { red: f64, green: f64, blue: f64, alpha: f64 };
+const Instance = extern struct {
+    rect: [4]f32,
+    clip: [4]f32,
+    color: [4]f32,
+    uv: [4]f32,
+    radius: f32,
+    mode: f32,
+    padding: [2]f32 = .{ 0, 0 },
+};
+comptime {
+    std.debug.assert(@sizeOf(Instance) == 80);
+}
+
+const GlyphKey = struct { font: CFRef, scale: u32, glyph: u16 };
+const Glyph = struct { bounds: Rect, uv: Rect };
+const GlyphContext = struct {
+    pub fn hash(_: GlyphContext, key: GlyphKey) u64 {
+        const parts = [3]u64{ CFHash(key.font), key.scale, key.glyph };
+        return std.hash.Wyhash.hash(0, std.mem.asBytes(&parts));
+    }
+    pub fn eql(_: GlyphContext, a: GlyphKey, b: GlyphKey) bool {
+        return a.scale == b.scale and a.glyph == b.glyph and CFEqual(a.font, b.font) != 0;
+    }
+};
+const BufferSlot = struct { buffer: Id = null, command: Id = null, capacity: usize = 0 };
+
+pub const Stats = struct {
+    frames: u64 = 0,
+    glyphs: u64 = 0,
+    shape_hits: u64 = 0,
+    shape_misses: u64 = 0,
+    cpu_ns: u64 = 0,
+    gpu_ns: u64 = 0,
+    atlas_bytes: usize = 0,
+    layout_bytes: usize = 0,
+    instance_bytes: usize = 0,
+};
+
+pub const Renderer = struct {
+    allocator: Allocator,
+    text: text_mod.TextSystem,
+    device: Id,
+    queue: Id,
+    pipeline: Id,
+    atlas: Id = null,
+    atlas_x: usize = 1,
+    atlas_y: usize = 1,
+    atlas_row: usize = 0,
+    glyphs: std.HashMapUnmanaged(GlyphKey, Glyph, GlyphContext, std.hash_map.default_max_load_percentage) = .empty,
+    instances: std.ArrayList(Instance) = .empty,
+    buffers: [3]BufferSlot = @splat(.{}),
+    next_slot: usize = 0,
+    counters: Stats = .{},
+
+    fn clearGlyphs(r: *Renderer) void {
+        var keys = r.glyphs.keyIterator();
+        while (keys.next()) |key| text_mod.CFRelease(key.font);
+        r.glyphs.clearRetainingCapacity();
+    }
+
+    fn resetAtlas(r: *Renderer) !void {
+        const descriptor = textureDescriptor(10, atlas_side, atlas_side, 1);
+        const fresh = objc.send(Id, r.device, "newTextureWithDescriptor:", .{descriptor}) orelse return error.MetalAllocationFailed;
+        errdefer objc.release(fresh);
+        const zero = try r.allocator.alloc(u8, atlas_side * atlas_side);
+        defer r.allocator.free(zero);
+        @memset(zero, 0);
+        objc.send(void, fresh, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", .{
+            Region{ .size = .{ .width = atlas_side, .height = atlas_side } },
+            @as(usize, 0),
+            @as(*const anyopaque, zero.ptr),
+            @as(usize, atlas_side),
+        });
+        // Metal command buffers retain referenced textures. Old generations
+        // therefore survive until every in-flight command using them completes.
+        objc.release(r.atlas);
+        r.atlas = fresh;
+        r.clearGlyphs();
+        r.atlas_x = 1;
+        r.atlas_y = 1;
+        r.atlas_row = 0;
+    }
+
+    fn glyph(r: *Renderer, font: CFRef, glyph_id: u16, scale: f32) !Glyph {
+        const key: GlyphKey = .{ .font = font, .scale = @bitCast(scale), .glyph = glyph_id };
+        if (r.glyphs.get(key)) |cached| return cached;
+        const pixel_font = CTFontCreateCopyWithAttributes(font, text_mod.CTFontGetSize(font) * scale, null, null) orelse return error.NativeFontUnavailable;
+        defer text_mod.CFRelease(pixel_font);
+        const native_bounds = CTFontGetBoundingRectsForGlyphs(pixel_font, 0, @ptrCast(&glyph_id), null, 1);
+        const min_x: f32 = @floatCast(@floor(native_bounds.origin.x));
+        const min_y: f32 = @floatCast(@floor(native_bounds.origin.y));
+        const width_f: f32 = @floatCast(@ceil(native_bounds.origin.x + native_bounds.size.width - min_x) + 2);
+        const height_f: f32 = @floatCast(@ceil(native_bounds.origin.y + native_bounds.size.height - min_y) + 2);
+        if (!std.math.isFinite(width_f) or !std.math.isFinite(height_f) or width_f < 0 or height_f < 0 or width_f > atlas_side - 2 or height_f > atlas_side - 2) return error.GlyphTooLarge;
+        const width: usize = @intFromFloat(width_f);
+        const height: usize = @intFromFloat(height_f);
+        if (r.atlas_x + width + 1 > atlas_side) {
+            r.atlas_x = 1;
+            r.atlas_y += r.atlas_row + 1;
+            r.atlas_row = 0;
+        }
+        if (r.atlas_y + height + 1 > atlas_side or r.glyphs.count() >= 32768) return error.AtlasFull;
+        const pixels = try r.allocator.alloc(u8, width * height);
+        defer r.allocator.free(pixels);
+        @memset(pixels, 0);
+        const context = CGBitmapContextCreate(pixels.ptr, width, height, 8, width, null, 7) orelse return error.GlyphRasterizationFailed;
+        defer CGContextRelease(context);
+        CGContextSetGrayFillColor(context, 1, 1);
+        CGContextSetShouldAntialias(context, true);
+        CGContextTranslateCTM(context, 1 - min_x, 1 - min_y);
+        const zero: objc.CGPoint = .{};
+        CTFontDrawGlyphs(pixel_font, @ptrCast(&glyph_id), @ptrCast(&zero), 1, context);
+        objc.send(void, r.atlas, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", .{
+            Region{ .origin = .{ .x = r.atlas_x, .y = r.atlas_y }, .size = .{ .width = width, .height = height } },
+            @as(usize, 0),
+            @as(*const anyopaque, pixels.ptr),
+            width,
+        });
+        const result: Glyph = .{
+            .bounds = .{ .x = (min_x - 1) / scale, .y = (min_y - 1) / scale, .width = width_f / scale, .height = height_f / scale },
+            .uv = .{ .x = @as(f32, @floatFromInt(r.atlas_x)) / atlas_side, .y = @as(f32, @floatFromInt(r.atlas_y)) / atlas_side, .width = width_f / atlas_side, .height = height_f / atlas_side },
+        };
+        _ = text_mod.CFRetain(font);
+        errdefer text_mod.CFRelease(font);
+        try r.glyphs.put(r.allocator, key, result);
+        r.atlas_x += width + 1;
+        r.atlas_row = @max(r.atlas_row, height);
+        return result;
+    }
+
+    fn append(r: *Renderer, rect: Rect, clip: Rect, color: Color, uv: Rect, radius: f32, mode: f32) !void {
+        if (rect.intersection(clip).width <= 0 or rect.intersection(clip).height <= 0) return;
+        if (r.instances.items.len >= max_instances) return error.SceneTooLarge;
+        try r.instances.append(r.allocator, .{
+            .rect = .{ rect.x, rect.y, rect.width, rect.height },
+            .clip = .{ clip.x, clip.y, clip.width, clip.height },
+            .color = .{ color.r, color.g, color.b, color.a },
+            .uv = .{ uv.x, uv.y, uv.width, uv.height },
+            .radius = radius,
+            .mode = mode,
+        });
+    }
+
+    fn build(r: *Renderer, frame: scene.Frame, scale: f32) !void {
+        r.instances.clearRetainingCapacity();
+        for (frame.items) |item| switch (item.kind) {
+            .rect => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 0),
+            .text => {
+                if (item.text.len == 0) continue;
+                const layout = try r.text.layout(item.text, item.font_size, item.mono);
+                var ascent: f64 = 0;
+                var descent: f64 = 0;
+                _ = text_mod.CTLineGetTypographicBounds(layout.line, &ascent, &descent, null);
+                const baseline: f32 = item.rect.y + @max(0, (item.rect.height - @as(f32, @floatCast(ascent + descent))) * 0.5) + @as(f32, @floatCast(ascent));
+                const runs = text_mod.CTLineGetGlyphRuns(layout.line);
+                var run_index: isize = 0;
+                while (run_index < text_mod.CFArrayGetCount(runs)) : (run_index += 1) {
+                    const run = text_mod.CFArrayGetValueAtIndex(runs, run_index);
+                    const font = text_mod.CFDictionaryGetValue(text_mod.CTRunGetAttributes(run), text_mod.kCTFontAttributeName) orelse return error.NativeFontUnavailable;
+                    const count = text_mod.CTRunGetGlyphCount(run);
+                    var glyph_index: isize = 0;
+                    while (glyph_index < count) : (glyph_index += 1) {
+                        var glyph_id: u16 = 0;
+                        var position: text_mod.CGPoint = undefined;
+                        const range: text_mod.CFRange = .{ .location = glyph_index, .length = 1 };
+                        text_mod.CTRunGetGlyphs(run, range, @ptrCast(&glyph_id));
+                        text_mod.CTRunGetPositions(run, range, @ptrCast(&position));
+                        const at = item.rect.x + @as(f32, @floatCast(position.x));
+                        if (at > item.clip.x + item.clip.width + item.font_size * 2 or at < item.clip.x - item.font_size * 3) continue;
+                        const cached = try r.glyph(font, glyph_id, scale);
+                        const b = cached.bounds;
+                        try r.append(.{ .x = at + b.x, .y = baseline - @as(f32, @floatCast(position.y)) - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1);
+                    }
+                }
+            },
+        };
+    }
+};
+
+pub fn create(allocator: Allocator) !*Renderer {
+    return createRenderer(allocator);
+}
+pub fn destroy(r: *Renderer) void {
+    destroyRenderer(r);
+}
+pub fn draw(r: *Renderer, frame: scene.Frame, size: Size, scale: f32, texture: Id, drawable: Id, synchronous: bool) !void {
+    try drawFrame(r, frame, size, scale, texture, drawable, synchronous);
+}
+pub fn snapshot(r: *Renderer, frame: scene.Frame, size: Size, path: []const u8) !void {
+    try snapshotFrame(r, frame, size, path);
+}
+pub fn stats(r: *Renderer) Stats {
+    return rendererStats(r);
+}
+
+fn createRenderer(allocator: Allocator) !*Renderer {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const device = MTLCreateSystemDefaultDevice() orelse return error.MetalUnavailable;
+    errdefer objc.release(device);
+    const queue = objc.send(Id, device, "newCommandQueue", .{}) orelse return error.MetalUnavailable;
+    errdefer objc.release(queue);
+    var native_error: Id = null;
+    const library = objc.send(Id, device, "newLibraryWithSource:options:error:", .{ objc.string(@embedFile("metal.metal")), @as(Id, null), &native_error }) orelse {
+        reportNativeError(native_error);
+        return error.MetalShaderCompilationFailed;
+    };
+    defer objc.release(library);
+    const vertex = objc.send(Id, library, "newFunctionWithName:", .{objc.string("vertex_main")}) orelse return error.MetalShaderUnavailable;
+    defer objc.release(vertex);
+    const fragment = objc.send(Id, library, "newFunctionWithName:", .{objc.string("fragment_main")}) orelse return error.MetalShaderUnavailable;
+    defer objc.release(fragment);
+    const descriptor = objc.send(Id, objc.class("MTLRenderPipelineDescriptor"), "new", .{}) orelse return error.MetalAllocationFailed;
+    defer objc.release(descriptor);
+    objc.send(void, descriptor, "setVertexFunction:", .{vertex});
+    objc.send(void, descriptor, "setFragmentFunction:", .{fragment});
+    const attachments = objc.send(Id, descriptor, "colorAttachments", .{});
+    const attachment = objc.send(Id, attachments, "objectAtIndexedSubscript:", .{@as(usize, 0)});
+    objc.send(void, attachment, "setPixelFormat:", .{@as(usize, 80)});
+    objc.send(void, attachment, "setBlendingEnabled:", .{true});
+    objc.send(void, attachment, "setSourceRGBBlendFactor:", .{@as(usize, 1)});
+    objc.send(void, attachment, "setDestinationRGBBlendFactor:", .{@as(usize, 5)});
+    objc.send(void, attachment, "setSourceAlphaBlendFactor:", .{@as(usize, 1)});
+    objc.send(void, attachment, "setDestinationAlphaBlendFactor:", .{@as(usize, 5)});
+    const pipeline = objc.send(Id, device, "newRenderPipelineStateWithDescriptor:error:", .{ descriptor, &native_error }) orelse {
+        reportNativeError(native_error);
+        return error.MetalPipelineUnavailable;
+    };
+    errdefer objc.release(pipeline);
+    const r = try allocator.create(Renderer);
+    errdefer allocator.destroy(r);
+    r.* = .{ .allocator = allocator, .text = .init(allocator), .device = device, .queue = queue, .pipeline = pipeline };
+    try r.resetAtlas();
+    return r;
+}
+
+fn destroyRenderer(r: *Renderer) void {
+    for (&r.buffers) |*slot| {
+        if (slot.command != null) objc.send(void, slot.command, "waitUntilCompleted", .{});
+        objc.release(slot.command);
+        objc.release(slot.buffer);
+    }
+    r.clearGlyphs();
+    r.glyphs.deinit(r.allocator);
+    r.instances.deinit(r.allocator);
+    r.text.deinit();
+    objc.release(r.atlas);
+    objc.release(r.pipeline);
+    objc.release(r.queue);
+    objc.release(r.device);
+    r.allocator.destroy(r);
+}
+
+fn textureDescriptor(format: usize, width: usize, height: usize, usage: usize) Id {
+    const descriptor = objc.send(Id, objc.class("MTLTextureDescriptor"), "texture2DDescriptorWithPixelFormat:width:height:mipmapped:", .{ format, width, height, false });
+    objc.send(void, descriptor, "setStorageMode:", .{@as(usize, 0)});
+    objc.send(void, descriptor, "setUsage:", .{usage});
+    return descriptor;
+}
+
+fn finishSlot(r: *Renderer, slot: *BufferSlot) !void {
+    if (slot.command == null) return;
+    // Three slots permit asynchronous frames. Only recycling a still-busy slot
+    // throttles submission; there is no wait after an ordinary presentation.
+    if (objc.send(usize, slot.command, "status", .{}) < 4) objc.send(void, slot.command, "waitUntilCompleted", .{});
+    const status = objc.send(usize, slot.command, "status", .{});
+    const start = objc.send(f64, slot.command, "GPUStartTime", .{});
+    const end = objc.send(f64, slot.command, "GPUEndTime", .{});
+    if (end > start) r.counters.gpu_ns = @intFromFloat((end - start) * 1e9);
+    if (status == 5) {
+        reportNativeError(objc.send(Id, slot.command, "error", .{}));
+        objc.release(slot.command);
+        slot.command = null;
+        return error.MetalExecutionFailed;
+    }
+    objc.release(slot.command);
+    slot.command = null;
+}
+
+fn drawFrame(r: *Renderer, frame: scene.Frame, size: Size, scale: f32, texture: Id, drawable: Id, synchronous: bool) !void {
+    if (texture == null or !std.math.isFinite(size.width) or !std.math.isFinite(size.height) or size.width <= 0 or size.height <= 0 or !std.math.isFinite(scale) or scale <= 0 or scale > 8) return error.InvalidRenderTarget;
+    try validateScene(frame);
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const start = objc.clockNs();
+    r.build(frame, scale) catch |err| {
+        if (err != error.AtlasFull) return err;
+        try r.resetAtlas();
+        r.build(frame, scale) catch |retry| return if (retry == error.AtlasFull) error.FrameExceedsAtlas else retry;
+    };
+    const slot = &r.buffers[r.next_slot];
+    try finishSlot(r, slot);
+    const required = @max(4096, r.instances.items.len * @sizeOf(Instance));
+    if (slot.buffer == null or slot.capacity < required) {
+        var capacity: usize = 4096;
+        while (capacity < required) capacity *= 2;
+        const fresh = objc.send(Id, r.device, "newBufferWithLength:options:", .{ capacity, @as(usize, 0) }) orelse return error.MetalAllocationFailed;
+        objc.release(slot.buffer);
+        slot.buffer = fresh;
+        slot.capacity = capacity;
+    }
+    const bytes = std.mem.sliceAsBytes(r.instances.items);
+    const destination = objc.send(?[*]u8, slot.buffer, "contents", .{}) orelse return error.MetalAllocationFailed;
+    @memcpy(destination[0..bytes.len], bytes);
+    const pass = objc.send(Id, objc.class("MTLRenderPassDescriptor"), "renderPassDescriptor", .{});
+    const attachments = objc.send(Id, pass, "colorAttachments", .{});
+    const attachment = objc.send(Id, attachments, "objectAtIndexedSubscript:", .{@as(usize, 0)});
+    objc.send(void, attachment, "setTexture:", .{texture});
+    objc.send(void, attachment, "setLoadAction:", .{@as(usize, 2)});
+    objc.send(void, attachment, "setStoreAction:", .{@as(usize, 1)});
+    const background = frame.background;
+    objc.send(void, attachment, "setClearColor:", .{ClearColor{ .red = background.r, .green = background.g, .blue = background.b, .alpha = background.a }});
+    const command = objc.send(Id, r.queue, "commandBuffer", .{}) orelse return error.MetalCommandUnavailable;
+    const encoder = objc.send(Id, command, "renderCommandEncoderWithDescriptor:", .{pass}) orelse return error.MetalCommandUnavailable;
+    objc.send(void, encoder, "setRenderPipelineState:", .{r.pipeline});
+    objc.send(void, encoder, "setVertexBuffer:offset:atIndex:", .{ slot.buffer, @as(usize, 0), @as(usize, 0) });
+    const logical_size = [2]f32{ size.width, size.height };
+    objc.send(void, encoder, "setVertexBytes:length:atIndex:", .{ @as(*const anyopaque, &logical_size), @as(usize, @sizeOf(@TypeOf(logical_size))), @as(usize, 1) });
+    objc.send(void, encoder, "setFragmentTexture:atIndex:", .{ r.atlas, @as(usize, 0) });
+    objc.send(void, encoder, "drawPrimitives:vertexStart:vertexCount:instanceCount:", .{ @as(usize, 3), @as(usize, 0), @as(usize, 6), r.instances.items.len });
+    objc.send(void, encoder, "endEncoding", .{});
+    if (drawable != null) objc.send(void, command, "presentDrawable:", .{drawable});
+    slot.command = objc.retain(command);
+    objc.send(void, command, "commit", .{});
+    r.counters.cpu_ns = objc.clockNs() - start;
+    r.counters.frames +%= 1;
+    r.next_slot = (r.next_slot + 1) % r.buffers.len;
+    if (synchronous) try finishSlot(r, slot);
+}
+
+fn snapshotFrame(r: *Renderer, frame: scene.Frame, size: Size, path: []const u8) !void {
+    if (!std.math.isFinite(size.width) or !std.math.isFinite(size.height) or size.width <= 0 or size.height <= 0 or size.width > 16384 or size.height > 16384) return error.InvalidSnapshotSize;
+    if (path.len == 0 or std.mem.indexOfScalar(u8, path, 0) != null) return error.InvalidSnapshotPath;
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const width: usize = @intFromFloat(@ceil(size.width));
+    const height: usize = @intFromFloat(@ceil(size.height));
+    const texture = objc.send(Id, r.device, "newTextureWithDescriptor:", .{textureDescriptor(80, width, height, 4)}) orelse return error.MetalAllocationFailed;
+    defer objc.release(texture);
+    try drawFrame(r, frame, size, 1, texture, null, true);
+    const raw_image = objc.send(Id, objc.class("NSBitmapImageRep"), "alloc", .{}) orelse return error.SnapshotAllocationFailed;
+    const image = objc.send(Id, raw_image, "initWithBitmapDataPlanes:pixelsWide:pixelsHigh:bitsPerSample:samplesPerPixel:hasAlpha:isPlanar:colorSpaceName:bitmapFormat:bytesPerRow:bitsPerPixel:", .{
+        @as(?*anyopaque, null),               width,         height,    @as(usize, 8),  @as(usize, 4), true, false,
+        objc.string("NSDeviceRGBColorSpace"), @as(usize, 0), width * 4, @as(usize, 32),
+    }) orelse return error.SnapshotAllocationFailed;
+    defer objc.release(image);
+    const pixels = objc.send(?[*]u8, image, "bitmapData", .{}) orelse return error.SnapshotAllocationFailed;
+    objc.send(void, texture, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{
+        @as(*anyopaque, pixels), width * 4, Region{ .size = .{ .width = width, .height = height } }, @as(usize, 0),
+    });
+    var offset: usize = 0;
+    while (offset < width * height * 4) : (offset += 4) std.mem.swap(u8, &pixels[offset], &pixels[offset + 2]);
+    const properties = objc.send(Id, objc.class("NSDictionary"), "dictionary", .{});
+    const png = objc.send(Id, image, "representationUsingType:properties:", .{ @as(usize, 4), properties }) orelse return error.SnapshotEncodingFailed;
+    var native_error: Id = null;
+    const written = objc.send(bool, png, "writeToFile:options:error:", .{ objc.string(path), @as(usize, 1), &native_error });
+    if (!written) {
+        reportNativeError(native_error);
+        return error.SnapshotWriteFailed;
+    }
+}
+
+fn rendererStats(r: *Renderer) Stats {
+    var result = r.counters;
+    result.glyphs = r.glyphs.count();
+    result.shape_hits = r.text.shape_hits;
+    result.shape_misses = r.text.shape_misses;
+    result.atlas_bytes = atlas_side * atlas_side;
+    result.layout_bytes = r.text.layout_bytes;
+    result.instance_bytes = r.instances.capacity * @sizeOf(Instance);
+    for (r.buffers) |slot| result.instance_bytes += slot.capacity;
+    return result;
+}
+
+fn reportNativeError(value: Id) void {
+    if (value != null) std.debug.print("Zircon UI: {s}\n", .{objc.fromString(objc.send(Id, value, "localizedDescription", .{}))});
+}
+
+fn validateScene(frame: scene.Frame) !void {
+    for (frame.items) |item| {
+        inline for (.{ "rect", "clip" }) |field| {
+            const bounds = @field(item, field);
+            inline for (.{ "x", "y", "width", "height" }) |axis| if (!std.math.isFinite(@field(bounds, axis))) return error.InvalidScene;
+            if (bounds.width < 0 or bounds.height < 0) return error.InvalidScene;
+        }
+        inline for (.{ "r", "g", "b", "a" }) |channel| {
+            const n = @field(item.color, channel);
+            if (!std.math.isFinite(n) or n < 0 or n > 1) return error.InvalidScene;
+        }
+        if (!std.math.isFinite(item.radius) or item.radius < 0) return error.InvalidScene;
+        if (item.kind == .text and (!std.math.isFinite(item.font_size) or item.font_size <= 0)) return error.InvalidScene;
+    }
+}

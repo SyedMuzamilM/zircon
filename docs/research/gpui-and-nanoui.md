@@ -1,3 +1,5 @@
+> Source research retained for reference. Implementation recommendations here predate the user-supplied framework specification; follow `docs/implementation-plan.md` for the current design. NanoUI is not a dependency.
+
 # GPUI and NanoUI research for Zircon
 
 Researched 2026-11-05 against primary source at the commits below. Zircon is the proposed name for a fresh native Zig desktop editor. The project directory was empty when inspected. Local `zig version` returned `0.17.0`.

@@ -27,3 +27,4 @@ pub const layout = struct {
     pub const Measurer = @import("layout/measure.zig").Measurer;
     pub const FixedMetrics = @import("layout/measure.zig").FixedMetrics;
 };
+pub const Color = @import("layout/geometry.zig").Color;

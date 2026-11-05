@@ -15,3 +15,5 @@ Use Zig 0.17.1:
 `tools/zig` uses the project-local compiler when present, otherwise Zig 0.17.1 on PATH. It never changes your global compiler. With Zig 0.17.1 on PATH, ordinary `zig build check` works as well.
 
 See the [package usage and lifetime contract](packages/zircon_ui/README.md), [implementation order](docs/implementation-plan.md), and [GPUI/NanoUI research](docs/research/gpui-and-nanoui.md). Native adapters will use direct Zig bindings, with Metal on macOS first. Neither reference framework is a dependency. Smaller/faster-than-Zed claims have not been established.
+
+On macOS with Metal, `./tools/zig build test-native` separately verifies direct Zig CoreText and GPU rendering. The tested native backend is a foundation for the next window/runtime milestone; `App.openWindow` and the editor are not implemented in this framework-first version yet.

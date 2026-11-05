@@ -36,3 +36,13 @@ The root `check` target includes compile-failure fixtures for mutable render met
 `layout.calculate(allocator, committed_frame, root, constraints, measurer)` produces owned bounds for one frame epoch. `deinit` the result. Rows/columns support padding, positive margins, gaps, flex grow/shrink, min/max freezing, cross-axis alignment, and main-axis justification. Dimensions support logical pixels, rem, viewport units, and percentages against the available parent content box. Intrinsic auto/percentage cycles do not implement browser CSS semantics. Flex wrapping, grid, and baseline alignment are not implemented.
 
 Inject text metrics through `layout.Measurer`. `layout.FixedMetrics` is a deterministic headless-test adapter, not a font shaper. Production layout will use the native shaping module. Invalid/nonfinite dimensions, invalid measurements, arithmetic overflow, excessive depth, and allocation failures return errors. A layout result cannot be reused with another frame epoch.
+
+## Native graphics layer
+
+The macOS shaping and offscreen Metal backend are independently implemented in Zig. `platform/macos/objc.zig` calls the system runtime directly. `text/shaping.zig` owns CoreText layouts and UTF-8/UTF-16 conversion. `graphics/backends/metal.zig` owns glyph rasterization, ordered instanced drawing, clipping, and GPU buffer leases. The `.metal` file is GPU shader source. There are no `.h`, `.c`, or `.m` implementation files and no NanoUI/GPUI dependency.
+
+Run the separate `./tools/zig build test-native` target from the repository root on a Mac with Metal. Tests decode a real rendered PNG and assert pixel colors for clipping, painter order, and rounded corners. They also exercise three leased buffers and synchronous snapshots. Core checks do not import the native-test root or load these frameworks.
+
+The layout cache has at most 512 entries and a 4 MiB estimated-cost budget; 64 font slots are retained. Oversized lines are transient and may exceed that cache budget. The active glyph atlas is 4 MiB; older atlas generations may remain alive while the GPU references them. Instance capacity is bounded and reported separately. These are resource policies, not measurements of whole-process memory.
+
+Current native limits include monochrome color-emoji coverage, runtime shader compilation, and a possible wait when recycling a busy GPU buffer. The native window/event loop and integration of layout/paint with the high-level `App.openWindow` API are not implemented yet. No Zed performance comparison is claimed.

@@ -22,7 +22,19 @@ pub fn build(b: *std.Build) void {
     }) });
     const example_run = b.addRunArtifact(example);
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);
-    const format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("examples"), b.path("packages/zircon_ui/src/root.zig"), b.path("packages/zircon_ui/src/ui"), b.path("packages/zircon_ui/src/layout"), b.path("packages/zircon_ui/src/event"), b.path("packages/zircon_ui/src/entity"), b.path("packages/zircon_ui/src/app"), b.path("packages/zircon_ui/src/testing/headless.zig"), b.path("packages/zircon_ui/tests") }, .check = true });
+    if (target.result.os.tag == .macos) {
+        const native = b.createModule(.{ .root_source_file = b.path("packages/zircon_ui/src/native_test_root.zig"), .target = target, .optimize = optimize, .link_libc = true });
+        for ([_][]const u8{ "AppKit", "Metal", "QuartzCore", "CoreText", "CoreGraphics", "CoreFoundation", "Foundation" }) |framework| native.linkFramework(framework, .{});
+        native.linkSystemLibrary("objc", .{});
+        const native_tests = b.addTest(.{ .root_module = b.createModule(.{
+            .root_source_file = b.path("packages/zircon_ui/tests/native_all.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "native", .module = native }},
+        }) });
+        b.step("test-native", "Verify direct Zig CoreText and Metal rendering").dependOn(&b.addRunArtifact(native_tests).step);
+    }
+    const format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("packages/zircon_ui"), b.path("examples") }, .check = true });
     b.step("fmt", "Check framework formatting").dependOn(&format.step);
     const contracts = b.step("contracts", "Check compile-time view, handler, and result contracts");
     for ([_][2][]const u8{

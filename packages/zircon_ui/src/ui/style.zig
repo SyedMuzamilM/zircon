@@ -1,7 +1,7 @@
 //! Typed styling for a documented flex subset, not a CSS string parser.
 const std = @import("std");
 pub const Insets = @import("../layout/geometry.zig").Insets;
-pub const Color = struct { r: f32, g: f32, b: f32, a: f32 = 1 };
+pub const Color = @import("../layout/geometry.zig").Color;
 pub const Length = union(enum) { auto, px: f32, percent: f32, rem: f32, viewport_width: f32, viewport_height: f32 };
 pub const Direction = enum { row, column };
 pub const Align = enum { start, center, end, stretch };

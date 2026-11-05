@@ -33,3 +33,7 @@ Only the user-supplied document is a full API specification. This checklist is a
 - The next tested unit adds deterministic flex layout with injected measurements. Native text and Metal remain isolated from core checks until their dedicated checks are wired.
 
 The native window and event-propagation milestones are still ahead. The headless counter inspects a tree; it is not advertised as a finished native application.
+
+The flex layout unit is committed as `993ed57`. Core validation now runs 36 behavior tests plus three expected compile failures. Direct Zig CoreText and Metal modules have a separate macOS test target with 12 tests, including rendered-pixel checks and asynchronous buffer reuse. The native implementation files follow the requested `text/`, `graphics/backends/`, and `platform/macos/` separation. The former `.h`/`.m` bridge is absent from the source tree.
+
+The next verifiable unit is the native window and high-level frame pipeline. It must integrate the existing committed/staging trees and const-render entities, rather than reintroducing the superseded immediate-frame application interface. Capture/target/bubble dispatch, persistent focus, observer dependency tracking, worker tasks, and editor integration remain later work.
