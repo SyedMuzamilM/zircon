@@ -75,6 +75,7 @@ fn format(a: std.mem.Allocator, binding: ui.Keymap(catalogue.Command).Binding) !
         .up => "↑",
         .down => "↓",
         .comma => ",",
+        .slash => "/",
         .space => "Space",
         .enter => "Enter",
         else => @tagName(binding.chord.key),

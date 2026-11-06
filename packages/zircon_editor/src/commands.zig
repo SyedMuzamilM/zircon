@@ -7,6 +7,7 @@ pub const Command = union(enum) {
     delete_forward,
     delete_to: Move,
     delete_line,
+    toggle_comment,
     move: Move,
     select_all,
     undo,

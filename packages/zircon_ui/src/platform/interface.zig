@@ -13,7 +13,7 @@ pub const WindowOptions = struct {
     background: g.Color = .{ .r = 0.07, .g = 0.08, .b = 0.1 },
 };
 pub const Modifiers = packed struct(u8) { shift: bool = false, control: bool = false, alt: bool = false, command: bool = false, _padding: u4 = 0 };
-pub const Key = enum { comma, left_bracket, right_bracket, unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z };
+pub const Key = enum { slash, comma, left_bracket, right_bracket, unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z };
 pub const Pointer = struct { position: g.Point, button: enum { primary, secondary, middle } = .primary, modifiers: Modifiers = .{}, clicks: u8 = 1 };
 /// Ordered UTF-8 byte range. Neither endpoint may split a code point.
 pub const TextRange = struct {

@@ -99,6 +99,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             }
             var result: Outcome = .{};
             if (command) switch (key.key) {
+                .slash => result = try self.execute(document, .toggle_comment),
                 .backspace, .delete => result = try self.execute(document, .{ .delete_to = .{ .direction = if (key.key == .backspace) .home else .end } }),
                 .a => result = try self.execute(document, .select_all),
                 .z => result = try self.execute(document, if (key.modifiers.shift) .redo else .undo),

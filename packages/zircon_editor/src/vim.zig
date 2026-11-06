@@ -509,6 +509,20 @@ fn token(self: *Editor, doc: *text.Document, key: u8, event: *ui.Event(ui.Input)
     if (v.prefix != 0) {
         const prefix = v.prefix;
         v.prefix = 0;
+        if (prefix == 'g' and key == 'c') {
+            if (v.visual()) return try comment(self, doc, event);
+            v.prefix = 'C';
+            return .{ .handled = true };
+        }
+        if (prefix == 'C') {
+            const row = (try s.pointAt(old)).line;
+            const target = if (key == 'c') @min(s.lineCount() - 1, row +| (count - 1)) else if (try motion(self, s, key, count, event)) |at| (try s.pointAt(at)).line else {
+                v.reset();
+                return .{ .handled = true };
+            };
+            self.selections.single(.{ .anchor = try s.lineStart(@min(row, target)), .head = (try s.lineRangeIncludingEnding(@max(row, target))).end });
+            return try comment(self, doc, event);
+        }
         if (prefix == 'g' and key == 'g') {
             self.preferred_x = null;
             return try finishMotion(self, doc, s, try s.lineStart(@min(s.lineCount() - 1, count - 1)), false, true, event);
@@ -731,4 +745,14 @@ pub fn synchronize(self: *Editor, s: text.Snapshot) void {
     v.anchor = @min(v.anchor, s.byteLen());
     while (!s.isBoundary(v.cursor)) v.cursor -= 1;
     while (!s.isBoundary(v.anchor)) v.anchor -= 1;
+}
+
+fn comment(self: *Editor, doc: *text.Document, event: *ui.Event(ui.Input)) !Outcome {
+    const result = try self.execute(doc, .toggle_comment);
+    self.vim.mode = .normal;
+    self.vim.reset();
+    var after = doc.snapshot();
+    defer after.deinit();
+    try select(self, after, event);
+    return result;
 }

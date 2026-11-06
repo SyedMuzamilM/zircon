@@ -254,6 +254,7 @@ pub const Editor = struct {
                 self.typing_group = 0;
                 return self.applyEdits(document, edits[0..count], 0);
             },
+            .toggle_comment => return @import("comments.zig").toggle(self, document, snapshot),
             .delete_line => {
                 const row = (try snapshot.pointAt(self.primary().head)).line;
                 var range = try snapshot.lineRangeIncludingEnding(row);

@@ -503,6 +503,7 @@ fn key(code: u16) platform.Key {
         38 => .j,
         40 => .k,
         43 => .comma,
+        44 => .slash,
         45 => .n,
         46 => .m,
         36, 76 => .enter,

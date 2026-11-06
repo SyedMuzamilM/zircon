@@ -827,3 +827,51 @@ test "wrapped Git deletion blocks map to the changed source and unwrap clamps sc
     try state.prepareView(snapshot, .{ .width = 160, .height = 200 }, metrics.measurer());
     try t.expectEqual(@as(f32, 0), state.scroll.offset);
 }
+
+test "Cmd slash toggles selected lines with indentation and undo while gcc comments the current line" {
+    var document = try text.Document.init(t.allocator, "    const x = 1;\n    const y = 2;\nnext\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.language = .zig;
+    state.selections.single(.{ .anchor = 4, .head = 34 });
+    var event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .slash, .modifiers = .{ .command = true } } } };
+    var outcome = try state.handle(&document, &event);
+    release(&outcome);
+    try expectText(&document, "    // const x = 1;\n    // const y = 2;\nnext\n");
+    outcome = try state.handle(&document, &event);
+    release(&outcome);
+    try expectText(&document, "    const x = 1;\n    const y = 2;\nnext\n");
+    state.selections.single(.{ .anchor = 4, .head = 4 });
+    state.setVim(true);
+    try vimKeys(&state, &document, "gcc");
+    try expectText(&document, "    // const x = 1;\n    const y = 2;\nnext\n");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "    const x = 1;\n    const y = 2;\nnext\n");
+}
+
+test "comments use extension delimiters and block-only profiles with CRLF and multiple cursors" {
+    var document = try text.Document.init(t.allocator, "  日 = 1\r\n  x = 2\r\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.language = .custom;
+    state.language_profile = .{ .keywords = &.{}, .line_comment = "# " };
+    state.selections.single(.{ .anchor = 2, .head = 2 });
+    try state.selections.items.append(t.allocator, .{ .anchor = 14, .head = 14 });
+    var result = try state.execute(&document, .toggle_comment);
+    release(&result);
+    try expectText(&document, "  # 日 = 1\r\n  # x = 2\r\n");
+    try t.expectEqual(@as(usize, 2), state.selections.items.items.len);
+    result = try state.execute(&document, .toggle_comment);
+    release(&result);
+    try expectText(&document, "  日 = 1\r\n  x = 2\r\n");
+    state.language_profile = .{ .keywords = &.{}, .block_comment = .{ .start = "<!--", .end = "-->" } };
+    state.selections.single(.{ .anchor = 2, .head = 2 });
+    result = try state.execute(&document, .toggle_comment);
+    release(&result);
+    try expectText(&document, "  <!-- 日 = 1 -->\r\n  x = 2\r\n");
+    result = try state.execute(&document, .toggle_comment);
+    release(&result);
+    try expectText(&document, "  日 = 1\r\n  x = 2\r\n");
+}
