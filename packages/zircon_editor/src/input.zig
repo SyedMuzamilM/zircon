@@ -92,7 +92,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             // Candidate navigation and acceptance belong to the input method
             // while marked text exists. Escape explicitly cancels our group.
             if (self.marked != null and !command and key.key != .escape) return .{};
-            if (!command and (key.key == .up or key.key == .down or key.key == .page_up or key.key == .page_down) and e._surface != null) {
+            if (!command and (key.key == .up or key.key == .down or key.key == .page_up or key.key == .page_down) and (e._surface != null or self.soft_wrap != .none)) {
                 try navigation.vertical(self, snapshot, e, key.key, key.modifiers.shift);
                 e.preventDefault();
                 return .{ .handled = true };
@@ -233,7 +233,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
         },
         .scroll => |wheel| {
             self.scroll.wheel(wheel.y, self.contentHeight(snapshot), e.bounds.height);
-            self.horizontal = @max(0, self.horizontal - wheel.x);
+            self.horizontal = if (self.soft_wrap == .none) @max(0, self.horizontal - wheel.x) else 0;
             e.preventDefault();
             return .{ .handled = true };
         },

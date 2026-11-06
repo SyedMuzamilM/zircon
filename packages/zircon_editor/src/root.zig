@@ -20,3 +20,5 @@ pub const annotations = @import("annotations.zig");
 pub const blame_view = @import("blame_view.zig");
 
 pub const vim = @import("vim.zig");
+
+pub const wrap = @import("wrap.zig");

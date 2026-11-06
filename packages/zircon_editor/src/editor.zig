@@ -15,6 +15,8 @@ pub const Editor = struct {
     selections: selection.Set,
     scroll: ui.controls.Scroll = .{},
     horizontal: f32 = 0,
+    soft_wrap: @import("wrap.zig").Mode = .none,
+    wrap_cache: *@import("wrap.zig").Cache,
     preferred_x: ?f32 = null,
     theme: @import("theme.zig").Theme = .{},
     git_changes: []@import("annotations.zig").GitChange = &.{},
@@ -31,8 +33,11 @@ pub const Editor = struct {
     line_height: f32 = 22,
     tab_width: usize = 4,
     language: syntax.Language = .plain,
+    language_id: ?[]const u8 = null,
     language_profile: ?@import("profile.zig").Profile = null,
     syntax_cache: syntax.Cache,
+    grammar_spans: []syntax.Span = &.{},
+    grammar_revision: ?u64 = null,
     history: std.ArrayList(SelectionHistory) = .empty,
     typing_group: u64 = 0,
     composition_group: u64 = 0,
@@ -43,9 +48,13 @@ pub const Editor = struct {
     search_query: []u8 = &.{},
     search_case_sensitive: bool = true,
     pub fn init(a: std.mem.Allocator) !Editor {
-        return .{ .allocator = a, .selections = try selection.Set.init(a), .syntax_cache = .init(a) };
+        var selections = try selection.Set.init(a);
+        errdefer selections.deinit(a);
+        return .{ .allocator = a, .selections = selections, .syntax_cache = .init(a), .wrap_cache = try @import("wrap.zig").Cache.init(a) };
     }
     pub fn deinit(self: *Editor) void {
+        self.allocator.free(self.grammar_spans);
+        self.wrap_cache.release();
         self.vim.deinit(self.allocator);
         self.allocator.free(self.git_changes);
         self.allocator.free(self.git_baseline);
@@ -56,6 +65,19 @@ pub const Editor = struct {
         self.history.deinit(self.allocator);
         self.allocator.free(self.search_query);
         self.* = undefined;
+    }
+    pub fn setHighlights(self: *Editor, snapshot: text.Snapshot, spans: []const syntax.Span) !void {
+        if (spans.len > 1_000_000) return error.TooManyHighlights;
+        var previous: usize = 0;
+        for (spans) |span| {
+            try snapshot.validateRange(.{ .start = span.start, .end = span.end });
+            if (span.start < previous) return error.InvalidHighlights;
+            previous = span.end;
+        }
+        const next = try self.allocator.dupe(syntax.Span, spans);
+        self.allocator.free(self.grammar_spans);
+        self.grammar_spans = next;
+        self.grammar_revision = snapshot.revision();
     }
     pub fn setVim(self: *Editor, enabled: bool) void {
         @import("vim.zig").enable(self, enabled);
@@ -81,6 +103,7 @@ pub const Editor = struct {
         };
     }
     pub fn mapChange(self: *Editor, change: *const text.Change) void {
+        self.wrap_cache.noteChange(change);
         self.vim.recording.active = false;
         self.vim.cursor = change.map(self.vim.cursor, .after);
         self.vim.anchor = change.map(self.vim.anchor, .after);
@@ -102,6 +125,7 @@ pub const Editor = struct {
         self.inline_blame = null;
     }
     pub fn rowAt(self: *const Editor, y: f32, revision: u64) usize {
+        if (self.soft_wrap != .none and self.wrap_cache.valid(revision)) return self.wrap_cache.rows.items[self.wrap_cache.visualAt(y, self.line_height, self.visibleChanges(revision))].line;
         return @import("annotations.zig").sourceRow(y, self.line_height, self.visibleChanges(revision));
     }
     pub fn primary(self: *const Editor) selection.Selection {
@@ -148,6 +172,7 @@ pub const Editor = struct {
         errdefer self.allocator.free(after_selections);
         try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
         var change = try document.apply(document.revision(), edits, group);
+        self.wrap_cache.noteChange(&change);
         @import("vim_repeat.zig").changed(self, &change, edits);
         for (edits, 0..) |edit, i| {
             const end = change.map(edit.range.end, .after);
@@ -336,12 +361,22 @@ pub const Editor = struct {
         self.typing_group = 0;
         return self.applyEdits(document, edits, 0);
     }
+    pub fn prepareView(self: *Editor, snapshot: text.Snapshot, viewport: ui.Size, metrics: ui.layout.Measurer) !void {
+        self.last_viewport = viewport;
+        if (self.soft_wrap != .none) {
+            const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
+            try self.wrap_cache.ensure(snapshot, viewport.width - gutter - 12, self.font_size, self.tab_width, metrics);
+            self.horizontal = 0;
+        }
+        self.reveal(snapshot);
+    }
     pub fn reveal(self: *Editor, snapshot: text.Snapshot) void {
         const row = (snapshot.pointAt(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head) catch return).line;
-        const start = self.rowY(row, snapshot.revision());
+        const start = if (self.soft_wrap != .none and self.wrap_cache.valid(snapshot.revision())) self.wrap_cache.rowY(self.wrap_cache.atOffset(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head), self.line_height, self.visibleChanges(snapshot.revision())) else self.rowY(row, snapshot.revision());
         self.scroll.reveal(start, start + self.line_height, self.contentHeight(snapshot), self.last_viewport.height);
     }
     pub fn rowY(self: *const Editor, row: usize, revision: u64) f32 {
+        if (self.soft_wrap != .none and self.wrap_cache.valid(revision)) return self.wrap_cache.y(row, self.line_height, self.visibleChanges(revision));
         return @import("annotations.zig").rowY(row, self.line_height, self.visibleChanges(revision));
     }
     pub fn visibleChanges(self: *const Editor, revision: u64) []const @import("annotations.zig").GitChange {
@@ -391,6 +426,15 @@ pub const Editor = struct {
     }
     pub fn handle(self: *Editor, document: *text.Document, event: *ui.Event(ui.Input)) !Outcome {
         const result = try @import("input.zig").handle(self, document, event);
+        if (self.soft_wrap != .none and result.handled) {
+            var snapshot = document.snapshot();
+            defer snapshot.deinit();
+            var fixed: ui.layout.FixedMetrics = .{ .advance = self.font_size * 0.6, .line_height = self.line_height };
+            const metrics = if (event._surface != null) try event.textMetrics() else fixed.measurer();
+            const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
+            try self.wrap_cache.ensure(snapshot, event.bounds.width - gutter - 12, self.font_size, self.tab_width, metrics);
+            if (event.data == .text or event.data == .edit or event.data == .key_down) self.reveal(snapshot);
+        }
         if (result.handled and event._surface != null and (event.data == .text or event.data == .edit or event.data == .key_down)) {
             var snapshot = document.snapshot();
             defer snapshot.deinit();

@@ -33,20 +33,27 @@ pub fn move(self: *Editor, snapshot: text.Snapshot, request: commands.Move) !voi
 pub fn vertical(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), key: ui.Key, extend: bool) !void {
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const metrics = try e.textMetrics();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = self.font_size * 0.6, .line_height = self.line_height };
+    const metrics = if (e._surface != null) try e.textMetrics() else fixed.measurer();
     const style: ui.TextStyle = .{ .size = self.font_size, .mono = true };
     for (self.selections.items.items, 0..) |*item, i| {
         const point = try snapshot.pointAt(item.head);
         const current_range = try snapshot.lineRange(point.line);
         const amount: usize = if (key == .page_up or key == .page_down) @max(1, @as(usize, @intFromFloat(e.bounds.height / self.line_height))) else 1;
-        const row = if (key == .up or key == .page_up) point.line -| amount else @min(snapshot.lineCount() - 1, point.line +| amount);
+        const wrapped = self.soft_wrap != .none and self.wrap_cache.valid(snapshot.revision());
+        const current_visual = if (wrapped) self.wrap_cache.atOffset(item.head) else 0;
+        const target_visual = if (key == .up or key == .page_up) current_visual -| amount else @min(self.wrap_cache.rows.items.len -| 1, current_visual +| amount);
+        const row = if (wrapped) self.wrap_cache.rows.items[target_visual].line else if (key == .up or key == .page_up) point.line -| amount else @min(snapshot.lineCount() - 1, point.line +| amount);
         const target_range = try snapshot.lineRange(row);
         if (current_range.end - current_range.start > 64 * 1024 or target_range.end - target_range.start > 64 * 1024) continue;
         const current = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), current_range), self.tab_width);
         const target = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), target_range), self.tab_width);
-        const x = if (i == 0) self.preferred_x orelse current.caret(metrics, style, @min(point.byte_column, current_range.end - current_range.start)) else current.caret(metrics, style, @min(point.byte_column, current_range.end - current_range.start));
+        const origin = if (wrapped) self.wrap_cache.rows.items[current_visual].x else 0;
+        const x = if (i == 0) self.preferred_x orelse current.caret(metrics, style, @min(point.byte_column, current_range.end - current_range.start)) - origin else current.caret(metrics, style, @min(point.byte_column, current_range.end - current_range.start)) - origin;
         if (i == 0) self.preferred_x = x;
-        item.head = target_range.start + target.index(metrics, style, x);
+        const target_origin = if (wrapped) self.wrap_cache.rows.items[target_visual].x else 0;
+        item.head = target_range.start + target.index(metrics, style, x + target_origin);
+        if (wrapped) item.head = std.math.clamp(item.head, self.wrap_cache.rows.items[target_visual].start, self.wrap_cache.rows.items[target_visual].end);
         if (!extend) item.anchor = item.head;
     }
     self.selections.normalize();
@@ -56,6 +63,8 @@ pub fn vertical(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
 pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), point: ui.Point) !usize {
     const metrics = try e.textMetrics();
     const relative = @max(0, point.y - e.bounds.y + self.scroll.offset);
+    const wrapped = self.soft_wrap != .none and self.wrap_cache.valid(snapshot.revision());
+    const part = if (wrapped) self.wrap_cache.rows.items[self.wrap_cache.visualAt(relative, self.line_height, self.visibleChanges(snapshot.revision()))] else null;
     const row = @min(snapshot.lineCount() - 1, self.rowAt(relative, snapshot.revision()));
     const range = try snapshot.lineRange(row);
     if (range.end - range.start > 64 * 1024) return range.start;
@@ -63,7 +72,8 @@ pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
     defer arena.deinit();
     const line = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), range), self.tab_width);
     const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
-    return range.start + line.index(metrics, .{ .size = self.font_size, .mono = true }, point.x - e.bounds.x - gutter + self.horizontal);
+    const at = range.start + line.index(metrics, .{ .size = self.font_size, .mono = true }, point.x - e.bounds.x - gutter + (if (part) |segment| segment.x else self.horizontal));
+    return if (part) |segment| std.math.clamp(at, segment.start, segment.end) else at;
 }
 fn wordCharacter(byte: u8) bool {
     return std.ascii.isAlphanumeric(byte) or byte == '_' or byte >= 0x80;
@@ -104,6 +114,11 @@ pub fn wordRange(snapshot: text.Snapshot, at: usize) !text.Range {
 /// Reveals the primary caret horizontally after navigation/editing. Metric
 /// allocation failure leaves the previous scroll value and document untouched.
 pub fn revealHorizontal(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input)) !void {
+    if (self.soft_wrap != .none) {
+        self.horizontal = 0;
+        self.reveal(snapshot);
+        return;
+    }
     const point = try snapshot.pointAt(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head);
     const range = try snapshot.lineRange(point.line);
     if (range.end - range.start > 64 * 1024) return;

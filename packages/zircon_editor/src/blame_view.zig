@@ -5,7 +5,7 @@ const ui = @import("zircon_ui");
 const text = @import("zircon_text");
 const annotations = @import("annotations.zig");
 const Theme = @import("theme.zig").Theme;
-pub const Options = struct { font: f32, line_height: f32, gutter: f32, horizontal: f32, scroll: f32, tab_width: usize };
+pub const Options = struct { source_y: ?f32 = null, source_x: f32 = 0, font: f32, line_height: f32, gutter: f32, horizontal: f32, scroll: f32, tab_width: usize };
 pub const Layout = struct { label: ui.Rect, card: ui.Rect, copy: ui.Rect, close: ui.Rect, message: ui.Rect, lines: []const []const u8, label_text: []const u8, content_height: f32 };
 pub fn layout(a: std.mem.Allocator, snapshot: text.Snapshot, blame: annotations.Blame, changes: []const annotations.GitChange, options: Options, metrics: ui.layout.Measurer, bounds: ui.Rect) !?Layout {
     if (blame.revision != snapshot.revision() or blame.line >= snapshot.lineCount()) return null;
@@ -16,8 +16,8 @@ pub fn layout(a: std.mem.Allocator, snapshot: text.Snapshot, blame: annotations.
     const width = (try metrics.text(metrics.context, source.bytes, .{ .size = options.font, .mono = true })).width;
     const label_text = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(a, "{s} · {s}", .{ blame.author, try annotations.date(a, blame.timestamp) });
     const measured = try metrics.text(metrics.context, label_text, .{ .size = options.font - 1 });
-    const line_y = bounds.y + annotations.rowY(blame.line, options.line_height, changes) - options.scroll;
-    const x = bounds.x + options.gutter + width - options.horizontal + 28;
+    const line_y = bounds.y + (options.source_y orelse annotations.rowY(blame.line, options.line_height, changes)) - options.scroll;
+    const x = bounds.x + options.gutter + width - options.source_x - options.horizontal + 28;
     const label: ui.Rect = .{ .x = x, .y = line_y + (options.line_height - measured.height) / 2, .width = @max(0, @min(measured.width, bounds.x + bounds.width - x - 12)), .height = measured.height };
     const card_width = @max(0, @min(560, bounds.width - 24));
     const rows = try wrap(a, metrics, @max(1, card_width - 28), if (blame.uncommitted) "This line has changes that have not been committed." else if (blame.message.len > 0) blame.message else blame.summary);

@@ -717,3 +717,92 @@ test "narrow editor advertises horizontal overflow and scrolls to reveal source"
     const owner = try app.windowEntity(View, h);
     try t.expectEqual(@as(f32, 100), try app.read(owner, Read.offset, .{}));
 }
+
+test "word wrapping preserves UTF8 source boundaries and reuses its visual map" {
+    var doc = try text.Document.init(t.allocator, "alpha beta gamma delta\n日🙂abcdefghi\n\tindented words follow here\n");
+    defer doc.deinit();
+    var source = doc.snapshot();
+    defer source.deinit();
+    const cache = try editor.wrap.Cache.init(t.allocator);
+    defer cache.release();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try cache.ensure(source, 80, 14, 4, fixed.measurer());
+    try t.expect(cache.rows.items.len > source.lineCount());
+    const first = cache.rows.items[0];
+    const bytes = try source.copy(t.allocator, .{ .start = first.start, .end = first.end });
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings("alpha ", bytes);
+    for (cache.rows.items) |row| {
+        try t.expect(source.isBoundary(row.start) and source.isBoundary(row.end));
+        try t.expectEqual(row.line, (try source.pointAt(row.start)).line);
+    }
+    const builds = cache.builds;
+    try cache.ensure(source, 80, 14, 4, fixed.measurer());
+    try t.expectEqual(builds, cache.builds);
+    try cache.ensure(source, 160, 14, 4, fixed.measurer());
+    try t.expectEqual(builds + 1, cache.builds);
+    try expectText(&doc, "alpha beta gamma delta\n日🙂abcdefghi\n\tindented words follow here\n");
+}
+
+test "wrapped canvas paints continuation rows and pointer and arrow navigation use them" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var doc = try text.Document.init(t.allocator, "alpha beta gamma delta epsilon zeta eta theta iota kappa\nsecond line\n");
+    var state = try editor.Editor.init(t.allocator);
+    state.soft_wrap = .editor_width;
+    const h = app.openWindow(View, .{ .visible = false, .width = 200, .height = 300 }, .{ .document = doc, .state = state }) catch |err| {
+        doc.deinit();
+        state.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    const owner = try app.windowEntity(View, h);
+    const Read = struct {
+        fn current(self: *const View) usize {
+            return self.state.primary().head;
+        }
+        fn part(self: *const View) editor.wrap.Row {
+            return self.state.wrap_cache.rows.items[1];
+        }
+    };
+    const part = try app.read(owner, Read.part, .{});
+    try t.expect(part.start > 0 and part.line == 0);
+    try app.dispatch(h, .{ .pointer_down = .{ .position = .{ .x = 54, .y = 25 } } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = .{ .x = 54, .y = 25 } } });
+    try t.expectEqual(part.start, try app.read(owner, Read.current, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .up } });
+    try t.expectEqual(@as(usize, 0), try app.read(owner, Read.current, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .down } });
+    try t.expectEqual(part.start, try app.read(owner, Read.current, .{}));
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-word-wrap.png");
+}
+
+test "wrapped edits reshape changed lines and retain UTF8 mappings in the suffix" {
+    var doc = try text.Document.init(t.allocator, "one two three four five\nunchanged 日🙂 line\nlast\n");
+    defer doc.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.soft_wrap = .editor_width;
+    var before = doc.snapshot();
+    defer before.deinit();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try state.wrap_cache.ensure(before, 80, 14, 4, fixed.measurer());
+    const shaped = state.wrap_cache.shaped_lines;
+    var outcome = try state.applyEdits(&doc, &.{.{ .range = .{ .start = 3, .end = 3 }, .text = " new\ninserted" }}, 0);
+    defer release(&outcome);
+    var after = doc.snapshot();
+    defer after.deinit();
+    try state.wrap_cache.ensure(after, 80, 14, 4, fixed.measurer());
+    try t.expectEqual(shaped + 2, state.wrap_cache.shaped_lines);
+    const fresh = try editor.wrap.Cache.init(t.allocator);
+    defer fresh.release();
+    try fresh.ensure(after, 80, 14, 4, fixed.measurer());
+    try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
+    var deletion = try state.applyEdits(&doc, &.{.{ .range = .{ .start = 0, .end = 13 }, .text = "" }}, 0);
+    defer release(&deletion);
+    var deleted = doc.snapshot();
+    defer deleted.deinit();
+    try state.wrap_cache.ensure(deleted, 80, 14, 4, fixed.measurer());
+    try fresh.ensure(deleted, 80, 14, 4, fixed.measurer());
+    try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
+}
