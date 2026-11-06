@@ -1,0 +1,112 @@
+[
+  {
+    "file": "zed-dark-commands.png",
+    "sha256": "cd9a3e13ade09238cea3f513d1a835aa4d267e6147b6dfaeeccef0f1d6f0c3de",
+    "bytes": 199849
+  },
+  {
+    "file": "zed-dark-diff.png",
+    "sha256": "eaf5cc05622f77fe683e66d796263330c003bddecc29c900aa0a71abca919fb1",
+    "bytes": 190919
+  },
+  {
+    "file": "zed-dark-editor.png",
+    "sha256": "b8389250f2a1f8e9b190c62ac01a99ea4400373cbd675f760c66ca08e25835d4",
+    "bytes": 201744
+  },
+  {
+    "file": "zed-dark-git.png",
+    "sha256": "950992925c5821eb0b338e4b19ae19eed7c6cda3d5cadc95da3a3bb7da952a16",
+    "bytes": 229984
+  },
+  {
+    "file": "zed-dark-selection.png",
+    "sha256": "76b358f7a53dc61d4c87e622bd381ae0540971ae6aa0e98d03721fe64027e63a",
+    "bytes": 201759
+  },
+  {
+    "file": "zed-dark-settings.png",
+    "sha256": "7f372062b6cfd18daa0d7188ccb7129218d29bc42b731ab4c9c7cd0c1b838189",
+    "bytes": 166993
+  },
+  {
+    "file": "zed-light-commands.png",
+    "sha256": "568616ddaa20c2dca95ea3a169da54ef213b02aa2613e58f0de50a64d76c0ca4",
+    "bytes": 225677
+  },
+  {
+    "file": "zed-light-editor.png",
+    "sha256": "06d8f7a85bef4099b2eb70eb3971b424b9abebb8f66e575cd3a9c94f6f121c6b",
+    "bytes": 231520
+  },
+  {
+    "file": "zed-light-git.png",
+    "sha256": "9cf22a8ff6d410ef7f8d96ef0b3e625ee72ae55320cf5cecf859655cc487b9b4",
+    "bytes": 192601
+  },
+  {
+    "file": "zed-light-settings.png",
+    "sha256": "7d240fa6feb7dc5a2e0c2f99a4bef1343b127a20ad55abfdd7285d65475f4505",
+    "bytes": 157359
+  },
+  {
+    "file": "zircon-dark-commands.png",
+    "sha256": "fee0cdc030da6c326f076871ffdc9549c34b1349ade955c1d5de76a31bb860de",
+    "bytes": 118116
+  },
+  {
+    "file": "zircon-dark-editor.png",
+    "sha256": "0932a6fad2af4c54f735f08f63b2138e3b2cd32ca794403206cd4162272049d9",
+    "bytes": 122198
+  },
+  {
+    "file": "zircon-dark-git.png",
+    "sha256": "4dd985772e7030747d7ab0cbc57faafc9dccf7bb8a781969816ae544fe7cce30",
+    "bytes": 119384
+  },
+  {
+    "file": "zircon-dark-selection.png",
+    "sha256": "235e427981a922cfae9796077dec534d36811c7e964d21a832c3381baf018b16",
+    "bytes": 121652
+  },
+  {
+    "file": "zircon-dark-settings.png",
+    "sha256": "b2e26558cded007b0c90c016f64af26b2bbf3a7987e37cbf365f54bfafc42437",
+    "bytes": 72480
+  },
+  {
+    "file": "zircon-dark-split.png",
+    "sha256": "24acde8f08c98e85c1400f54897f393dc2c8512613e227e212a0826cb23d115a",
+    "bytes": 126590
+  },
+  {
+    "file": "zircon-light-commands.png",
+    "sha256": "7f8ffc3c3e5d80523ac727b2bf106c2c3fa67041dbdcec91c5a15edd80beec62",
+    "bytes": 121617
+  },
+  {
+    "file": "zircon-light-editor.png",
+    "sha256": "d3f101fe538ea47f20057f027934f98b48ec73977114c3594865f61b70b4e38e",
+    "bytes": 125906
+  },
+  {
+    "file": "zircon-light-git.png",
+    "sha256": "744302468f60727abacf15716c645a0fb804411dc8326039a4acc0cb95a71259",
+    "bytes": 122953
+  },
+  {
+    "file": "zircon-light-selection.png",
+    "sha256": "114dfd8bbb32ef4cd773b6a278eecd6f0255309e00d04fb2d71644a6c75d2514",
+    "bytes": 125472
+  },
+  {
+    "file": "zircon-light-settings.png",
+    "sha256": "5015c5d8354ed760c196b7d776ff5815e7ec56909832b108b99c0db6e199d529",
+    "bytes": 74093
+  },
+  {
+    "file": "zircon-light-split.png",
+    "sha256": "cfdc92e139039a2f62230b33ad12a9eac51bc72223ab141a658d35c69270793f",
+    "bytes": 130128
+  }
+]

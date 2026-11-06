@@ -1,0 +1,1 @@
+These Zircon captures and the manifest were reviewed in gemini-final.md, opencode-beam-final.md and opencode-crouton-final.md. Zed reference files in the archived manifest resolve in the parent directory and are unchanged. The parent directory now holds the next candidate.
