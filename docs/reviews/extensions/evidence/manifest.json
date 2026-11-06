@@ -1,37 +1,42 @@
 {
   "captured": "2026-11-06",
-  "method": "Hidden native AppKit windows, committed framework frame exports; real official packages and servers.",
-  "journey": "./tools/zig build verify-zed-extensions -Dzed-output=/tmp/zircon-zed-native-release",
+  "method": "Hidden native AppKit windows. Official Zed packages, actual language servers; source/edit and catalog jobs, not browser mockups.",
+  "journey": "verify-zed-extensions, plus the native Markdown code regression",
   "files": [
     {
       "file": "extensions-catalog.png",
-      "sha256": "0caa73de211ff60c048c627592767d4a12aa06b768cc832940697c562870344a",
-      "bytes": 79602
+      "sha256": "849be7c7c8c45822ad9cd7334af9e43b330007eb2e7b2fbe0be0ae3ed359d4fa",
+      "bytes": 79705
     },
     {
       "file": "extensions-installed.png",
-      "sha256": "e64e40847f740be9e6b2d56c305d5e5b7202a0be8e052a08f3f8b25ebef2c4e7",
-      "bytes": 75875
+      "sha256": "659f7613bd914cbe59075da5493c4e0d874928aac9384ba58d02a4cfead3c495",
+      "bytes": 75779
+    },
+    {
+      "file": "markdown-code-wrap-light.png",
+      "sha256": "a7d651c4c80da70f2197babb863d3b91a3e617dd40063b2595542348e694ccfd",
+      "bytes": 65995
     },
     {
       "file": "official-zig-theme-icons-wrap.png",
-      "sha256": "82ded230c80a3447ca88aa76a5d84501859a43b2a344cf6d921c50684ea8ed09",
-      "bytes": 52320
+      "sha256": "f3c9a89f5a9d4f4eee20f2556463bb72c8d4e36e1d4f7d43ec0815d074dce70a",
+      "bytes": 52273
     },
     {
       "file": "official-zls-completion.png",
-      "sha256": "3d41d8b2a88eda5c022785696eab5158551a9d14e81d9ffd5951764cebd04660",
-      "bytes": 74295
+      "sha256": "2c3b80b37e15ccf28f23e3b3aa6b908b64fc2b8dd552b6b9b086df9d6b8c8701",
+      "bytes": 74199
     },
     {
       "file": "python-light-theme.png",
-      "sha256": "a2965201ca6c4d27374f12d06ff3b3b7b0f71540a1301db8423ddc600b406554",
-      "bytes": 38696
+      "sha256": "197de366be590dc737a180af46c4690bd3c8d30d13201ea63a7773a43abc82e8",
+      "bytes": 38643
     },
     {
       "file": "python-pyright-completion.png",
-      "sha256": "23a6d8ea3ef29ef05aface84e5b8ce91d24484ca895abcb580b63742e5c85425",
-      "bytes": 50977
+      "sha256": "ed524d7127f1f10de50a46e19949fad6d24580a90267ae1713e8d7c98e918318",
+      "bytes": 50882
     }
   ]
 }

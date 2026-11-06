@@ -1,0 +1,1 @@
+This candidate was reviewed by the reports named *-round-2.md. Zed reference images listed in this manifest remain in the parent directory and are unchanged. The parent now holds the next native candidate.

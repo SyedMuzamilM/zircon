@@ -28,7 +28,7 @@ Portable and native journeys cover ordinary UTF-8 input, stale native ranges, co
 
 New regressions assert initial light search paint, exact palette query height, no full-window palette dimming, outside dismissal, automatic ancestor reveal, completion placement and arrow-key handling. Existing selection tests now assert source-length bands and visible newline cells. The native capture runner also refuses an initially dark field in light settings.
 
-Full Zed feature parity remains incomplete: arbitrary pane trees, a native menu/terminal/debugger, collaboration, full LSP navigation/refactoring, complete Vim, soft wrapping/grapheme motion and asynchronous Markdown are not supplied by this UI pass. These gaps must remain visible in any overall feature assessment.
+At the first UI pass, arbitrary pane trees, a native menu/terminal/debugger, collaboration, full LSP navigation/refactoring, complete Vim, soft wrapping/grapheme motion and asynchronous Markdown were absent. The third candidate adds soft wrapping and language providers as described below. The other gaps remain visible in the feature assessment.
 
 ## Reproduce Zircon captures
 
@@ -58,3 +58,19 @@ Validation on this candidate: `zig build check test-settings-native` passed, inc
 The Gemini first-final report describes incremental/streaming Markdown and broad accessibility too strongly. The inspected Zed source establishes background/coalesced parsing and caching, not incremental event layout. Zircon's native tests do not establish full foreground IME or VoiceOver acceptance. Those statements are not adopted as conclusions here.
 
 The capture runner renders the project-search tab before typing into its field and rejects a snapshot unless real search matches exist and no overlay is open. Earlier transient search captures typed against the preceding frame and were discarded.
+
+## Third candidate
+
+Application source candidate: `2faf2bb`. Evidence was captured with this source before the commit; this section and its manifests are committed separately.
+
+The second candidate and its manifest are archived in `evidence/round-2/`; reports named `*-round-2.md` are historical. Current root images come from the native runner's `/tmp/zircon-ui-review/round-3-final` output, plus the native completion and Markdown regressions. The runner now includes real 700 × 650 windows for narrow editor/palette inspection. Reference Zed images remain unchanged.
+
+This candidate adds viewport word wrapping, the official Zed extension catalog and supported package adapters, bundled common-language grammar/LSP providers, actual ZLS/Pyright initialization/completions, and automatic dot completion. See `../../zed-extensions.md` for exact compatibility and performance limits. Additional package/server captures and hashes are in `../extensions/evidence/`.
+
+Markdown fenced code now receives editor theme token colors, preserves indentation and wraps long words instead of clipping. A new regression failed on the old light code color and passes with color, indentation and preview containment assertions. Native PNG evidence includes the long-token/Unicode light case. Known source suffixes and special filenames now map to useful extension searches. Small-window tests assert canvas containment above the status bar.
+
+The palette uses up to 560 pixels, bounded by a 24-pixel window inset, so long command labels fit in the 700-pixel window. In split editors, only the focused canvas paints an active line and bright line number. A native click regression checks that the highlight moves between panes. Inactive text selection retains its separate theme color.
+
+Validation: `./tools/zig build check test-settings-native`, Linux test cross-build, ReleaseFast build, formatting and generated-icon checks passed. The real-package journey passed again in `/tmp/zircon-zed-native-round-3`, including automatic ZLS completion, acceptance/undo, Pyright, theme/icons, wrapping and catalog installation. All current and archived second-candidate manifest hashes were checked. These checks do not measure runtime latency.
+
+This is still not full Zed feature parity. Current syntax providers parse off the UI thread and reject stale spans, but are not incremental Tree-sitter sessions; imported theme styles and API capabilities are partial. Markdown parsing/layout are cached, not incremental background rendering. Reviews must preserve these distinctions.
