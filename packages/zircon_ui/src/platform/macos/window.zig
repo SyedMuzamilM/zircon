@@ -196,7 +196,11 @@ fn setParent(raw: *anyopaque, parent: ?platform.Surface) void {
     if (old != null) objc.send(void, old, "removeChildWindow:", .{s.window});
     if (parent) |surface| {
         std.debug.assert(surface.ops == &ops);
-        objc.send(void, state(surface.context).window, "addChildWindow:ordered:", .{ s.window, @as(isize, 1) });
+        const parent_window = state(surface.context).window;
+        const parent_frame = objc.send(objc.CGRect, parent_window, "frame", .{});
+        const child_frame = objc.send(objc.CGRect, s.window, "frame", .{});
+        objc.send(void, s.window, "setFrameOrigin:", .{objc.CGPoint{ .x = parent_frame.origin.x + (parent_frame.size.width - child_frame.size.width) / 2, .y = parent_frame.origin.y + (parent_frame.size.height - child_frame.size.height) / 2 }});
+        objc.send(void, parent_window, "addChildWindow:ordered:", .{ s.window, @as(isize, 1) });
     }
 }
 fn raise(raw: *anyopaque) void {

@@ -14,7 +14,14 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
     const value = frame.nodes.items[index];
     const bounds = layout.bounds[index];
     const opacity = inherited_opacity * value.style.opacity;
-    if (value.style.background) |background| {
+    var hovered = frame.hovered_node;
+    var within_hover = false;
+    while (hovered) |current| : (hovered = frame.nodes.items[current].parent) if (current == index) {
+        within_hover = true;
+        break;
+    };
+    const background_value = if (within_hover) value.style.hover_background orelse value.style.background else value.style.background;
+    if (background_value) |background| {
         var color = background;
         color.a *= opacity;
         try painter.fillRect(.{ .bounds = bounds, .color = color, .radius = value.style.radius });

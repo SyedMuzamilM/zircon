@@ -58,6 +58,12 @@ pub const App = struct {
         try app.check();
         app.state.depth += 1;
     }
+    /// Native lifecycle callbacks can arrive synchronously while a view action
+    /// owns an entity borrow. Those notifications drain at the next app step.
+    pub fn transactionActive(app: *const App) bool {
+        std.debug.assert(app.state.thread == std.Thread.getCurrentId());
+        return app.state.depth != 0 or app.state.reactive.settling;
+    }
     pub fn endTransaction(app: *App) void {
         std.debug.assert(app.state.depth > 0);
         app.finishTransaction();
@@ -112,6 +118,8 @@ pub const App = struct {
         try app.check();
         if (app.state.depth != 0) return error.TransactionActive;
         if (!std.math.isFinite(time) or time < 0) return error.InvalidTime;
+        const native_count = app.state.windows.items.len;
+        for (0..native_count) |index| if (app.state.windows.items[index]) |window_value| try window_value.flushNativeFocus();
         var external_index: usize = 0;
         // Copy the registration before calling it: callbacks may register other
         // recipients and grow the list. Dead generational identities are retired.

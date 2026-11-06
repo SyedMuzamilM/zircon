@@ -22,6 +22,8 @@ pub const Style = struct {
     flex_grow: f32 = 0,
     flex_shrink: f32 = 1,
     background: ?Color = null,
+    hover_background: ?Color = null,
+    scroll_y: f32 = 0,
     radius: f32 = 0,
     opacity: f32 = 1,
     overflow: enum { visible, hidden } = .visible,
@@ -32,7 +34,7 @@ pub const Style = struct {
             .auto => {},
             inline else => |n| if (!std.math.isFinite(n) or n < 0) return error.InvalidStyle,
         };
-        inline for (.{ "gap", "flex_grow", "flex_shrink", "radius" }) |field| {
+        inline for (.{ "gap", "flex_grow", "flex_shrink", "radius", "scroll_y" }) |field| {
             const n = @field(style, field);
             if (!std.math.isFinite(n) or n < 0) return error.InvalidStyle;
         }
@@ -41,7 +43,7 @@ pub const Style = struct {
             if (!std.math.isFinite(n) or n < 0) return error.InvalidStyle;
         };
         if (!std.math.isFinite(style.opacity) or style.opacity < 0 or style.opacity > 1) return error.InvalidStyle;
-        if (style.background) |color| inline for (.{ "r", "g", "b", "a" }) |field| {
+        inline for (.{ "background", "hover_background" }) |name| if (@field(style, name)) |color| inline for (.{ "r", "g", "b", "a" }) |field| {
             const n = @field(color, field);
             if (!std.math.isFinite(n) or n < 0 or n > 1) return error.InvalidStyle;
         };

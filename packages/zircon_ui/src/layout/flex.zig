@@ -127,7 +127,7 @@ const Engine = struct {
         if (node.children.len == 0) return;
         const style = node.style;
         const horizontal = style.direction == .row;
-        const content: geometry.Rect = .{ .x = rect.x + style.padding.left, .y = rect.y + style.padding.top, .width = @max(0, rect.width - style.padding.horizontal()), .height = @max(0, rect.height - style.padding.vertical()) };
+        const content: geometry.Rect = .{ .x = rect.x + style.padding.left, .y = rect.y + style.padding.top - style.scroll_y, .width = @max(0, rect.width - style.padding.horizontal()), .height = @max(0, rect.height - style.padding.vertical()) };
         const available: geometry.Size = .{ .width = content.width, .height = content.height };
         if (style.direction == .stack) {
             for (node.children) |child| {

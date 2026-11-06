@@ -30,9 +30,12 @@ pub const Window = struct {
     restore_focus: ?u32 = null,
     capture: ?u32 = null,
     pressed: ?u32 = null,
+    pointer_position: ?g.Point = null,
     dirty: bool = true,
     closed: bool = false,
     active: bool = true,
+    pending_native_focus: ?bool = null,
+    pending_native_blur: bool = false,
     frame_count: u64 = 0,
     animations: @import("../animation/timeline.zig").Timeline,
     time: f64 = 0,
@@ -85,6 +88,7 @@ pub const Window = struct {
         const metrics = surface.measurer();
         const layout = try flex.calculate(staging.allocator(), staging, root, .{ .viewport = w.dimensions }, metrics);
         staging.bounds = layout.bounds;
+        if (w.pointer_position) |position| staging.hovered_node = hitTest(staging, modalRoot(staging) orelse root.index, position, .{ .width = w.dimensions.width, .height = w.dimensions.height });
         var next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, null, false);
         var next_restore = reconcile(&w.frames.committed, staging, w.restore_focus);
         if (modalRoot(&w.frames.committed) == null and modalRoot(staging) != null) next_restore = reconcile(&w.frames.committed, staging, w.focus);
@@ -136,7 +140,22 @@ pub const Window = struct {
     }
     fn receive(raw: *anyopaque, input: platform.Input) !void {
         const w: *Window = @ptrCast(@alignCast(raw));
+        if (input == .focus and w.app.transactionActive()) {
+            w.pending_native_focus = input.focus;
+            w.pending_native_blur = w.pending_native_blur or !input.focus;
+            w.dirty = true;
+            wake();
+            return;
+        }
         try w.dispatch(input);
+    }
+    pub fn flushNativeFocus(w: *Window) !void {
+        const focused = w.pending_native_focus orelse return;
+        w.pending_native_focus = null;
+        const blurred = w.pending_native_blur;
+        w.pending_native_blur = false;
+        if (blurred) try w.dispatch(.{ .focus = false });
+        if (focused or !blurred) try w.dispatch(.{ .focus = focused });
     }
     fn dragRegion(raw: *anyopaque, point: g.Point) bool {
         const w: *Window = @ptrCast(@alignCast(raw));
@@ -170,6 +189,7 @@ pub const Window = struct {
                 if (!focused) {
                     w.capture = null;
                     w.pressed = null;
+                    w.pointer_position = null;
                 }
             },
             else => {},
@@ -192,6 +212,10 @@ pub const Window = struct {
         };
         const route_root = modalRoot(frame) orelse frame.root.?.index;
         const hit = if (point) |p| hitTest(frame, route_root, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
+        if (point) |position| {
+            w.pointer_position = position;
+            if (frame.hovered_node != hit) w.dirty = true;
+        }
         const target = if (input == .close) frame.root.?.index else if (point != null) w.capture orelse hit orelse route_root else w.focus orelse route_root;
         if (input == .pointer_down) {
             w.pressed = buttonTarget(frame, hit);

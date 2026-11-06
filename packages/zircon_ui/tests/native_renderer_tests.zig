@@ -9,6 +9,8 @@ const shapes = [_]native.scene.Primitive{
     .{ .kind = .rect, .rect = .{ .x = 25, .y = 25, .width = 20, .height = 20 }, .clip = .{ .width = 240, .height = 150 }, .color = .{ .r = 0, .g = 1, .b = 0 } },
     .{ .kind = .rect, .rect = .{ .x = 70, .y = 10, .width = 30, .height = 30 }, .clip = .{ .width = 240, .height = 150 }, .color = .{ .r = 0, .g = 0, .b = 1 }, .radius = 8 },
     .{ .kind = .text, .rect = .{ .x = 10, .y = 70, .width = 220, .height = 30 }, .clip = .{ .width = 240, .height = 150 }, .color = .white, .font_size = 16, .mono = true, .text = "Zircon UI / 日本" },
+    .{ .kind = .line, .rect = .{ .x = 115, .y = 5, .width = 50, .height = 50 }, .clip = .{ .width = 240, .height = 150 }, .color = .white, .segment = .{ .start = .{ .x = 120, .y = 10 }, .end = .{ .x = 160, .y = 50 }, .width = 6 } },
+    .{ .kind = .line, .rect = .{ .x = 174, .y = 14, .width = 52, .height = 12 }, .clip = .{ .x = 180, .y = 0, .width = 20, .height = 40 }, .color = .{ .r = 1, .g = 0, .b = 0 }, .segment = .{ .start = .{ .x = 180, .y = 20 }, .end = .{ .x = 220, .y = 20 }, .width = 10 } },
 };
 test "Metal preserves clipping painter order rounding and native glyph rendering" {
     const pool = objc.Pool.init();
@@ -42,12 +44,22 @@ test "Metal preserves clipping painter order rounding and native glyph rendering
     try pixel(bitmap, 42, 22, .{ 0, 0, 0 });
     try pixel(bitmap, 70, 10, .{ 0, 0, 0 });
     try pixel(bitmap, 85, 25, .{ 0, 0, 1 });
+    try pixel(bitmap, 140, 30, .{ 1, 1, 1 });
+    try pixel(bitmap, 118, 9, .{ 1, 1, 1 }); // Round cap extends past endpoint.
+    try pixel(bitmap, 120, 30, .{ 0, 0, 0 }); // Outside diagonal stroke.
+    try pixel(bitmap, 190, 20, .{ 1, 0, 0 });
+    try pixel(bitmap, 201, 20, .{ 0, 0, 0 }); // Clip cuts the stroke itself.
     const stats = native.metal.stats(renderer);
     try t.expectEqual(@as(u64, 9), stats.frames);
     try t.expect(stats.glyphs > 0);
     try t.expectEqual(@as(usize, 4 * 1024 * 1024), stats.atlas_bytes);
     try t.expect(stats.layout_bytes <= 4 * 1024 * 1024);
     try t.expect(stats.instance_bytes > 0);
+    var invalid = shapes[4];
+    invalid.segment.?.width = std.math.nan(f32);
+    try t.expectError(error.InvalidScene, native.metal.snapshot(renderer, .{ .items = &.{invalid}, .background = .black }, .{ .width = 240, .height = 150 }, path));
+    invalid.segment = null;
+    try t.expectError(error.InvalidScene, native.metal.snapshot(renderer, .{ .items = &.{invalid}, .background = .black }, .{ .width = 240, .height = 150 }, path));
 }
 fn pixel(bitmap: objc.Id, x: usize, y: usize, expected: [3]f64) !void {
     const color = objc.send(objc.Id, bitmap, "colorAtX:y:", .{ x, y });

@@ -41,6 +41,7 @@ pub const Frame = struct {
     viewport: @import("../layout/geometry.zig").Size = .{ .width = 0, .height = 0 },
     text_input: ?@import("../platform/interface.zig").TextSnapshot = null,
     focused_node: ?u32 = null,
+    hovered_node: ?u32 = null,
     pub fn init(a: std.mem.Allocator) !Frame {
         return .{ .arena = .init(a), .epoch = try epoch() };
     }
@@ -66,6 +67,7 @@ pub const Frame = struct {
         frame.time = 0;
         frame.text_input = null;
         frame.focused_node = null;
+        frame.hovered_node = null;
         frame.next_deadline = null;
     }
     pub fn discard(frame: *Frame) void {

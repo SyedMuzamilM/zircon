@@ -19,6 +19,7 @@ pub const TextEdit = @import("platform/interface.zig").TextEdit;
 pub const Keymap = @import("event/actions.zig").Keymap;
 pub const Chord = @import("event/actions.zig").Chord;
 pub const controls = struct {
+    pub const icons = @import("controls/icons.zig");
     pub const TextInput = @import("controls/text_input.zig").TextInput;
     pub const Scroll = @import("controls/scroll.zig").Scroll;
     pub const visibleRows = @import("controls/scroll.zig").visibleRows;

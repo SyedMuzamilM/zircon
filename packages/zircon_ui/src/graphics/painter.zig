@@ -50,6 +50,21 @@ pub const Painter = struct {
         };
         for (edges) |edge| try painter.fillRect(.{ .bounds = edge, .color = color });
     }
+    /// Antialiased segment with round caps. Endpoints stay in logical pixels;
+    /// the native renderer evaluates coverage at the actual display scale.
+    pub fn strokeLine(painter: *Painter, start: g.Point, end: g.Point, color_value: g.Color, width: f32) !void {
+        inline for (.{ start.x, start.y, end.x, end.y, width }) |value| if (!std.math.isFinite(value)) return error.InvalidDrawCommand;
+        if (width < 0) return error.InvalidDrawCommand;
+        try validateColor(color_value);
+        if (width == 0) return;
+        const pad = width * 0.5 + 1;
+        const bounds: g.Rect = .{ .x = @min(start.x, end.x) - pad, .y = @min(start.y, end.y) - pad, .width = @abs(end.x - start.x) + pad * 2, .height = @abs(end.y - start.y) + pad * 2 };
+        const clipped = bounds.intersection(painter.clip());
+        if (clipped.width == 0 or clipped.height == 0) return;
+        var color = color_value;
+        color.a *= painter.opacity;
+        try painter.items.append(painter.allocator, .{ .kind = .line, .rect = bounds, .clip = painter.clip(), .color = color, .segment = .{ .start = start, .end = end, .width = width } });
+    }
     pub fn drawText(painter: *Painter, options: Text) !void {
         try validateRect(options.bounds);
         try options.style.validate();

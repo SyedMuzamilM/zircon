@@ -42,7 +42,14 @@ fragment float4 fragment_main(Vertex in [[stage_in]],
         in.point.x >= in.clip.x + in.clip.z ||
         in.point.y >= in.clip.y + in.clip.w) discard_fragment();
     float coverage = 1;
-    if (in.mode > 1.5) {
+    if (in.mode > 2.5) {
+        float2 start = in.uv.xy;
+        float2 delta = in.uv.zw - start;
+        float t = clamp(dot(in.point - start, delta) / max(dot(delta, delta), 0.00001), 0.0, 1.0);
+        float distance = length(in.point - start - t * delta) - in.radius;
+        float aa = max(fwidth(distance), 0.001);
+        coverage = 1 - smoothstep(-aa * 0.5, aa * 0.5, distance);
+    } else if (in.mode > 1.5) {
         constexpr sampler image_sampler(coord::normalized, address::clamp_to_edge,
                                         filter::linear);
         float4 sample = atlas.sample(image_sampler, in.uv.xy + in.local * in.uv.zw);

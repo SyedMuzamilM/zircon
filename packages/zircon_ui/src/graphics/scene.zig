@@ -1,7 +1,8 @@
 //! Platform-neutral display items. No native pointers or C transport types.
 const geometry = @import("../layout/geometry.zig");
 pub const Primitive = struct {
-    kind: enum { rect, text, image },
+    kind: enum { rect, text, image, line },
+    segment: ?struct { start: geometry.Point, end: geometry.Point, width: f32 } = null,
     mono: bool = false,
     rect: geometry.Rect,
     clip: geometry.Rect,

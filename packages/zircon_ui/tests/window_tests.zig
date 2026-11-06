@@ -4,7 +4,7 @@ const t = std.testing;
 const RichButton = struct {
     clicks: usize = 0,
     pub fn render(_: *const RichButton, b: *ui.Ui) !ui.Element {
-        return b.column(.{}, &.{try b.listen(try b.button(.{ .label = "Accessible row name", .on_click = b.onClick(click), .children = &.{ try b.styled(try b.text("Title"), .{ .height = .{ .px = 20 } }), try b.styled(try b.text("Metadata"), .{ .height = .{ .px = 20 } }) }, .style = .{ .height = .{ .px = 50 }, .gap = 4, .padding = ui.Insets.all(3) } }), .{})});
+        return b.column(.{}, &.{try b.listen(try b.button(.{ .label = "Accessible row name", .on_click = b.onClick(click), .children = &.{ try b.styled(try b.text("Title"), .{ .height = .{ .px = 20 } }), try b.styled(try b.text("Metadata"), .{ .height = .{ .px = 20 } }) }, .style = .{ .height = .{ .px = 50 }, .gap = 4, .padding = ui.Insets.all(3), .hover_background = ui.Color.rgb(0x123456) } }), .{})});
     }
     fn click(self: *RichButton, _: *ui.Event(ui.Click), cx: *ui.Context(RichButton)) void {
         self.clicks += 1;
@@ -28,6 +28,21 @@ test "composed button activates across decorative children and by keyboard" {
     _ = try app.step(1);
     const frame = &(try app.window(h)).frames.committed;
     for (frame.scene.items) |item| if (item.kind == .text) try t.expect(!std.mem.eql(u8, item.text, "Accessible row name"));
+}
+test "hover paints composed control ancestors and becomes idle after pointer settles" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(RichButton, .{ .visible = false, .width = 300, .height = 150 }, .{});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = 10, .y = 10 } } });
+    try t.expectEqual(@as(usize, 1), try app.step(1));
+    const window = try app.window(h);
+    try t.expectEqual(ui.Color.rgb(0x123456), window.frames.committed.scene.items[0].color);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = 11, .y = 10 } } });
+    try t.expectEqual(@as(usize, 0), try app.step(2));
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = 10, .y = 100 } } });
+    try t.expectEqual(@as(usize, 1), try app.step(3));
+    for (window.frames.committed.scene.items) |item| try t.expect(!std.meta.eql(item.color, ui.Color.rgb(0x123456)));
 }
 const Counter = struct {
     count: u32 = 0,

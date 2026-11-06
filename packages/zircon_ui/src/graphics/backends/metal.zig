@@ -242,6 +242,10 @@ pub const Renderer = struct {
             const start = r.instances.items.len;
             const texture = if (item.kind == .image) try r.imageTexture(item.image.?) else r.atlas;
             switch (item.kind) {
+                .line => {
+                    const segment = item.segment orelse return error.InvalidScene;
+                    try r.append(item.rect, item.clip, item.color, .{ .x = segment.start.x, .y = segment.start.y, .width = segment.end.x, .height = segment.end.y }, segment.width / 2, 3);
+                },
                 .rect => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 0),
                 .image => try r.append(item.rect, item.clip, item.color, item.uv, 0, 2),
                 .text => {
@@ -499,6 +503,11 @@ fn validateScene(frame: scene.Frame) !void {
             if (!std.math.isFinite(n) or n < 0 or n > 1) return error.InvalidScene;
         }
         if (!std.math.isFinite(item.radius) or item.radius < 0) return error.InvalidScene;
+        if (item.kind == .line) {
+            const segment = item.segment orelse return error.InvalidScene;
+            inline for (.{ segment.start.x, segment.start.y, segment.end.x, segment.end.y, segment.width }) |value| if (!std.math.isFinite(value)) return error.InvalidScene;
+            if (segment.width <= 0) return error.InvalidScene;
+        }
         if (item.kind == .text and (!std.math.isFinite(item.font_size) or item.font_size <= 0)) return error.InvalidScene;
         if (item.kind == .image) {
             const image = item.image orelse return error.InvalidScene;
