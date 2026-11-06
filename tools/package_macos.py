@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='zircon-package-',dir=args.output) as te
         if Path(source).is_file():shutil.copy2(source,resources/name)
     source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
     dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip())
-    (resources/'build.json').write_text(json.dumps({'source':source,'uncommitted_changes':dirty,'architecture':subprocess.check_output(['uname','-m'],text=True).strip(),'executables':{name:hashlib.sha256((mac/name).read_bytes()).hexdigest() for name in ('zircon','zircon-extension-host')}},indent=2)+'\n')
+    (resources/'build.json').write_text(json.dumps({'source':source,'uncommitted_changes':dirty,'architecture':subprocess.check_output(['uname','-m'],text=True).strip()},indent=2)+'\n')
     subprocess.run(['/usr/bin/codesign','--force','--sign','-',str(app)],check=True)
     subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(app)],check=True)
     target=args.output/'Zircon.app'
@@ -24,5 +24,6 @@ with tempfile.TemporaryDirectory(prefix='zircon-package-',dir=args.output) as te
 archive=args.output/'Zircon-macos-arm64.zip'
 if archive.exists():archive.unlink()
 subprocess.run(['/usr/bin/ditto','-c','-k','--sequesterRsrc','--keepParent',str(target),str(archive)],check=True)
+(args.output/'Zircon-build.json').write_text(json.dumps({'source':source,'uncommitted_changes':dirty,'executables':{name:hashlib.sha256((target/'Contents/MacOS'/name).read_bytes()).hexdigest() for name in ('zircon','zircon-extension-host')},'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest()},indent=2)+'\n')
 (args.output/'Zircon-macos-arm64.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest()+'  '+archive.name+'\n')
 print(target.resolve());print(archive.resolve())
