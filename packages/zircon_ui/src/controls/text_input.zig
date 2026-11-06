@@ -10,7 +10,16 @@ const events = @import("../event/event.zig");
 const p = @import("../platform/interface.zig");
 const g = @import("../layout/geometry.zig");
 const TextStyle = @import("../text/style.zig").TextStyle;
+const icons = @import("icons.zig");
 pub const TextInput = struct {
+    pub const Appearance = struct {
+        background: g.Color = g.Color.rgb(0x282c33),
+        foreground: g.Color = g.Color.rgb(0xdce0e5),
+        placeholder: g.Color = g.Color.rgb(0xa9afbc),
+        selection: g.Color = g.Color.rgb(0x364357),
+        caret: g.Color = g.Color.rgb(0x74ade8),
+        focus_border: g.Color = g.Color.rgb(0x74ade8),
+    };
     allocator: std.mem.Allocator,
     bytes: std.ArrayList(u8) = .empty,
     anchor: usize = 0,
@@ -19,6 +28,10 @@ pub const TextInput = struct {
     marked: ?p.TextRange = null,
     dragging: bool = false,
     placeholder: []const u8 = "Type here…",
+    appearance: Appearance = .{},
+    height: f32 = 30,
+    font_size: f32 = 13,
+    leading_icon: ?icons.Name = null,
     pub fn init(a: std.mem.Allocator, text: []const u8) !TextInput {
         if (!validLine(text)) return error.InvalidText;
         var input: TextInput = .{ .allocator = a };
@@ -31,8 +44,14 @@ pub const TextInput = struct {
         self.bytes.deinit(self.allocator);
     }
     pub fn render(self: *const TextInput, b: *Ui) !Element {
-        const field: Field = .{ .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked };
-        return b.listen(try b.key(.{ .string = "text-input" }, try b.custom(Field, field, .{ .height = .{ .px = 38 }, .overflow = .hidden })), .{ .focusable = true, .on_input = b.onInput(onInput) });
+        try (TextStyle{ .size = self.font_size }).validate();
+        const field: Field = .{ .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked, .appearance = self.appearance, .height = self.height, .font_size = self.font_size, .leading_icon = self.leading_icon };
+        return b.listen(try b.key(.{ .string = "text-input" }, try b.custom(Field, field, .{ .height = .{ .px = self.height }, .overflow = .hidden })), .{ .focusable = true, .on_input = b.onInput(onInput) });
+    }
+    pub fn setAppearance(self: *TextInput, cx: *runtime.Context(TextInput), appearance: Appearance) void {
+        if (std.meta.eql(self.appearance, appearance)) return;
+        self.appearance = appearance;
+        cx.notify();
     }
     pub fn copy(self: *const TextInput, a: std.mem.Allocator, output: *[]u8) !void {
         output.* = try a.dupe(u8, self.bytes.items);
@@ -61,7 +80,7 @@ pub const TextInput = struct {
             .pointer_down => |pointer| {
                 if (pointer.button != .primary) return;
                 const metrics = try e.textMetrics();
-                const offset = metrics.index(self.bytes.items, .{}, pointer.position.x - e.bounds.x - 10);
+                const offset = metrics.index(self.bytes.items, .{ .size = self.font_size }, pointer.position.x - e.bounds.x - textInset(self.leading_icon));
                 if (!pointer.modifiers.shift) self.anchor = offset;
                 self.cursor = offset;
                 self.dragging = true;
@@ -72,7 +91,7 @@ pub const TextInput = struct {
             .pointer_move => |pointer| {
                 if (!self.dragging) return;
                 const metrics = try e.textMetrics();
-                self.cursor = metrics.index(self.bytes.items, .{}, pointer.position.x - e.bounds.x - 10);
+                self.cursor = metrics.index(self.bytes.items, .{ .size = self.font_size }, pointer.position.x - e.bounds.x - textInset(self.leading_icon));
                 e.preventDefault();
             },
             .pointer_up => {
@@ -162,13 +181,18 @@ const Field = struct {
     cursor: usize,
     revision: u64,
     marked: ?p.TextRange,
+    appearance: TextInput.Appearance,
+    height: f32,
+    font_size: f32,
+    leading_icon: ?icons.Name,
     pub const LayoutState = @import("../layout/measure.zig").Measurer;
     pub const PrepaintState = g.Rect;
-    pub fn requestLayout(_: *Field, cx: *custom.LayoutCx) !custom.LayoutResult(LayoutState) {
-        return .{ .size = .{ .width = cx.available.width, .height = 38 }, .state = cx.measurer };
+    pub fn requestLayout(self: *Field, cx: *custom.LayoutCx) !custom.LayoutResult(LayoutState) {
+        return .{ .size = .{ .width = cx.available.width, .height = self.height }, .state = cx.measurer };
     }
     pub fn prepaint(self: *Field, cx: *custom.PrepaintCx, bounds: g.Rect, metrics: *LayoutState) !g.Rect {
-        const caret: g.Rect = .{ .x = bounds.x + 10 + metrics.caret(self.text, .{}, self.cursor), .y = bounds.y + 10, .width = 1.5, .height = 18 };
+        const size = try metrics.text(metrics.context, "M", .{ .size = self.font_size });
+        const caret: g.Rect = .{ .x = bounds.x + textInset(self.leading_icon) + metrics.caret(self.text, .{ .size = self.font_size }, self.cursor), .y = bounds.y + @max(0, bounds.height - size.height) / 2, .width = 1, .height = @min(size.height, bounds.height) };
         if (cx.focused) {
             try cx.setTextInput(.{ .text = self.text, .revision = self.revision, .selection = self.selection, .marked = self.marked, .caret = caret });
             try cx.requestFrameAfter(0.5 - @mod(cx.time, 0.5));
@@ -176,19 +200,25 @@ const Field = struct {
         return caret;
     }
     pub fn paint(self: *Field, cx: *custom.PaintCx, bounds: g.Rect, metrics: *LayoutState, caret: *g.Rect) !void {
-        try cx.painter.fillRect(.{ .bounds = bounds, .color = g.Color.rgb(0x202631), .radius = 6 });
+        try cx.painter.fillRect(.{ .bounds = bounds, .color = self.appearance.background, .radius = 3 });
+        if (cx.focused) try cx.painter.strokeRect(bounds, self.appearance.focus_border, 1);
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
-        const content: g.Rect = .{ .x = bounds.x + 10, .y = bounds.y + 10, .width = @max(0, bounds.width - 20), .height = 20 };
+        if (self.leading_icon) |icon| try icons.draw(icon, cx.painter, .{ .x = bounds.x + 8, .y = bounds.y + (bounds.height - 14) / 2, .width = 14, .height = 14 }, self.appearance.placeholder);
+        const inset = textInset(self.leading_icon);
+        const content: g.Rect = .{ .x = bounds.x + inset, .y = caret.y, .width = @max(0, bounds.width - inset - 8), .height = caret.height };
         if (self.selection.start != self.selection.end) {
-            const left = metrics.caret(self.text, .{}, self.selection.start);
-            const right = metrics.caret(self.text, .{}, self.selection.end);
-            try cx.painter.fillRect(.{ .bounds = .{ .x = content.x + left, .y = content.y, .width = right - left, .height = 18 }, .color = g.Color.rgb(0x365a91) });
+            const left = metrics.caret(self.text, .{ .size = self.font_size }, self.selection.start);
+            const right = metrics.caret(self.text, .{ .size = self.font_size }, self.selection.end);
+            try cx.painter.fillRect(.{ .bounds = .{ .x = content.x + left, .y = content.y, .width = right - left, .height = content.height }, .color = self.appearance.selection });
         }
-        try cx.painter.drawText(.{ .bounds = content, .text = if (self.text.len == 0) self.placeholder else self.text, .style = .{ .color = g.Color.rgb(if (self.text.len == 0) @as(u24, 0x7c879b) else 0xe0e6f0) } });
-        if (cx.focused and @mod(cx.time, 1.0) < 0.5) try cx.painter.fillRect(.{ .bounds = caret.*, .color = g.Color.rgb(0x8abaff) });
+        try cx.painter.drawText(.{ .bounds = content, .text = if (self.text.len == 0) self.placeholder else self.text, .style = .{ .size = self.font_size, .color = if (self.text.len == 0) self.appearance.placeholder else self.appearance.foreground } });
+        if (cx.focused and @mod(cx.time, 1.0) < 0.5) try cx.painter.fillRect(.{ .bounds = caret.*, .color = self.appearance.caret });
     }
 };
+fn textInset(leading: ?icons.Name) f32 {
+    return if (leading != null) 28 else 8;
+}
 fn validLine(bytes: []const u8) bool {
     return std.unicode.utf8ValidateSlice(bytes) and std.mem.indexOfAny(u8, bytes, "\r\n\x00") == null;
 }

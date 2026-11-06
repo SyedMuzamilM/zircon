@@ -41,7 +41,19 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             const text = if (value.kind == .text) value.kind.text else value.kind.button.label;
             var style = value.style.text;
             style.color.a *= opacity;
-            const content: g.Rect = .{ .x = bounds.x + value.style.padding.left, .y = bounds.y + value.style.padding.top, .width = @max(0, bounds.width - value.style.padding.horizontal()), .height = @max(0, bounds.height - value.style.padding.vertical()) };
+            var content: g.Rect = .{ .x = bounds.x + value.style.padding.left, .y = bounds.y + value.style.padding.top, .width = @max(0, bounds.width - value.style.padding.horizontal()), .height = @max(0, bounds.height - value.style.padding.vertical()) };
+            // A bare button label follows the same alignment as a text child.
+            // Previously its top-left paint origin ignored centered layout.
+            if (value.kind == .button and value.children.len == 0) {
+                const measured = try measurer.text(measurer.context, text, style);
+                const horizontal = value.style.direction == .row;
+                const center_x = if (horizontal) value.style.justify_content == .center else value.style.align_items == .center;
+                const center_y = if (horizontal) value.style.align_items == .center else value.style.justify_content == .center;
+                if (center_x) content.x += @max(0, content.width - measured.width) / 2;
+                if (center_y) content.y += @max(0, content.height - measured.height) / 2;
+                content.width = @min(content.width, measured.width);
+                content.height = @min(content.height, measured.height);
+            }
             if (value.kind == .text or value.children.len == 0) try painter.drawText(.{ .bounds = content, .text = text, .style = style });
         },
     }

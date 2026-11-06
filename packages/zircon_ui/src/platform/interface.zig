@@ -70,6 +70,7 @@ pub const Input = union(enum) {
     pointer_down: Pointer,
     pointer_up: Pointer,
     pointer_move: Pointer,
+    pointer_leave,
     scroll: struct { position: g.Point, x: f32, y: f32, modifiers: Modifiers = .{} },
     key_down: struct { key: Key, modifiers: Modifiers = .{}, repeat: bool = false },
     text: []const u8,

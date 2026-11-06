@@ -149,6 +149,7 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     errdefer allocator.destroy(s);
     s.* = .{ .allocator = allocator, .sink = sink, .window = window, .view = view, .layer = layer, .renderer = renderer };
     _ = object_setInstanceVariable(view, "zirconState", s);
+    errdefer _ = object_setInstanceVariable(view, "zirconState", null);
     objc.send(void, layer, "setDevice:", .{renderer.device});
     objc.send(void, layer, "setPixelFormat:", .{@as(usize, 80)});
     objc.send(void, layer, "setFramebufferOnly:", .{true});
@@ -158,6 +159,11 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     objc.send(void, view, "setLayer:", .{layer});
     objc.send(void, view, "setAutoresizingMask:", .{@as(usize, 2 | 16)});
     objc.send(void, window, "setContentView:", .{view});
+    // Follow hover through entry and exit as well as movement. The visible-rect
+    // option keeps this area correct when AppKit resizes the content view.
+    const tracking = objc.send(Id, objc.send(Id, objc.class("NSTrackingArea"), "alloc", .{}), "initWithRect:options:owner:userInfo:", .{ objc.CGRect{}, @as(usize, 1 | 2 | 0x80 | 0x200), view, @as(Id, null) }) orelse return error.WindowCreationFailed;
+    objc.send(void, view, "addTrackingArea:", .{tracking});
+    objc.release(tracking);
     objc.send(void, window, "setDelegate:", .{view});
     objc.send(void, window, "setTitle:", .{objc.string(options.title)});
     objc.send(void, window, "setAcceptsMouseMovedEvents:", .{true});
@@ -340,6 +346,8 @@ fn registerView() !void {
     try add(pointerUp, "rightMouseUp:", "v@:@");
     try add(pointerUp, "otherMouseUp:", "v@:@");
     try add(pointerMove, "mouseMoved:", "v@:@");
+    try add(pointerMove, "mouseEntered:", "v@:@");
+    try add(pointerExit, "mouseExited:", "v@:@");
     try add(pointerMove, "mouseDragged:", "v@:@");
     try add(pointerMove, "rightMouseDragged:", "v@:@");
     try add(pointerMove, "otherMouseDragged:", "v@:@");
@@ -401,7 +409,14 @@ fn pointerUp(object: Id, _: Sel, event: Id) callconv(.c) void {
 }
 fn pointerMove(object: Id, _: Sel, event: Id) callconv(.c) void {
     const s = nativeState(object) orelse return;
-    s.emit(.{ .pointer_move = pointer(s, event) });
+    // Tracking events have a location and modifiers, but AppKit raises an
+    // exception for clickCount/buttonNumber. Only button events use pointer().
+    const kind = objc.send(usize, event, "type", .{});
+    s.emit(.{ .pointer_move = .{ .position = eventPoint(s, event), .modifiers = modifiers(event), .button = if (kind == 7) .secondary else if (kind == 27) .middle else .primary } });
+}
+fn pointerExit(object: Id, _: Sel, _: Id) callconv(.c) void {
+    const s = nativeState(object) orelse return;
+    s.emit(.pointer_leave);
 }
 fn scroll(object: Id, _: Sel, event: Id) callconv(.c) void {
     const s = nativeState(object) orelse return;

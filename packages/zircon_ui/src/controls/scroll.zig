@@ -24,10 +24,10 @@ pub fn visibleRows(count: usize, height: f32, offset: f32, viewport: f32, oversc
     if (!std.math.isFinite(height) or height <= 0 or !std.math.isFinite(offset) or !std.math.isFinite(viewport) or offset < 0 or viewport < 0) return error.InvalidViewport;
     const total = @as(f32, @floatFromInt(count)) * height;
     if (!std.math.isFinite(total)) return error.InvalidViewport;
-    const clamped = @min(offset, total);
+    const clamped = @min(offset, @max(0, total - viewport));
     const first: usize = @intFromFloat(@floor(clamped / height));
     const visible: usize = @intFromFloat(@ceil(@min(viewport, total) / height));
     const start = first -| overscan;
     const end = @min(count, first +| visible +| overscan +| 1);
-    return .{ .start = start, .end = end, .top = @as(f32, @floatFromInt(start)) * height - offset, .total_height = total };
+    return .{ .start = start, .end = end, .top = @as(f32, @floatFromInt(start)) * height - clamped, .total_height = total };
 }

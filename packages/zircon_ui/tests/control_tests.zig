@@ -1,6 +1,33 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const t = std.testing;
+test "themed search fields center text and use the same inset for hit testing" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var input = try ui.controls.TextInput.init(t.allocator, "sample");
+    input.leading_icon = .search;
+    const handle = try app.openWindow(ui.controls.TextInput, .{ .visible = false, .width = 300, .height = 80 }, input);
+    const owner = try app.windowEntity(ui.controls.TextInput, handle);
+    const appearance: ui.controls.TextInput.Appearance = .{ .background = .white, .foreground = .black };
+    try app.update(owner, ui.controls.TextInput.setAppearance, .{appearance});
+    _ = try app.step(0);
+    const window = try app.window(handle);
+    const caret = window.frames.committed.text_input.?.caret;
+    try t.expectApproxEqAbs(@as(f32, 6), caret.y, 0.01);
+    var found = false;
+    for (window.frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, "sample")) {
+        try t.expectEqual(ui.Color.black, item.color);
+        try t.expectApproxEqAbs(@as(f32, 28), item.rect.x, 0.01);
+        found = true;
+    };
+    try t.expect(found);
+    try app.dispatch(handle, .{ .pointer_down = .{ .position = .{ .x = 44, .y = 15 } } });
+    try app.dispatch(handle, .{ .pointer_up = .{ .position = .{ .x = 44, .y = 15 } } });
+    _ = try app.step(0.1);
+    try t.expectEqual(@as(usize, 2), window.frames.committed.text_input.?.selection.start);
+    try app.update(owner, ui.controls.TextInput.setAppearance, .{appearance});
+    try t.expectEqual(@as(usize, 0), try app.step(0.2));
+}
 test "text field edits Unicode selection clipboard and revisioned composition through window dispatch" {
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
@@ -36,6 +63,10 @@ test "virtual list range and scrolling keep render work proportional to viewport
     try t.expectEqual(@as(usize, 18), visible.start);
     try t.expectEqual(@as(usize, 28), visible.end);
     try t.expectEqual(@as(f32, -40), visible.top);
+    const shortened = try ui.controls.visibleRows(3, 24, 1000, 48, 0);
+    try t.expectEqual(@as(usize, 1), shortened.start);
+    try t.expectEqual(@as(usize, 3), shortened.end);
+    try t.expectEqual(@as(f32, 0), shortened.top);
     var scroll: ui.controls.Scroll = .{};
     scroll.wheel(-500, 1000, 100);
     try t.expectEqual(@as(f32, 500), scroll.offset);

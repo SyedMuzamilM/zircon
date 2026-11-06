@@ -171,6 +171,11 @@ pub const Window = struct {
     }
     pub fn dispatch(w: *Window, input: platform.Input) !void {
         if (w.closed) return;
+        if (input == .pointer_leave) {
+            w.pointer_position = null;
+            if (w.frames.committed.hovered_node != null) w.dirty = true;
+            return;
+        }
         errdefer w.dirty = true;
         switch (input) {
             .close => if (w.frames.committed.root == null) {

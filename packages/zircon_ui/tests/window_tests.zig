@@ -1,6 +1,21 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const t = std.testing;
+test "bare button labels honor centered control alignment" {
+    const View = struct {
+        pub fn render(_: *const @This(), b: *ui.Ui) !ui.Element {
+            return b.button(.{ .label = "Save", .style = .{ .direction = .row, .width = .{ .px = 100 }, .height = .{ .px = 30 }, .align_items = .center, .justify_content = .center } });
+        }
+    };
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try app.openWindow(View, .{ .visible = false }, .{});
+    _ = try app.step(0);
+    const scene = (try app.window(handle)).frames.committed.scene;
+    try t.expectEqual(@as(usize, 1), scene.items.len);
+    try t.expectApproxEqAbs(@as(f32, 34), scene.items[0].rect.x, 0.01);
+    try t.expectApproxEqAbs(@as(f32, 6), scene.items[0].rect.y, 0.01);
+}
 const RichButton = struct {
     clicks: usize = 0,
     pub fn render(_: *const RichButton, b: *ui.Ui) !ui.Element {
@@ -43,6 +58,12 @@ test "hover paints composed control ancestors and becomes idle after pointer set
     try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = 10, .y = 100 } } });
     try t.expectEqual(@as(usize, 1), try app.step(3));
     for (window.frames.committed.scene.items) |item| try t.expect(!std.meta.eql(item.color, ui.Color.rgb(0x123456)));
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = 10, .y = 10 } } });
+    _ = try app.step(4);
+    try app.dispatch(h, .pointer_leave);
+    try t.expectEqual(@as(usize, 1), try app.step(5));
+    try t.expect(window.frames.committed.hovered_node == null);
+    try t.expectEqual(@as(usize, 0), try app.step(6));
 }
 const Counter = struct {
     count: u32 = 0,
