@@ -32,6 +32,9 @@ const Ops = struct {
     fn settings(self: *const Shell) ui.WindowHandle {
         return self.settings_window.?;
     }
+    fn searchReady(self: *const Shell) bool {
+        return self.overlay == .none and self.search.results != null and self.search.results.?.total_matches > 0;
+    }
 };
 fn settle(app: *ui.App, io: std.Io) !void {
     const deadline = std.Io.Clock.awake.now(io).addDuration(.fromSeconds(20));
@@ -104,9 +107,11 @@ pub fn main(init: std.process.Init) !void {
         try settle(&app, init.io);
         try snapshot(&app, h, a, args[2], theme, "git");
         try app.update(owner, Ops.command, .{.project_search});
+        _ = try app.step(0);
         try app.dispatch(h, .{ .text = "session" });
         try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
         try settle(&app, init.io);
+        if (!try app.read(owner, Ops.searchReady, .{})) return error.ReviewSearchNotReady;
         try snapshot(&app, h, a, args[2], theme, "search");
         try app.update(owner, Ops.open, .{"README.md"});
         try app.update(owner, Ops.command, .{.markdown_preview});
