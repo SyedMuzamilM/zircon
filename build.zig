@@ -136,6 +136,8 @@ pub fn build(b: *std.Build) void {
             .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } },
         }) });
         b.installArtifact(zircon);
+        b.installFile("assets/icons/LICENSES", "share/zircon/icons-LICENSES");
+        b.installFile("assets/icons/SOURCE.md", "share/zircon/icons-SOURCE.md");
         const zircon_run = b.addRunArtifact(zircon);
 
         b.step("run", "Open the Zircon native text editor").dependOn(&zircon_run.step);

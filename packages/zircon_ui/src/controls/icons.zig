@@ -1,4 +1,4 @@
-//! Lucide's pinned, licensed SVG geometry, baked into native line segments.
+//! Shared assets/icons SVG geometry, baked into native strokes and fill spans.
 //! Drawing and hit targets remain Zircon UI; no icon font or SVG parsing runs
 //! during a frame. Source SVGs, attribution and the offline generator are kept.
 const ui = @import("../ui/ui.zig");
@@ -29,7 +29,15 @@ pub fn draw(name: Name, painter: *Painter, bounds: g.Rect, color: g.Color) !void
     const scale = side / 24;
     const x = bounds.x + (bounds.width - side) / 2;
     const y = bounds.y + (bounds.height - side) / 2;
-    for (paths.paths(name)) |points| {
-        for (points[1..], points[0 .. points.len - 1]) |end, start| try painter.strokeLine(.{ .x = x + start[0] * scale, .y = y + start[1] * scale }, .{ .x = x + end[0] * scale, .y = y + end[1] * scale }, color, 2 * scale);
+    for (paths.fills(name)) |rect| {
+        var tint = color;
+        tint.a *= rect[4];
+        try painter.fillRect(.{ .bounds = .{ .x = x + rect[0] * scale, .y = y + rect[1] * scale, .width = rect[2] * scale, .height = rect[3] * scale }, .color = tint });
+    }
+    for (paths.strokes(name)) |stroke| {
+        const points = stroke.points;
+        var tint = color;
+        tint.a *= stroke.opacity;
+        for (points[1..], points[0 .. points.len - 1]) |end, start| try painter.strokeLine(.{ .x = x + start[0] * scale, .y = y + start[1] * scale }, .{ .x = x + end[0] * scale, .y = y + end[1] * scale }, tint, stroke.width * scale);
     }
 }

@@ -84,3 +84,23 @@ test "typed keymap shares semantic commands and rejects ambiguous bindings" {
     try t.expect(map.resolve(.{ .key_down = .{ .key = .s } }) == null);
     try t.expectError(error.DuplicateKeyBinding, Map.init(&.{ .{ .chord = .{ .key = .s }, .action = .save }, .{ .chord = .{ .key = .s }, .action = .find } }));
 }
+
+test "shared SVG icons retain filled shapes and source opacity under theme tinting" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var painter = try ui.graphics.Painter.init(arena.allocator(), .{ .width = 100, .height = 40 });
+    try ui.controls.icons.draw(.settings, &painter, .{ .width = 16, .height = 16 }, .white);
+    var fill = false;
+    for (painter.items.items) |item| if (item.kind == .rect) {
+        fill = true;
+        try t.expect(item.color.a > 0.9);
+    };
+    try t.expect(fill);
+    painter.items.clearRetainingCapacity();
+    try ui.controls.icons.draw(.search, &painter, .{ .x = 20, .width = 16, .height = 16 }, .black);
+    var translucent = false;
+    for (painter.items.items) |item| if (item.kind == .rect and item.color.a < 0.2) {
+        translucent = true;
+    };
+    try t.expect(translucent);
+}

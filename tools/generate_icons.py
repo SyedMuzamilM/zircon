@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Bake the pinned Lucide SVG subset into renderer-neutral polylines.
+"""Bake shared SVG icon assets into renderer-neutral strokes and fills.
 
-Run with --fetch to retrieve upstream sources. Normal regeneration is offline.
+Sources live in assets/icons. Regeneration is offline and preserves SVG fills.
 Curves flatten to <=0.08 SVG units before scaling to the native icon size.
 """
-import argparse, concurrent.futures, math, pathlib, re, urllib.request, xml.etree.ElementTree as ET
+import argparse, math, pathlib, re, subprocess, xml.etree.ElementTree as ET
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-ASSETS = ROOT / 'packages/zircon_ui/src/controls/lucide'
-REV = 'b826f0c527e1498f5e46f41ca0277ccab144bf31'
-ICONS = dict(folder='folder', folder_open='folder-open', file='file', code='file-code-corner', zig='file-code-corner', markdown='file-text', image='file-image', chevron_down='chevron-down', chevron_right='chevron-right', chevron_left='chevron-left', plus='plus', close='x', search='search', split='columns-2', sidebar='panel-left', branch='git-branch', history='rotate-ccw', settings='settings', commands='square-terminal', more='ellipsis', check='check', extension='blocks', refresh='refresh-cw', arrow_up='arrow-up', arrow_down='arrow-down', square='square', square_checked='square-check', square_mixed='square-minus', commit='git-commit-horizontal', user='user-round', diff='diff', minus='minus')
-def fetch(name):
-    path = ASSETS / (name + '.svg')
-    path.write_bytes(urllib.request.urlopen(f'https://raw.githubusercontent.com/lucide-icons/lucide/{REV}/icons/{name}.svg', timeout=30).read())
+ASSETS = ROOT / 'assets/icons'
+ICONS = {'folder': 'folder', 'folder_open': 'folder_open', 'file': 'file', 'code': 'file_code', 'zig': 'file_code', 'markdown': 'file_markdown', 'image': 'image', 'chevron_down': 'chevron_down', 'chevron_right': 'chevron_right', 'chevron_left': 'chevron_left', 'plus': 'plus', 'close': 'close', 'search': 'magnifying_glass', 'split': 'split', 'sidebar': 'file_tree', 'branch': 'git_branch', 'history': 'rotate_ccw', 'settings': 'settings', 'commands': 'command', 'more': 'ellipsis', 'check': 'check', 'extension': 'box', 'refresh': 'refresh_title', 'arrow_up': 'arrow_up', 'arrow_down': 'arrow_down', 'square': 'square', 'square_checked': 'square-check', 'square_mixed': 'square_minus', 'commit': 'git_commit', 'user': 'person', 'diff': 'diff', 'minus': 'dash', 'copy': 'copy', 'stash': 'archive'}
 def curve(a,b,c,d):
     distance = lambda p: abs((d[0]-a[0])*(a[1]-p[1])-(a[0]-p[0])*(d[1]-a[1])) / max(math.dist(a,d), 1e-9)
     if max(distance(b),distance(c)) < .08 and math.dist(a,b)+math.dist(b,c)+math.dist(c,d)-math.dist(a,d)<.08:
@@ -72,35 +68,74 @@ def path_data(data):
     if points: paths.append(points)
     return paths
 
-def svg_paths(name):
-    result=[]
-    for node in ET.parse(ASSETS/(name+'.svg')).getroot():
-        kind=node.tag.split('}')[-1];a=node.attrib; number=lambda key,default=0:float(a.get(key,default))
-        if kind=='path': result.extend(path_data(a['d']))
-        elif kind=='line': result.append([(number('x1'),number('y1')),(number('x2'),number('y2'))])
-        elif kind in ('polyline','polygon'):
-            values=list(map(float,re.findall(r'[-+]?\d*\.?\d+',a['points'])));points=list(zip(values[::2],values[1::2]));result.append(points+points[:1] if kind=='polygon' else points)
-        elif kind in ('circle','ellipse'):
-            cx,cy=number('cx'),number('cy');rx,ry=(number('r'),number('r')) if kind=='circle' else (number('rx'),number('ry'))
-            result.append([(cx+rx*math.cos(n*math.tau/32),cy+ry*math.sin(n*math.tau/32)) for n in range(33)])
-        elif kind=='rect':
-            x,y,w,h=number('x'),number('y'),number('width'),number('height');r=min(number('rx'),w/2,h/2)
-            if not r: result.append([(x,y),(x+w,y),(x+w,y+h),(x,y+h),(x,y)])
-            else: result.extend(path_data(f'M{x+r} {y} H{x+w-r} A{r} {r} 0 0 1 {x+w} {y+r} V{y+h-r} A{r} {r} 0 0 1 {x+w-r} {y+h} H{x+r} A{r} {r} 0 0 1 {x} {y+h-r} V{y+r} A{r} {r} 0 0 1 {x+r} {y} Z'))
+
+def svg_geometry(name):
+    root = ET.parse(ASSETS/(name+'.svg')).getroot()
+    view = list(map(float, root.attrib.get('viewBox', '0 0 '+root.attrib.get('width','24')+' '+root.attrib.get('height','24')).split()))
+    if view[:2] != [0, 0] or view[2] != view[3]: raise ValueError('Icons require a square origin viewBox')
+    scale = 24 / view[2]
+    strokes, fills = [], []
+    def visit(node, inherited):
+        attrs = dict(inherited); attrs.update(node.attrib)
+        attrs['opacity'] = float(inherited.get('opacity',1))*float(node.attrib.get('opacity',1))
+        kind = node.tag.split('}')[-1]
+        if kind == 'defs': return # The selected Markdown SVG clips to its full viewBox.
+        if kind in ('svg', 'g'):
+            for child in node: visit(child, attrs)
+            return
+        number = lambda key, default=0: float(attrs.get(key, default))
+        if kind == 'path': paths = path_data(attrs['d'])
+        elif kind == 'line': paths = [[(number('x1'), number('y1')), (number('x2'), number('y2'))]]
+        elif kind in ('polyline', 'polygon'):
+            values = list(map(float, re.findall(r'[-+]?\d*\.?\d+', attrs['points'])))
+            points = list(zip(values[::2], values[1::2])); paths = [points + points[:1] if kind == 'polygon' else points]
+        elif kind in ('circle', 'ellipse'):
+            cx, cy = number('cx'), number('cy')
+            rx, ry = (number('r'), number('r')) if kind == 'circle' else (number('rx'), number('ry'))
+            paths = [[(cx+rx*math.cos(n*math.tau/64), cy+ry*math.sin(n*math.tau/64)) for n in range(65)]]
+        elif kind == 'rect':
+            x,y,w,h = number('x'),number('y'),number('width'),number('height'); r=min(number('rx'),w/2,h/2)
+            paths = path_data(f'M{x+r} {y} H{x+w-r} A{r} {r} 0 0 1 {x+w} {y+r} V{y+h-r} A{r} {r} 0 0 1 {x+w-r} {y+h} H{x+r} A{r} {r} 0 0 1 {x} {y+h-r} V{y+r} A{r} {r} 0 0 1 {x+r} {y} Z')
         else: raise ValueError(f'Unsupported SVG element {kind}')
-    return result
+        paths = [[(x*scale,y*scale) for x,y in points] for points in paths]
+        if attrs.get('stroke', 'none') != 'none':
+            strokes.extend((points, number('stroke-width',1)*scale, number('opacity',1)*number('stroke-opacity',1)) for points in paths)
+        if kind != 'line' and attrs.get('fill', 'black') != 'none':
+            # Nonzero/even-odd scan conversion preserves path holes. Quarter-unit
+            # strips are generated once, not parsed or rasterized during frames.
+            for row in range(96):
+                y=(row+.5)*.25; crossings=[]
+                for points in paths:
+                    for (x1,y1),(x2,y2) in zip(points, points[1:]+points[:1]):
+                        if min(y1,y2) <= y < max(y1,y2): crossings.append((x1+(y-y1)*(x2-x1)/(y2-y1),1 if y2>y1 else -1))
+                crossings.sort(); winding=0; begin=None
+                for x,delta in crossings:
+                    before=winding; winding = (winding+1)%2 if attrs.get('fill-rule')=='evenodd' else winding+delta
+                    if before==0 and winding!=0: begin=x
+                    if before!=0 and winding==0 and x>begin: fills.append((begin,row*.25,x-begin,.25,number('opacity',1)*number('fill-opacity',1)))
+    visit(root,{})
+    return strokes,fills
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--fetch',action='store_true');args=parser.parse_args();ASSETS.mkdir(parents=True,exist_ok=True)
-    if args.fetch:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool: list(pool.map(fetch,sorted(set(ICONS.values()))))
-        (ASSETS/'LICENSE').write_bytes(urllib.request.urlopen(f'https://raw.githubusercontent.com/lucide-icons/lucide/{REV}/LICENSE',timeout=30).read())
-    out=['//! Generated by tools/generate_icons.py from the pinned Lucide SVG subset.','//! Do not edit coordinates by hand. See lucide/LICENSE and SOURCE.md.', 'pub const Name = enum { '+', '.join(ICONS)+' };','pub fn paths(name: Name) []const []const [2]f32 {','    return switch (name) {']
-    for name,asset in ICONS.items():
-        out.append('        .'+name+' => &.{')
-        for points in svg_paths(asset):
-            out.append('            &.{'+', '.join('.{'+f'{x:.4f}, {y:.4f}'+'}' for x,y in points)+'},')
-        out.append('        },')
-    out.extend(['    };','}'])
-    (ROOT/'packages/zircon_ui/src/controls/icon_paths.zig').write_text('\n'.join(out)+'\n')
+    parser=argparse.ArgumentParser();parser.add_argument('--check',action='store_true');args=parser.parse_args()
+    geometry={name:svg_geometry(asset) for name,asset in ICONS.items()}
+    out=['//! Generated from assets/icons by tools/generate_icons.py. Do not edit.',
+         '//! Source SVGs and licenses: assets/icons/SOURCE.md and LICENSES.',
+         'pub const Name = enum { '+', '.join(ICONS)+' };',
+         'pub const Stroke = struct { points: []const [2]f32, width: f32, opacity: f32 };',
+         'pub fn strokes(name: Name) []const Stroke { return switch (name) {']
+    for name,(strokes,_) in geometry.items():
+        out.append('.'+name+' => &.{')
+        for points,width,opacity in strokes:
+            out.append('.{ .width = '+f'{width:.4f}'+', .opacity = '+f'{opacity:.4f}'+', .points = &.{'+', '.join('.{'+f'{x:.4f}, {y:.4f}'+'}' for x,y in points)+'} },')
+        out.append('},')
+    out.extend(['}; }','pub fn fills(name: Name) []const [5]f32 { return switch (name) {'])
+    for name,(_,fills) in geometry.items():
+        out.append('.'+name+' => &.{'+', '.join('.{'+', '.join(f'{v:.4f}' for v in rect)+'}' for rect in fills)+'},')
+    out.extend(['}; }'])
+    formatted=subprocess.run([str(ROOT/'tools/zig'),'fmt','--stdin'],input='\n'.join(out)+'\n',text=True,capture_output=True,check=True).stdout
+    destination=ROOT/'packages/zircon_ui/src/controls/icon_paths.zig'
+    if args.check:
+        if destination.read_text()!=formatted: raise SystemExit('Regenerate icons with python3 tools/generate_icons.py')
+    else: destination.write_text(formatted)
 if __name__=='__main__': main()
