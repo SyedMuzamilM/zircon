@@ -20,6 +20,19 @@ pub fn contentHeight(diff: git.Diff, line_height: f32) f32 {
     }
     return total;
 }
+pub fn fileOffset(diff: git.Diff, path: []const u8, line_height: f32) ?f32 {
+    var position: f32 = 0;
+    var previous: []const u8 = "";
+    for (diff.hunks) |hunk| {
+        if (!std.mem.eql(u8, previous, hunk.path)) {
+            if (std.mem.eql(u8, path, hunk.path)) return position;
+            position += file_height;
+        }
+        position += context_height + @as(f32, @floatFromInt(hunk.lines.len)) * line_height;
+        previous = hunk.path;
+    }
+    return null;
+}
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     const font = self.editor_options.font_size;

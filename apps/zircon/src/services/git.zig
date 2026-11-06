@@ -318,19 +318,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.diff = null;
         self.git.diff_scroll.offset = 0;
         if (self.git.reveal_path.len > 0) {
-            var position: f32 = 0;
-            var previous: []const u8 = "";
-            for (diff.hunks) |hunk| {
-                if (!std.mem.eql(u8, previous, hunk.path)) {
-                    if (std.mem.eql(u8, self.git.reveal_path, hunk.path)) {
-                        self.git.diff_scroll.offset = position;
-                        break;
-                    }
-                    position += 38;
-                }
-                position += 26 + @as(f32, @floatFromInt(hunk.lines.len)) * self.editor_options.font_size * self.editor_options.line_height;
-                previous = hunk.path;
-            }
+            if (@import("../views/git_diff.zig").fileOffset(diff, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| self.git.diff_scroll.offset = offset;
             a.free(self.git.reveal_path);
             self.git.reveal_path = &.{};
         }

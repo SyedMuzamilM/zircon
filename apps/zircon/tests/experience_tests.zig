@@ -71,6 +71,15 @@ const Ops = struct {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onGitCommit(&event, cx, 0);
     }
+    fn gitGeneration(self: *const zircon.Shell) u64 {
+        return self.git.generation;
+    }
+    fn previewImage(self: *const zircon.Shell) ?u64 {
+        return self.preview.?.view.imageIdentity("image.png");
+    }
+    fn previewLayouts(self: *const zircon.Shell) usize {
+        return self.preview.?.view.layoutBuilds();
+    }
     fn staged(self: *const zircon.Shell) bool {
         return self.git.status != null and self.git.status.?.entries.len > 0 and self.git.status.?.entries[0].staged;
     }
@@ -219,17 +228,29 @@ test "Markdown preview shares the editable source revision and closes safely" {
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
     defer t.allocator.free(root);
-    try tmp.dir.writeFile(t.io, .{ .sub_path = "note.md", .data = "# Title\n\nText **bold** and [source](other.md).\n\n```zig\nconst n = 1;\n```\n\n| One | Two |\n| --- | --- |\n| a | b |\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "note.md", .data = "# Title\n\n![tiny](image.png)\n\nText **bold** and [source](other.md).\n\n```zig\nconst n = 1;\n```\n\n| One | Two |\n| --- | --- |\n| a | b |\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "image.png", .data = @embedFile("image_fixture") });
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
     const h = try open(&app, root, "note.md");
     const owner = try app.windowEntity(zircon.Shell, h);
     try send(&app, h, .markdown_preview);
-    _ = try elementBounds(&app, h, "markdown-preview");
+    const preview_bounds = try elementBounds(&app, h, "markdown-preview");
+    const layouts = try app.read(owner, Ops.previewLayouts, .{});
+    const point: ui.Point = .{ .x = preview_bounds.x + 30, .y = preview_bounds.y + 40 };
+    try app.dispatch(h, .{ .scroll = .{ .position = point, .x = 0, .y = -30 } });
+    _ = try app.step(0);
+    try t.expectEqual(layouts, try app.read(owner, Ops.previewLayouts, .{}));
+    try app.dispatch(h, .{ .resize = .{ .width = 920, .height = 650 } });
+    _ = try app.step(0);
+    try t.expectEqual(layouts + 1, try app.read(owner, Ops.previewLayouts, .{}));
+    const image_identity = try app.read(owner, Ops.previewImage, .{});
+    if (comptime ui.testing.native != void) try t.expect(image_identity != null);
     try t.expect(try app.read(owner, Ops.previewCurrent, .{}));
     try app.dispatch(h, .{ .text = "Updated " });
     _ = try app.step(0);
     try t.expect(try app.read(owner, Ops.previewCurrent, .{}));
+    try t.expectEqual(image_identity, try app.read(owner, Ops.previewImage, .{}));
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-markdown.png");
     try send(&app, h, .close_tab);
     try send(&app, h, .discard_dirty);
@@ -351,7 +372,9 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     };
     try t.expect(try app.read(owner, AllChanges.visible, .{}));
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-all.png");
+    const before_navigation = try app.read(owner, Ops.gitGeneration, .{});
     try app.update(owner, Ops.gitFile, .{});
+    try t.expectEqual(before_navigation, try app.read(owner, Ops.gitGeneration, .{}));
     try settle(&app);
     var numbered = false;
     var addition = false;

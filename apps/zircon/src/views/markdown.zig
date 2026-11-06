@@ -15,10 +15,12 @@ pub const Colors = struct {
     code: ui.Color = ui.Color.rgb(0x1c222b),
     border: ui.Color = ui.Color.rgb(0x3c4350),
 };
-const Asset = struct { target: []const u8, path: ?[]u8 = null, image: ?Image = null, failure: ?anyerror = null };
+const Asset = struct { stamp: ?std.Io.File.Stat = null, target: []const u8, path: ?[]u8 = null, image: ?Image = null, failure: ?anyerror = null };
 const Generation = struct {
     allocator: std.mem.Allocator,
     refs: usize = 1,
+    layout_builds: usize = 0,
+    cached: ?*Layout = null,
     owner: std.Thread.Id,
     document: md.Document,
     revision: u64,
@@ -38,6 +40,7 @@ const Generation = struct {
             if (asset.image) |*image| image.deinit();
             if (asset.path) |path| a.free(path);
         }
+        if (self.cached) |cached| cached.release();
         a.free(self.assets);
         if (self.path) |path| a.free(path);
         self.document.deinit();
@@ -55,7 +58,7 @@ pub const Preview = struct {
     scroll: ui.controls.Scroll = .{},
     colors: Colors = .{},
     pub fn init(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.Snapshot) !Preview {
-        return .{ .allocator = a, .io = io, .generation = try prepare(a, io, path, snapshot) };
+        return .{ .allocator = a, .io = io, .generation = try prepare(a, io, path, snapshot, null) };
     }
     pub fn deinit(self: *Preview) void {
         self.generation.release();
@@ -64,9 +67,16 @@ pub const Preview = struct {
     /// Builds a complete replacement before releasing old parsed/image state.
     pub fn refresh(self: *Preview, snapshot: text.Snapshot) !void {
         if (self.generation.revision == snapshot.revision()) return;
-        const next = try prepare(self.allocator, self.io, self.generation.path, snapshot);
+        const next = try prepare(self.allocator, self.io, self.generation.path, snapshot, self.generation);
         self.generation.release();
         self.generation = next;
+    }
+    pub fn imageIdentity(self: *const Preview, target: []const u8) ?u64 {
+        const asset = self.generation.findAsset(target) orelse return null;
+        return if (asset.image) |image| image.id() else null;
+    }
+    pub fn layoutBuilds(self: *const Preview) usize {
+        return self.generation.layout_builds;
     }
     pub fn revision(self: *const Preview) u64 {
         return self.generation.revision;
@@ -81,19 +91,14 @@ pub const Preview = struct {
     pub fn handle(self: *Preview, event: *ui.Event(ui.Input)) !Outcome {
         switch (event.data) {
             .scroll => |wheel| {
-                var arena = std.heap.ArenaAllocator.init(self.allocator);
-                defer arena.deinit();
-                const metrics = try event.textMetrics();
-                const prepared = try layout(arena.allocator(), self.generation, metrics, event.bounds.width, self.colors);
+                const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors)).prepared;
                 self.scroll.wheel(wheel.y, prepared.height, event.bounds.height);
                 event.preventDefault();
                 return .{ .handled = true };
             },
             .pointer_down => |pointer| {
                 if (pointer.button != .primary) return .{};
-                var arena = std.heap.ArenaAllocator.init(self.allocator);
-                defer arena.deinit();
-                const prepared = try layout(arena.allocator(), self.generation, try event.textMetrics(), event.bounds.width, self.colors);
+                const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors)).prepared;
                 const point: ui.Point = .{ .x = pointer.position.x - event.bounds.x, .y = pointer.position.y - event.bounds.y + self.scroll.offset };
                 for (prepared.hits) |hit| if (contains(hit.bounds, point)) {
                     event.preventDefault();
@@ -111,7 +116,7 @@ pub const Preview = struct {
         }
     }
 };
-fn prepare(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.Snapshot) !*Generation {
+fn prepare(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.Snapshot, previous: ?*Generation) !*Generation {
     if (snapshot.byteLen() > 16 * 1024 * 1024) return error.MarkdownTooLarge;
     const bytes = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
     defer a.free(bytes);
@@ -128,8 +133,8 @@ fn prepare(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.S
         assets.deinit(a);
     }
     for (document.blocks) |block| {
-        for (block.inlines) |span| if (span.kind == .image) try loadAsset(a, io, owned_path, span.target.?, &assets);
-        if (block.table) |table| for (table.rows) |row| for (row.cells) |cell| for (cell.content) |span| if (span.kind == .image) try loadAsset(a, io, owned_path, span.target.?, &assets);
+        for (block.inlines) |span| if (span.kind == .image) try loadAsset(a, io, owned_path, span.target.?, &assets, previous);
+        if (block.table) |table| for (table.rows) |row| for (row.cells) |cell| for (cell.content) |span| if (span.kind == .image) try loadAsset(a, io, owned_path, span.target.?, &assets, previous);
     }
     const owned_assets = try assets.toOwnedSlice(a);
     errdefer {
@@ -143,7 +148,7 @@ fn prepare(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.S
     result.* = .{ .allocator = a, .owner = std.Thread.getCurrentId(), .document = document, .revision = snapshot.revision(), .path = owned_path, .assets = owned_assets };
     return result;
 }
-fn loadAsset(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, target: []const u8, list: *std.ArrayList(Asset)) !void {
+fn loadAsset(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, target: []const u8, list: *std.ArrayList(Asset), previous: ?*Generation) !void {
     for (list.items) |item| if (std.mem.eql(u8, item.target, target)) return;
     var asset: Asset = .{ .target = target };
     errdefer {
@@ -153,6 +158,17 @@ fn loadAsset(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, target: []cons
     if (external(target) or std.mem.startsWith(u8, target, "data:")) asset.failure = error.RemoteImageUnavailable else {
         const parent = if (path) |p| std.fs.path.dirname(p) orelse "." else ".";
         asset.path = try std.fs.path.resolve(a, &.{ parent, target });
+        asset.stamp = std.Io.Dir.cwd().statFile(io, asset.path.?, .{}) catch null;
+        if (previous) |old| if (old.findAsset(target)) |cached| if (cached.stamp != null and asset.stamp != null) {
+            const before = cached.stamp.?;
+            const after = asset.stamp.?;
+            if (before.inode == after.inode and before.size == after.size and before.mtime.nanoseconds == after.mtime.nanoseconds and before.ctime.nanoseconds == after.ctime.nanoseconds) {
+                asset.image = if (cached.image) |image| image.clone() else null;
+                asset.failure = cached.failure;
+                try list.append(a, asset);
+                return;
+            }
+        };
         if (std.Io.Dir.cwd().readFileAlloc(io, asset.path.?, a, .limited(ui.graphics.images.max_bytes))) |bytes| {
             defer a.free(bytes);
             asset.image = loadImage(a, bytes) catch |err| switch (err) {
@@ -195,6 +211,41 @@ const Fill = struct { bounds: ui.Rect, color: ui.Color, radius: f32 = 0 };
 const ImageDraw = struct { bounds: ui.Rect, image: Image };
 const Hit = struct { bounds: ui.Rect, source: usize, target: ?[]const u8 = null };
 const Prepared = struct { texts: []const TextDraw, fills: []const Fill, images: []const ImageDraw, hits: []const Hit, height: f32 };
+// A frame retains its own layout while the generation replaces its cache on
+// resize or font/theme changes. Retirement can therefore never free live draws.
+const Layout = struct {
+    allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
+    refs: usize = 1,
+    width: f32,
+    metrics: ui.layout.Measurer,
+    colors: Colors,
+    prepared: Prepared,
+    fn retain(self: *Layout) *Layout {
+        self.refs += 1;
+        return self;
+    }
+    fn release(self: *Layout) void {
+        self.refs -= 1;
+        if (self.refs != 0) return;
+        const a = self.allocator;
+        self.arena.deinit();
+        a.destroy(self);
+    }
+};
+fn cachedLayout(generation: *Generation, metrics: ui.layout.Measurer, width: f32, colors: Colors) !*Layout {
+    if (generation.cached) |cached| if (cached.width == width and std.meta.eql(cached.colors, colors) and cached.metrics.context == metrics.context and cached.metrics.text == metrics.text and cached.metrics.generation == metrics.generation) return cached;
+    const a = generation.allocator;
+    const result = try a.create(Layout);
+    errdefer a.destroy(result);
+    var arena = std.heap.ArenaAllocator.init(a);
+    errdefer arena.deinit();
+    const prepared = try layout(arena.allocator(), generation, metrics, width, colors);
+    result.* = .{ .allocator = a, .arena = arena, .width = width, .metrics = metrics, .colors = colors, .prepared = prepared };
+    if (generation.cached) |old| old.release();
+    generation.cached = result;
+    return result;
+}
 const Flow = struct {
     allocator: std.mem.Allocator,
     generation: *Generation,
@@ -279,6 +330,7 @@ const Flow = struct {
     }
 };
 fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Measurer, width: f32, colors: Colors) !Prepared {
+    generation.layout_builds += 1;
     var flow: Flow = .{ .allocator = a, .generation = generation, .metrics = metrics, .colors = colors, .right = @max(64, width - 30) };
     for (generation.document.blocks) |block| {
         flow.left = 30;
@@ -390,6 +442,7 @@ fn tokenColor(kind: syntax.Kind, colors: Colors) ui.Color {
     };
 }
 const Canvas = struct {
+    retained_layout: ?*Layout = null,
     generation: *Generation,
     scroll: f32,
     colors: Colors,
@@ -399,15 +452,19 @@ const Canvas = struct {
         return .{ .size = cx.available, .state = cx.measurer };
     }
     pub fn prepaint(self: *Canvas, cx: *ui.PrepaintCx, bounds: ui.Rect, metrics: *LayoutState) !Prepared {
-        return layout(cx.allocator, self.generation, metrics.*, bounds.width, self.colors);
+        _ = cx;
+        const cached = (try cachedLayout(self.generation, metrics.*, bounds.width, self.colors)).retain();
+        if (self.retained_layout) |old| old.release();
+        self.retained_layout = cached;
+        return cached.prepared;
     }
     pub fn paint(self: *Canvas, cx: *ui.PaintCx, bounds: ui.Rect, _: *LayoutState, prepared: *Prepared) !void {
         try cx.painter.fillRect(.{ .bounds = bounds, .color = self.colors.background });
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
-        for (prepared.fills) |fill| try cx.painter.fillRect(.{ .bounds = translated(fill.bounds, bounds, self.scroll), .color = fill.color, .radius = fill.radius });
-        for (prepared.images) |image| try cx.painter.drawImage(image.image, translated(image.bounds, bounds, self.scroll), .contain);
-        for (prepared.texts) |item| try cx.painter.drawText(.{ .bounds = translated(item.bounds, bounds, self.scroll), .text = item.text, .style = item.style });
+        for (prepared.fills) |fill| if (onScreen(fill.bounds, bounds.height, self.scroll)) try cx.painter.fillRect(.{ .bounds = translated(fill.bounds, bounds, self.scroll), .color = fill.color, .radius = fill.radius });
+        for (prepared.images) |image| if (onScreen(image.bounds, bounds.height, self.scroll)) try cx.painter.drawImage(image.image, translated(image.bounds, bounds, self.scroll), .contain);
+        for (prepared.texts) |item| if (onScreen(item.bounds, bounds.height, self.scroll)) try cx.painter.drawText(.{ .bounds = translated(item.bounds, bounds, self.scroll), .text = item.text, .style = item.style });
         if (prepared.height > bounds.height and bounds.height > 0) {
             const height = @max(24, bounds.height * bounds.height / prepared.height);
             const y = bounds.y + (bounds.height - height) * self.scroll / @max(1, prepared.height - bounds.height);
@@ -415,6 +472,7 @@ const Canvas = struct {
         }
     }
     pub fn deinit(self: *Canvas) void {
+        if (self.retained_layout) |cached| cached.release();
         self.generation.release();
     }
 };
@@ -430,4 +488,8 @@ fn contains(rect: ui.Rect, point: ui.Point) bool {
 
 fn loadImage(a: std.mem.Allocator, bytes: []const u8) anyerror!Image {
     return Image.load(a, bytes);
+}
+
+fn onScreen(rect: ui.Rect, height: f32, scroll: f32) bool {
+    return rect.y + rect.height > scroll and rect.y < scroll + height;
 }

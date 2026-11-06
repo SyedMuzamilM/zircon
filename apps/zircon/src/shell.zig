@@ -357,6 +357,13 @@ pub const Shell = struct {
             self.git.selected_commit = &.{};
             self.panel = .git_diff;
             self.rememberPanel();
+            if (self.git.combined and self.git.diff != null) {
+                if (@import("views/git_diff.zig").fileOffset(self.git.diff.?, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
+                    self.git.diff_scroll.offset = offset;
+                    cx.notify();
+                    return;
+                }
+            }
             @import("services/git.zig").start(self, cx, if (self.git.combined) blk: {
                 std.heap.page_allocator.free(self.git.reveal_path);
                 self.git.reveal_path = try std.heap.page_allocator.dupe(u8, path);
