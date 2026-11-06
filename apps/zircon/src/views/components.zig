@@ -6,8 +6,8 @@ const Shell = @import("../shell.zig").Shell;
 pub const Palette = @import("../theme.zig").Palette;
 pub const Icon = ui.controls.icons.Name;
 pub const metrics = struct {
-    pub const control_radius: f32 = 3;
-    pub const popover_radius: f32 = 5;
+    pub const control_radius = ui.controls.metrics.control_radius;
+    pub const popover_radius = ui.controls.metrics.popover_radius;
     pub const titlebar: f32 = 34;
     pub const tabs: f32 = 32;
     pub const status: f32 = 24;
@@ -35,7 +35,7 @@ pub fn buttonStyle(c: Palette, primary: bool) ui.Style {
     return .{ .direction = .row, .height = .{ .px = metrics.control }, .gap = 6, .align_items = .center, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = metrics.control_radius, .background = if (primary) c.primary else c.element, .hover_background = if (primary) c.primary_hover else c.hover, .text = .{ .size = 12, .color = if (primary) c.on_primary else c.text }, .flex_shrink = 0 };
 }
 pub fn inputAppearance(c: Palette) ui.controls.TextInput.Appearance {
-    return .{ .background = c.document, .foreground = c.text, .placeholder = c.muted, .selection = c.selected, .caret = c.accent, .focus_border = c.accent };
+    return .{ .background = c.document, .foreground = c.text, .placeholder = c.muted, .selection = c.selection, .caret = c.accent, .focus_border = c.accent };
 }
 pub fn actionButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, primary: bool) !ui.Element {
     const glyph: ?Icon = switch (action) {
@@ -94,3 +94,24 @@ pub fn popoverBounds(viewport: ui.Size, anchor: ui.Rect, requested: ui.Size) ui.
     const preferred_y = if (below + height <= viewport.height - inset) below else anchor.y - height - 4;
     return .{ .x = std.math.clamp(anchor.x + anchor.width - width, inset, @max(inset, viewport.width - width - inset)), .y = std.math.clamp(preferred_y, inset, @max(inset, viewport.height - height - inset)), .width = width, .height = height };
 }
+
+pub fn floatingPanel(b: *ui.Ui, c: Palette, size: ui.Size, padding: ui.Insets, gap: f32, children: []const ui.Element) !ui.Element {
+    return b.stack(.{ .width = .{ .px = size.width }, .height = .{ .px = size.height }, .flex_shrink = 0 }, &.{
+        try b.custom(PanelSurface, .{ .colors = c }, .{ .flex_grow = 1 }),
+        try b.column(.{ .padding = padding, .gap = gap, .overflow = .hidden }, children),
+    });
+}
+const PanelSurface = struct {
+    colors: Palette,
+    pub const LayoutState = void;
+    pub const PrepaintState = void;
+    pub fn requestLayout(_: *PanelSurface, cx: *ui.LayoutCx) !ui.LayoutResult(void) {
+        return .{ .size = cx.available, .state = {} };
+    }
+    pub fn prepaint(_: *PanelSurface, _: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {}
+    pub fn paint(self: *PanelSurface, cx: *ui.PaintCx, bounds: ui.Rect, _: *void, _: *void) !void {
+        for ([_]f32{ 10, 6, 3 }) |spread| try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x - spread, .y = bounds.y - spread / 2 + 2, .width = bounds.width + spread * 2, .height = bounds.height + spread }, .radius = metrics.popover_radius + spread, .color = .{ .r = 0, .g = 0, .b = 0, .a = 0.035 } });
+        try cx.painter.fillRect(.{ .bounds = bounds, .radius = metrics.popover_radius, .color = self.colors.line });
+        try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + 1, .y = bounds.y + 1, .width = @max(0, bounds.width - 2), .height = @max(0, bounds.height - 2) }, .radius = metrics.popover_radius - 1, .color = self.colors.panel });
+    }
+};

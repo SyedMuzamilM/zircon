@@ -3,7 +3,6 @@ const ui = @import("zircon_ui");
 pub const Command = enum { delete_line, open_project, browse_project, submit_project, workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_network_menu, git_changes_menu, git_branches, git_stashes, git_fetch, git_fetch_from, git_pull, git_pull_rebase, git_push, git_push_to, git_force_push, git_publish, git_stash_all, git_stash_tracked, git_stash_pop, git_stash_apply, git_stash_show, git_create_branch, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, split_menu, split_left, split_right, split_up, split_down, close_split, git_blame, git_next_change, git_previous_change, git_toggle_hunk, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
-    .{ .command = .delete_line, .label = "Delete line", .shortcut = "⇧⌘K" },
     .{ .command = .open_project, .label = "Open folder or Git repository", .shortcut = "⇧⌘O" },
     .{ .command = .palette, .label = "Command palette", .shortcut = "⇧⌘P" },
     .{ .command = .project_files, .label = "Show project files" },
@@ -48,6 +47,7 @@ pub const commands = [_]Entry{
     .{ .command = .toggle_sidebar, .label = "Toggle project sidebar", .shortcut = "⌘B" },
     .{ .command = .find, .label = "Find in document", .shortcut = "⌘F" },
     .{ .command = .replace, .label = "Find and replace", .shortcut = "⌥⌘F" },
+    .{ .command = .delete_line, .label = "Delete line", .shortcut = "⇧⌘K" },
     .{ .command = .undo, .label = "Undo", .shortcut = "⌘Z" },
     .{ .command = .redo, .label = "Redo", .shortcut = "⇧⌘Z" },
     .{ .command = .select_all, .label = "Select all", .shortcut = "⌘A" },

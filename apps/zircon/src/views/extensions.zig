@@ -24,9 +24,9 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             if (choices.items.len > 0) try content.append(b.allocator(), try b.row(.{ .gap = 8 }, choices.items));
             for (entry.languages) |language| try content.append(b.allocator(), try label(b, try std.fmt.allocPrint(b.allocator(), "Language: {s} · {d} keywords", .{ language.name, language.keywords.len }), c.muted, 12));
             for (entry.language_servers) |server| try content.append(b.allocator(), try label(b, try std.fmt.allocPrint(b.allocator(), "Language server: {s} ({s})", .{ server.id, server.command }), c.muted, 12));
-            try rows.append(b.allocator(), try b.key(.{ .string = entry.id }, try b.column(.{ .padding = ui.Insets.all(18), .gap = 12, .background = c.panel, .radius = 5 }, content.items)));
+            try rows.append(b.allocator(), try b.key(.{ .string = entry.id }, try b.column(.{ .padding = ui.Insets.all(18), .gap = 12, .background = c.panel, .radius = ui.controls.metrics.popover_radius }, content.items)));
         }
-        if (snapshot.extension("org.zircon.oxide") == null) try rows.append(b.allocator(), try b.column(.{ .padding = ui.Insets.all(18), .gap = 12, .background = c.panel, .radius = 5 }, &.{ try label(b, "Available locally: Oxide contributions", c.text, 16), try label(b, "A warm theme, symbol icon theme, Python syntax and ZLS configuration.", c.muted, 13), try command(b, .install_bundled_extension, "Install Oxide", c) }));
+        if (snapshot.extension("org.zircon.oxide") == null) try rows.append(b.allocator(), try b.column(.{ .padding = ui.Insets.all(18), .gap = 12, .background = c.panel, .radius = ui.controls.metrics.popover_radius }, &.{ try label(b, "Available locally: Oxide contributions", c.text, 16), try label(b, "A warm theme, symbol icon theme, Python syntax and ZLS configuration.", c.muted, 13), try command(b, .install_bundled_extension, "Install Oxide", c) }));
     } else try rows.append(b.allocator(), try label(b, "An extension directory has not been configured for this workspace.", c.warning, 13));
     if (self.status.len > 0) try rows.append(b.allocator(), try label(b, self.status, if (self.status_is_error) c.warning else c.muted, 13));
     return b.column(.{ .flex_grow = 1, .padding = ui.Insets.all(24), .gap = 18, .overflow = .hidden, .background = c.document }, rows.items);

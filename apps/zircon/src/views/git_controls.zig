@@ -155,7 +155,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const searchable = self.git.menu == .branches or self.git.menu == .stashes or self.git.menu == .fetch_remote or self.git.menu == .push_remote;
     const height = @min(if (searchable) @as(f32, 360) else @as(f32, @floatFromInt(rows.items.len)) * 30 + 12, b.viewport().height - 90);
     const placement = v.popoverBounds(b.viewport(), self.git_anchor, .{ .width = if (searchable) 440 else 300, .height = height });
-    const popup = try b.key(.{ .string = "git-controls" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .gap = if (searchable) 8 else 0, .padding = ui.Insets.all(if (searchable) 12 else 6), .background = c.panel, .radius = v.metrics.popover_radius, .overflow = .hidden }, rows.items));
+    const popup = try b.key(.{ .string = "git-controls" }, try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(if (searchable) 12 else 6), if (searchable) 8 else 0, rows.items));
     return b.modal(try b.listen(try b.stack(.{ .padding = .{ .top = placement.y, .left = placement.x }, .align_items = .start }, &.{popup}), .{ .on_input = b.onInput(dismiss) }));
 }
 

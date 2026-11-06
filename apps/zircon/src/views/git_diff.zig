@@ -52,7 +52,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             if (line.kind == .addition) added += 1;
             if (line.kind == .deletion) deleted += 1;
         };
-        if (b.viewport().width > 950) try tools.appendSlice(b.allocator(), &.{ try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{deleted}), c.deleted, 12) });
+        if (b.viewport().width - (if (self.sidebar_visible) self.panelWidth() else 0) >= 560) try tools.appendSlice(b.allocator(), &.{ try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{deleted}), c.deleted, 12) });
     }
     const labels = b.viewport().width - self.panelWidth() > 660;
     if (self.git.selected_commit.len == 0) {
@@ -83,11 +83,11 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                 try lines.append(b.allocator(), try b.row(.{ .height = .{ .px = context_height }, .align_items = .center, .padding = .{ .left = 60 }, .flex_shrink = 0, .background = c.sidebar }, &.{try v.text(b, hunk.header, c.muted, 11)}));
             }
             position += context_height;
-            for (hunk.lines) |line| {
+            for (hunk.lines, 0..) |line, index| {
                 if (position >= bottom) break;
                 if (visible(position, line_height, top, bottom)) {
                     if (first == null) first = position;
-                    try lines.append(b.allocator(), try codeRow(self, b, line, hunk.path));
+                    try lines.append(b.allocator(), try codeRow(self, b, line, hunk.path, pairedLine(hunk.lines, index)));
                 }
                 position += line_height;
             }
@@ -98,7 +98,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                 if (position >= bottom) break;
                 if (visible(position, line_height, top, bottom)) {
                     if (first == null) first = position;
-                    try lines.append(b.allocator(), try codeRow(self, b, .{ .kind = .metadata, .text = line }, ""));
+                    try lines.append(b.allocator(), try codeRow(self, b, .{ .kind = .metadata, .text = line }, "", null));
                 }
             }
         }
@@ -131,13 +131,44 @@ fn fileHeader(b: *ui.Ui, c: v.Palette, path: []const u8) !ui.Element {
 fn message(b: *ui.Ui, c: v.Palette, bytes: []const u8) !ui.Element {
     return b.styled(try v.text(b, bytes, c.muted, 13), .{ .padding = ui.Insets.all(16), .text = .{ .size = 13, .color = c.muted } });
 }
-fn codeRow(self: *const Shell, b: *ui.Ui, line: git.Line, path: []const u8) !ui.Element {
+fn codeRow(self: *const Shell, b: *ui.Ui, line: git.Line, path: []const u8, paired: ?[]const u8) !ui.Element {
     const c = self.colors;
     const changed = line.kind == .addition or line.kind == .deletion;
     const tint = if (line.kind == .addition) c.added else if (line.kind == .deletion) c.deleted else self.editor_options.theme.line_number;
     var fill = tint;
     fill.a = 0.14;
     const number = if (line.new_line orelse line.old_line) |n| try std.fmt.allocPrint(b.allocator(), "{d}", .{n}) else "";
-    const code = try @import("code_line.zig").element(b, line.text, path, self.editor_options.font_size, self.editor_options.font_size * self.editor_options.line_height, self.editor_options.theme, &.{});
+    var highlights: [1]@import("code_line.zig").Highlight = undefined;
+    var ranges: []const @import("code_line.zig").Highlight = &.{};
+    if (paired) |other| {
+        const changed_columns = @import("zircon_editor").annotations.changedColumns(other, line.text);
+        var strong = tint;
+        strong.a = 0.3;
+        highlights[0] = .{ .start = changed_columns.start, .end = changed_columns.end, .color = strong };
+        ranges = &highlights;
+    }
+    const code = try @import("code_line.zig").element(b, line.text, path, self.editor_options.font_size, self.editor_options.font_size * self.editor_options.line_height, self.editor_options.theme, ranges);
     return b.row(.{ .height = .{ .px = self.editor_options.font_size * self.editor_options.line_height }, .flex_shrink = 0, .align_items = .stretch, .gap = 8, .background = if (changed) fill else null, .overflow = .hidden }, &.{ try b.div(.{ .width = .{ .px = 3 }, .background = if (changed) tint else null, .flex_shrink = 0 }, &.{}), try b.column(.{ .width = .{ .px = 38 }, .flex_shrink = 0, .justify_content = .center, .align_items = .end }, &.{try b.styled(try v.text(b, number, tint, 12), .{ .text = .{ .size = 12, .mono = true, .color = tint } })}), try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.border_subtle }, &.{}), code });
+}
+
+// Pair equally sized adjacent deletion/addition runs. Large or unbalanced runs
+// retain their line highlight; work for one visible row is bounded.
+fn pairedLine(lines: []const git.Line, index: usize) ?[]const u8 {
+    const kind = lines[index].kind;
+    if (kind != .deletion and kind != .addition) return null;
+    var start = index;
+    var end = index + 1;
+    while (start > 0 and lines[start - 1].kind == kind and index - start < 256) start -= 1;
+    while (end < lines.len and lines[end].kind == kind and end - start < 256) end += 1;
+    if (end - start >= 256) return null;
+    if (kind == .deletion) {
+        var after = end;
+        while (after < lines.len and lines[after].kind == .addition and after - end < 256) after += 1;
+        if (end - start == after - end) return lines[end + index - start].text;
+    } else {
+        var before = start;
+        while (before > 0 and lines[before - 1].kind == .deletion and start - before < 256) before -= 1;
+        if (start - before == end - start) return lines[before + index - start].text;
+    }
+    return null;
 }

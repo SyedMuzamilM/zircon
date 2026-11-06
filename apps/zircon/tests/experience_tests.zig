@@ -121,6 +121,21 @@ const Ops = struct {
     fn stopped(self: *const zircon.Shell) bool {
         return self.language.sessions.items.len == 0 and self.language.documents.items.len == 0;
     }
+    fn expandCompletion(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        const message = &self.language.completions.?;
+        const first = message.data.completion.items[0];
+        const items = try message.arena.allocator().alloc(@TypeOf(first), 2);
+        items[0] = first;
+        items[1] = first;
+        items[1].label = "other";
+        items[1].insert_text = "other";
+        if (items[1].text_edit) |*edit| edit.new_text = "other";
+        message.data.completion.items = items;
+        cx.notify();
+    }
+    fn completionIndex(self: *const zircon.Shell) usize {
+        return self.language.completion_index;
+    }
     fn cursor(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
         const tab = &self.tabs.items[self.active];
         var snapshot = try self.workspace.snapshot(tab.document);
@@ -290,12 +305,22 @@ test "installed server publishes diagnostics applies Unicode completion and stop
     try send(&app, h, .back_to_editor);
     try app.update(owner, Ops.cursor, .{});
     _ = try app.step(0);
+    const completion_caret = (try app.window(h)).frames.committed.text_input.?.caret;
     try send(&app, h, .complete);
     while (!try app.read(owner, Ops.completion, .{})) {
         _ = try app.step(0);
         if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.CompletionTimeout;
         std.Io.sleep(t.io, .fromMilliseconds(1), .awake) catch {};
     }
+    try app.update(owner, Ops.expandCompletion, .{});
+    _ = try app.step(0);
+    const completion_bounds = try elementBounds(&app, h, "completion-list");
+    try t.expectApproxEqAbs(completion_caret.x, completion_bounds.x, 1);
+    try t.expectApproxEqAbs(completion_caret.y + completion_caret.height + 4, completion_bounds.y, 1);
+    try app.dispatch(h, .{ .key_down = .{ .key = .down } });
+    try t.expectEqual(@as(usize, 1), try app.read(owner, Ops.completionIndex, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .up } });
+    try t.expectEqual(@as(usize, 0), try app.read(owner, Ops.completionIndex, .{}));
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-completion.png");
     try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
     _ = try app.step(0);
@@ -371,6 +396,16 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
         }
     };
     try t.expect(try app.read(owner, AllChanges.visible, .{}));
+    var commit_disabled = false;
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Commit staged changes")) {
+        commit_disabled = node.kind.button.on_click == null;
+    };
+    try t.expect(commit_disabled);
+    var changed_word = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.color.a == 0.3 and item.rect.width > 0 and item.rect.width < 40) {
+        changed_word = true;
+    };
+    try t.expect(changed_word);
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-all.png");
     const before_navigation = try app.read(owner, Ops.gitGeneration, .{});
     try app.update(owner, Ops.gitFile, .{});

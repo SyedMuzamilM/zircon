@@ -304,6 +304,44 @@ pub const Shell = struct {
     pub fn onRoot(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         try actions.rootInput(self, e, cx);
     }
+    pub const Breadcrumb = struct { document: workspace.DocumentId, prefix: u32, pane: u8 = 0 };
+    pub fn onBreadcrumb(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Breadcrumb) !void {
+        const record = try self.workspace.getConst(target.document);
+        if (target.prefix > 0) if (record.path) |path| {
+            if (target.prefix > path.len) return;
+            self.left_panel = .project;
+            self.sidebar_visible = true;
+            for (self.tree.items, 0..) |row, index| if (std.mem.eql(u8, row.path, path[0..target.prefix])) {
+                if (row.directory and !row.expanded) try actions.activateTree(self, index);
+                self.tree_scroll.reveal(@as(f32, @floatFromInt(index)) * 24, @as(f32, @floatFromInt(index + 1)) * 24, @as(f32, @floatFromInt(self.tree.items.len)) * 24, 400);
+                break;
+            };
+        };
+        if (target.pane == 1 and self.secondary != null and std.meta.eql(self.secondary.?.document, target.document)) {
+            self.active_pane = .secondary;
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            self.secondary.?.editor.reveal(snapshot);
+        } else for (self.tabs.items, 0..) |*tab, index| if (std.meta.eql(tab.document, target.document)) {
+            self.active = index;
+            self.active_pane = .primary;
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            tab.editor.reveal(snapshot);
+            break;
+        };
+        self.editor_focus_request +%= 1;
+        cx.notify();
+    }
+    pub fn onOverlayInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
+        if (e.phase == .target and e.data == .pointer_down and self.overlay != .dirty) {
+            self.overlay = .none;
+            self.vim_find_pending = false;
+            self.editor_focus_request +%= 1;
+            e.preventDefault();
+            cx.notify();
+        }
+    }
     pub fn onMenuInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data == .pointer_down and e.phase == .target) {
             self.menu_open = false;

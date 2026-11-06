@@ -292,7 +292,7 @@ const Flow = struct {
                 const fragment = word[0..take];
                 const width = (try self.metrics.text(self.metrics.context, fragment, style)).width;
                 const bounds: ui.Rect = .{ .x = self.x, .y = self.y, .width = @max(1, width), .height = self.line_height };
-                if (background) try self.fills.append(self.allocator, .{ .bounds = .{ .x = bounds.x - 2, .y = bounds.y, .width = bounds.width + 4, .height = self.line_height - 1 }, .color = self.colors.code, .radius = 3 });
+                if (background) try self.fills.append(self.allocator, .{ .bounds = .{ .x = bounds.x - 2, .y = bounds.y, .width = bounds.width + 4, .height = self.line_height - 1 }, .color = self.colors.code, .radius = ui.controls.metrics.inline_code_radius });
                 try self.texts.append(self.allocator, .{ .bounds = bounds, .text = fragment, .style = style });
                 try self.hits.append(self.allocator, .{ .bounds = bounds, .source = source, .target = target });
                 if (target != null) try self.fills.append(self.allocator, .{ .bounds = .{ .x = self.x, .y = self.y + style.size + 2, .width = width, .height = 1 }, .color = self.colors.accent });
@@ -397,7 +397,7 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
                     flow.newline();
                 }
                 flow.y += 8;
-                try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = block_top, .width = @max(1, flow.right - 30), .height = flow.y - block_top }, .color = colors.code, .radius = 5 });
+                try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = block_top, .width = @max(1, flow.right - 30), .height = flow.y - block_top }, .color = colors.code, .radius = ui.controls.metrics.control_radius });
                 flow.y += 14;
             },
             .table => {

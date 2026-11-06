@@ -70,19 +70,29 @@ pub fn activateTree(self: *Shell, index: usize) !void {
         while (end < self.tree.items.len and self.tree.items[end].depth > row.depth) : (end += 1) freeRow(self.allocator, self.tree.items[end]);
         self.tree.replaceRangeAssumeCapacity(index + 1, end - index - 1, &.{});
         self.tree.items[index].expanded = false;
-    } else {
-        const entries = try self.workspace.children(row.path, self.allocator);
-        defer ws.deinitEntries(entries, self.allocator);
-        var rows: std.ArrayList(model.TreeRow) = .empty;
-        defer rows.deinit(self.allocator);
-        errdefer for (rows.items) |child| freeRow(self.allocator, child);
-        for (entries) |entry| {
-            const child = try copyRow(self.allocator, entry, row.depth + 1);
-            errdefer freeRow(self.allocator, child);
-            try rows.append(self.allocator, child);
-        }
-        try self.tree.insertSlice(self.allocator, index + 1, rows.items);
-        self.tree.items[index].expanded = true;
+    } else try expandDirectory(self, index);
+}
+fn expandDirectory(self: *Shell, index: usize) !void {
+    const row = self.tree.items[index];
+    const entries = try self.workspace.children(row.path, self.allocator);
+    defer ws.deinitEntries(entries, self.allocator);
+    var rows: std.ArrayList(model.TreeRow) = .empty;
+    defer rows.deinit(self.allocator);
+    errdefer for (rows.items) |child| freeRow(self.allocator, child);
+    for (entries) |entry| {
+        const child = try copyRow(self.allocator, entry, row.depth + 1);
+        errdefer freeRow(self.allocator, child);
+        try rows.append(self.allocator, child);
+    }
+    try self.tree.insertSlice(self.allocator, index + 1, rows.items);
+    self.tree.items[index].expanded = true;
+}
+/// Reveal only ancestors of the opened source; do not flatten unrelated folders.
+fn revealTreePath(self: *Shell, path: []const u8) !void {
+    var index: usize = 0;
+    while (index < self.tree.items.len) : (index += 1) {
+        const row = self.tree.items[index];
+        if (row.directory and !row.expanded and path.len > row.path.len and std.mem.startsWith(u8, path, row.path) and path[row.path.len] == std.fs.path.sep) try expandDirectory(self, index);
     }
 }
 pub fn openPath(self: *Shell, path: []const u8) !void {
@@ -98,6 +108,7 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
     }
     self.panel = .editor;
     const id = try self.workspace.open(path);
+    if ((try self.workspace.getConst(id)).path) |absolute| revealTreePath(self, absolute) catch {};
     for (self.tabs.items, 0..) |tab, i| if (std.meta.eql(tab.document, id)) {
         self.active = i;
         self.active_pane = .primary;
@@ -159,6 +170,18 @@ fn setField(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), va
 fn show(self: *Shell, cx: *ui.Context(Shell), which: model.Overlay) !void {
     self.overlay = which;
     self.overlay_index = 0;
+    if (self.fields) |fields| {
+        const SetQuery = struct {
+            fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), picker: bool) void {
+                input.height = if (picker) 38 else 30;
+                input.font_size = if (picker) 14 else 13;
+                input.leading_icon = if (picker) .search else null;
+                input.show_focus_border = !picker;
+                context.notify();
+            }
+        };
+        try cx.update(fields.query, SetQuery.call, .{which == .palette or which == .quick_open});
+    }
     if (self.fields) |fields| switch (which) {
         .palette => try setField(cx, fields.query, "", "Search commands…"),
         .quick_open => try setField(cx, fields.query, "", "Find a file…"),
@@ -424,7 +447,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 if (cx.app.raiseWindow(handle)) |_| return else |err| if (err != error.WindowNotFound) return err;
             }
             const View = @import("settings/view.zig").View;
-            const handle = try cx.app.openChildWindow(self.window.?, View, .{ .title = "Zircon Settings", .chrome = .integrated, .width = 1000, .height = 700 }, .{ .allocator = self.allocator, .settings = self.settings.?, .workspace = cx.owner });
+            const handle = try cx.app.openChildWindow(self.window.?, View, .{ .title = "Zircon Settings", .chrome = .integrated, .width = 1000, .height = 700 }, .{ .allocator = self.allocator, .settings = self.settings.?, .workspace = cx.owner, .initial_colors = self.colors, .initial_follows_system = self.follows_system });
             self.settings_window = handle;
             try cx.app.update(try cx.app.windowEntity(View, handle), View.bootstrap, .{handle});
         },
@@ -683,8 +706,11 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
             return;
         }
     }
-    if (self.overlay == .none and self.language.completions != null and (key.key == .escape or key.key == .enter)) {
-        if (key.key == .enter) @import("services/language.zig").accept(self, cx, 0) catch |err| try self.reportError(err) else self.language.clearCompletion();
+    if (self.overlay == .none and self.language.completions != null and (key.key == .escape or key.key == .enter or key.key == .up or key.key == .down)) {
+        if (key.key == .enter) @import("services/language.zig").accept(self, cx, @intCast(self.language.completion_index)) catch |err| try self.reportError(err) else if (key.key == .escape) self.language.clearCompletion() else {
+            const count = self.language.completions.?.data.completion.items.len;
+            if (count > 0) self.language.completion_index = if (key.key == .down) (self.language.completion_index + 1) % count else (self.language.completion_index + count - 1) % count;
+        }
         e.preventDefault();
         e.stopPropagation();
         cx.notify();

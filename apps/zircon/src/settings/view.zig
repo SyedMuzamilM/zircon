@@ -16,6 +16,8 @@ pub const View = struct {
     settings: ui.Entity(model.Settings),
     font_families: []ui.typography.FontName = &.{},
     workspace: ?ui.Entity(Shell) = null,
+    initial_colors: ?v.Palette = null,
+    initial_follows_system: bool = false,
     window: ?ui.WindowHandle = null,
     query: ?ui.Entity(ui.controls.TextInput) = null,
     choice_query: ?ui.Entity(ui.controls.TextInput) = null,
@@ -51,7 +53,17 @@ pub const View = struct {
         _ = try cx.observe(self.choice_query.?, onChoiceQuery);
         _ = try cx.observe(self.query.?, onQuery);
         _ = try cx.observe(self.settings, onSettings);
-        try self.onSettings(cx, self.settings);
+        if (self.initial_colors) |colors| {
+            self.follows_system = self.initial_follows_system;
+            if ((try cx.app.window(window)).surface) |surface| {
+                const dark = colors.document.r * 0.2126 + colors.document.g * 0.7152 + colors.document.b * 0.0722 < 0.5;
+                surface.setAppearance(if (self.follows_system) null else dark);
+            }
+            const appearance = v.inputAppearance(colors);
+            try cx.update(self.query.?, ui.controls.TextInput.setAppearance, .{appearance});
+            try cx.update(self.choice_query.?, ui.controls.TextInput.setAppearance, .{appearance});
+            self.initial_colors = null;
+        } else try self.onSettings(cx, self.settings);
         cx.notify();
     }
     fn onSettings(self: *View, cx: *ui.Context(View), settings: ui.Entity(model.Settings)) !void {
@@ -489,7 +501,7 @@ fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
     if (self.choice_query) |handle| try children.append(b.allocator(), try b.autofocus(try b.key(.{ .string = "settings-choice-query" }, try b.view(handle))));
     try children.appendSlice(b.allocator(), &.{ try v.rule(b, c), list });
     const placement = v.popoverBounds(b.viewport(), self.picker_anchor, .{ .width = 264, .height = height + 54 });
-    const popup = try b.key(.{ .string = "settings-choices" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .gap = 6, .padding = ui.Insets.all(6), .radius = v.metrics.popover_radius, .background = c.panel, .overflow = .hidden }, children.items));
+    const popup = try b.key(.{ .string = "settings-choices" }, try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(6), 6, children.items));
     return b.modal(try b.listen(try b.stack(.{ .align_items = .start, .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}), .{ .on_input = b.onInput(View.closePicker) }));
 }
 const Switch = struct {
@@ -502,8 +514,8 @@ const Switch = struct {
     }
     pub fn prepaint(_: *Switch, _: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {}
     pub fn paint(self: *Switch, cx: *ui.PaintCx, bounds: ui.Rect, _: *void, _: *void) !void {
-        try cx.painter.fillRect(.{ .bounds = bounds, .radius = 9, .color = if (self.enabled) self.colors.primary else self.colors.line });
-        try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + (if (self.enabled) @as(f32, 15) else 3), .y = bounds.y + 3, .width = 12, .height = 12 }, .radius = 6, .color = if (self.enabled) self.colors.text else self.colors.muted });
+        try cx.painter.fillRect(.{ .bounds = bounds, .radius = bounds.height / 2, .color = if (self.enabled) self.colors.primary else self.colors.line });
+        try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + (if (self.enabled) @as(f32, 15) else 3), .y = bounds.y + 3, .width = 12, .height = 12 }, .radius = (bounds.height - 6) / 2, .color = if (self.enabled) self.colors.text else self.colors.muted });
     }
 };
 
@@ -511,7 +523,7 @@ fn palette(values: model.Values, generation: ?ext.Snapshot, system_dark: bool) v
     var c: v.Palette = if (@import("../theme.zig").isLight(values.theme, system_dark)) v.Palette.light else .{};
     if (generation) |snapshot| if (snapshot.resolveTheme(values.theme)) |theme| {
         inline for (.{ "document", "chrome", "sidebar", "panel", "line", "text", "muted", "accent", "selected", "warning", "primary" }) |name| @field(c, name) = @import("../services/extensions.zig").color(@field(theme.colors, name));
-        c.hover = c.selected;
+        c.applySelection(@import("../services/extensions.zig").color(theme.colors.selected));
         c.element = c.chrome;
         c.primary_hover = c.selected;
         c.on_primary = c.text;

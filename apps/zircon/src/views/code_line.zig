@@ -37,7 +37,7 @@ const Code = struct {
             const style: ui.TextStyle = .{ .size = self.font, .mono = true };
             const left = cx.measurer.caret(self.text, style, highlight.start);
             const right = cx.measurer.caret(self.text, style, highlight.end);
-            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + left, .y = bounds.y + 1, .width = right - left, .height = @max(0, bounds.height - 2) }, .color = highlight.color, .radius = 2 });
+            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + left, .y = bounds.y + 1, .width = right - left, .height = @max(0, bounds.height - 2) }, .color = highlight.color, .radius = ui.controls.metrics.text_highlight_radius });
         }
         for (self.spans) |span| {
             if (span.start > cursor) x += try self.run(cx, self.text[cursor..span.start], self.theme.foreground, x, y, bounds);

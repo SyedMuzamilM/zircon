@@ -20,6 +20,7 @@ pub const Model = struct {
     sessions: std.ArrayList(Session) = .empty,
     documents: std.ArrayList(Document) = .empty,
     completions: ?lsp.Message = null,
+    completion_index: usize = 0,
     pending: ?Pending = null,
     /// Request IDs are local to a server. Both its session and document URI
     /// participate in identity before a response can reach an editor.
@@ -32,6 +33,7 @@ pub const Model = struct {
     pub fn clearCompletion(self: *Model) void {
         if (self.completions) |*value| value.deinit();
         self.completions = null;
+        self.completion_index = 0;
         self.pending = null;
     }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
@@ -156,6 +158,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     if (!self.language.expects(session_index, value.uri, value.id, value.version) or record.doc.revision() != value.version) continue;
                     if (self.language.completions) |*old| old.deinit();
                     self.language.completions = message;
+                    self.language.completion_index = 0;
                     moved = true;
                     changed = true;
                 },

@@ -23,7 +23,7 @@ pub fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     const tool_count: f32 = @as(f32, @floatFromInt(@as(u32, @intFromBool(self.tool_tabs.search or self.panel == .search)) + @as(u32, @intFromBool(self.tool_tabs.git_diff or self.panel == .git_diff)) + @as(u32, @intFromBool(self.tool_tabs.extensions or self.panel == .extensions))));
     const utility = tool_count > 0 or self.panel == .image;
     const source_room = @max(0, width - 104 - tool_count * 160);
-    const capacity = if (utility and self.panel != .editor and self.panel != .markdown and width < 520 + (tool_count - 1) * 100) @as(usize, 0) else @max(@as(usize, 1), @as(usize, @intFromFloat(@floor(source_room / 174))));
+    const capacity = if (utility and self.panel != .editor and self.panel != .markdown and width < 420 + tool_count * 100) @as(usize, 0) else @max(@as(usize, 1), @as(usize, @intFromFloat(@floor(source_room / 174))));
     const first = if (capacity == 0) @min(self.active, self.tabs.items.len) else if (self.active >= capacity) self.active - capacity + 1 else 0;
     const end = @min(self.tabs.items.len, first + capacity);
     for (self.tabs.items[first..end], first..) |tab, index| {
@@ -34,7 +34,7 @@ pub fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const title = try b.listen(try b.button(.{ .label = accessible, .children = &.{ try v.icon(b, v.fileIcon(record.path orelse ""), v.fileColor(c, record.path orelse ""), 14), try v.text(b, record.title(), if (selected) c.text else c.muted, 13) }, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onTab), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 7, .align_items = .center, .padding = .{ .left = 11, .right = 6 }, .hover_background = if (selected) c.document else c.hover, .overflow = .hidden } }), .{ .on_input = try b.onInputWith(tab.document, Shell.onTabDrag) });
         const close = try b.key(.{ .string = "close" }, try b.button(.{ .label = "Close tab", .children = &.{if (record.dirty()) try b.div(.{ .width = .{ .px = 5 }, .height = .{ .px = 5 }, .radius = v.metrics.control_radius, .background = c.muted }, &.{}) else try v.icon(b, .close, c.muted, 12)}, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onCloseTab), .style = .{ .width = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }));
         const measured = @min(@as(f32, 174), @max(@as(f32, 110), @as(f32, @floatFromInt(record.title().len)) * 7.2 + 57));
-        try items.append(b.allocator(), try b.key(.{ .number = @import("../panes.zig").key(tab.document) }, try b.column(.{ .width = .{ .px = measured }, .min_width = .{ .px = 90 }, .flex_shrink = 1, .background = background }, &.{ try b.row(.{ .flex_grow = 1 }, &.{ try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{}), title, close, try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{}) }), try b.div(.{ .height = .{ .px = 1 }, .background = if (selected) c.document else c.line, .flex_shrink = 0 }, &.{}) })));
+        try items.append(b.allocator(), try b.key(.{ .number = @import("../panes.zig").key(tab.document) }, try b.column(.{ .width = .{ .px = measured }, .min_width = .{ .px = 90 }, .flex_shrink = 1, .background = background }, &.{ try b.row(.{ .flex_grow = 1 }, &.{ title, close, try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{}) }), try b.div(.{ .height = .{ .px = 1 }, .background = if (selected) c.document else c.line, .flex_shrink = 0 }, &.{}) })));
     }
     var shown_tools: usize = 0;
     inline for (.{ Shell.Tool.search, Shell.Tool.git_diff, Shell.Tool.extensions }) |tool| {
@@ -80,13 +80,28 @@ fn navigation(self: *const Shell, b: *ui.Ui, index: ?usize, key: []const u8, nam
     if (index == null) color.a = 0.4;
     return b.key(.{ .string = key }, try b.button(.{ .label = key, .children = &.{try v.icon(b, name, color, 14)}, .on_click = if (index) |target| try b.onClickWith(@as(u32, @intCast(target)), Shell.onTab) else null, .style = .{ .width = .{ .px = 26 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = if (index != null) c.hover else null } }));
 }
-pub fn fileHeader(self: *const Shell, b: *ui.Ui, record: *const @import("zircon_workspace").Record) !ui.Element {
+pub fn fileHeader(self: *const Shell, b: *ui.Ui, record: *const @import("zircon_workspace").Record, document: @import("zircon_workspace").DocumentId, state: *const @import("zircon_editor").Editor) !ui.Element {
     const c = self.colors;
     var path = record.path orelse record.title();
     if (std.mem.startsWith(u8, path, self.workspace.root_path) and path.len > self.workspace.root_path.len) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
-    const name = try v.text(b, path, c.muted, 12);
+    const pane: u8 = if (self.secondary != null and state == &self.secondary.?.editor) 1 else 0;
+    var crumbs: std.ArrayList(ui.Element) = .empty;
+    var segments = std.mem.splitScalar(u8, path, '/');
+    while (segments.next()) |segment| {
+        if (segment.len == 0) continue;
+        if (crumbs.items.len > 0) try crumbs.append(b.allocator(), try v.icon(b, .chevron_right, c.muted, 10));
+        const end = @intFromPtr(segment.ptr) - @intFromPtr(path.ptr) + segment.len;
+        const label = try std.fmt.allocPrint(b.allocator(), "Reveal {s}", .{segment});
+        try crumbs.append(b.allocator(), try b.button(.{ .label = label, .children = &.{try v.text(b, segment, c.muted, 12)}, .on_click = try b.onClickWith(Shell.Breadcrumb{ .document = document, .pane = pane, .prefix = if (record.path) |full| @intCast(@intFromPtr(path.ptr) - @intFromPtr(full.ptr) + end) else 0 }, Shell.onBreadcrumb), .style = .{ .height = .{ .px = 24 }, .min_width = .{ .px = 0 }, .flex_shrink = 1, .align_items = .center, .padding = .{ .left = 2, .right = 2 }, .hover_background = c.hover, .radius = v.metrics.control_radius, .overflow = .hidden } }));
+    }
+    var snapshot = record.doc.snapshot();
+    defer snapshot.deinit();
+    const head = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head;
+    const point = try snapshot.pointAt(@min(head, snapshot.byteLen()));
+    try crumbs.append(b.allocator(), try v.icon(b, .chevron_right, c.muted, 10));
+    try crumbs.append(b.allocator(), try b.button(.{ .label = "Reveal cursor", .children = &.{try v.text(b, try std.fmt.allocPrint(b.allocator(), "Line {d}", .{point.line + 1}), c.muted, 11)}, .on_click = try b.onClickWith(Shell.Breadcrumb{ .document = document, .pane = pane, .prefix = 0 }, Shell.onBreadcrumb), .style = .{ .height = .{ .px = 24 }, .align_items = .center, .padding = .{ .left = 3, .right = 3 }, .hover_background = c.hover, .radius = v.metrics.control_radius } }));
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try b.styled(name, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .mono = true, .color = c.muted }, .overflow = .hidden }));
+    try children.append(b.allocator(), try b.row(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 2, .align_items = .center, .overflow = .hidden }, crumbs.items));
     try children.append(b.allocator(), try v.iconButton(b, c, .git_blame, "Toggle line blame", .history, false));
     try children.append(b.allocator(), try v.iconButton(b, c, .find, "Find", .search, false));
     if (@import("zircon_editor").syntax.languageForPath(record.path orelse "") == .markdown) try children.append(b.allocator(), try v.iconButton(b, c, .markdown_preview, "Preview", .markdown, self.panel == .markdown));
@@ -130,7 +145,7 @@ pub fn menu(self: *const Shell, b: *ui.Ui) !ui.Element {
         try items.append(b.allocator(), try v.menuRow(b, c, entry[0], entry[1], try self.key_bindings.shortcut(b.allocator(), entry[0]), false));
     }
     const placement = v.popoverBounds(b.viewport(), self.menu_anchor, .{ .width = 260, .height = 170 });
-    const popup = try b.key(.{ .string = "workspace-menu" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .padding = ui.Insets.all(5), .background = c.panel, .radius = v.metrics.popover_radius, .overflow = .hidden }, items.items));
+    const popup = try b.key(.{ .string = "workspace-menu" }, try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, items.items));
     return b.modal(try b.listen(try b.stack(.{ .align_items = .start, .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}), .{ .on_input = b.onInput(Shell.onMenuInput) }));
 }
 
@@ -142,6 +157,6 @@ pub fn splitMenu(self: *const Shell, b: *ui.Ui) !ui.Element {
         try rows.append(b.allocator(), try v.menuRow(b, self.colors, action, item.label, try self.key_bindings.shortcut(b.allocator(), action), false));
     }
     const placement = v.popoverBounds(b.viewport(), self.split_anchor, .{ .width = 260, .height = 160 });
-    const popup = try b.key(.{ .string = "split-menu" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .padding = ui.Insets.all(5), .background = self.colors.panel, .radius = v.metrics.popover_radius, .overflow = .hidden }, rows.items));
+    const popup = try b.key(.{ .string = "split-menu" }, try v.floatingPanel(b, self.colors, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, rows.items));
     return b.modal(try b.listen(try b.stack(.{ .align_items = .start, .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}), .{ .on_input = b.onInput(Shell.onMenuInput) }));
 }

@@ -111,6 +111,15 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module } },
         });
+        const ui_review = b.addExecutable(.{ .name = "zircon-ui-review", .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/capture_ui_review.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } },
+        }) });
+        const ui_review_run = b.addRunArtifact(ui_review);
+        ui_review_run.addArgs(&.{ b.option([]const u8, "review-project", "Review fixture project") orelse ".", b.option([]const u8, "review-output", "Review screenshot directory") orelse "/tmp/zircon-ui-review/current" });
+        b.step("capture-ui-review", "Capture deterministic native editor review scenarios").dependOn(&ui_review_run.step);
         const app_native_tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path("apps/zircon/tests/native_journey.zig"),
             .target = target,

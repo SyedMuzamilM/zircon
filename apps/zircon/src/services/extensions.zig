@@ -28,7 +28,7 @@ pub fn applyTheme(self: *Shell, id: []const u8) void {
     const contribution = snapshot.resolveTheme(id) orelse return;
     inline for (.{ "document", "chrome", "sidebar", "panel", "line", "text", "muted", "accent", "selected", "warning", "primary" }) |name| @field(self.colors, name) = color(@field(contribution.colors, name));
     self.colors.tab_bar = self.colors.sidebar;
-    self.colors.hover = self.colors.selected;
+    self.colors.applySelection(color(contribution.colors.selected));
     self.colors.element = self.colors.chrome;
     self.colors.border_subtle = self.colors.line;
     self.colors.primary_hover = self.colors.selected;

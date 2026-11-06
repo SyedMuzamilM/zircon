@@ -55,6 +55,9 @@ test "all directional splits arrange the new pane in the requested direction and
         _ = try app.step(1);
         const primary = try bounds(&app, h, "primary-editor");
         const secondary = try bounds(&app, h, "secondary-editor");
+        const panes = try bounds(&app, h, "panes");
+        try t.expect(primary.y + primary.height <= panes.y + panes.height + 0.1);
+        try t.expect(secondary.y + secondary.height <= panes.y + panes.height + 0.1);
         switch (action) {
             .split_left => try t.expect(secondary.x < primary.x and secondary.width > 300),
             .split_right => try t.expect(secondary.x > primary.x and primary.width > 300),
@@ -199,4 +202,58 @@ test "Vim slash search uses the focused find field and returns to Normal" {
     };
     const owner = try app.windowEntity(zircon.Shell, h);
     try t.expect(try app.read(owner, Read.matched, .{}));
+}
+
+test "compact command palette preserves query height, source visibility and outside dismissal" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.command, .{.palette});
+    _ = try app.step(0);
+    const query = try bounds(&app, h, "query");
+    try t.expectApproxEqAbs(@as(f32, 38), query.height, 0.01);
+    const dialog = try bounds(&app, h, "dialog");
+    try t.expect(dialog.width <= 560 and dialog.height < 500);
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.width >= 1000 and item.rect.height >= 700) try t.expect(item.color.a == 1 or item.color.a == 0);
+    try app.dispatch(h, .{ .pointer_down = .{ .position = .{ .x = 15, .y = 600 } } });
+    _ = try app.step(0);
+    try t.expectError(error.MissingElement, bounds(&app, h, "dialog"));
+}
+test "opened nested source reveals only its project ancestors" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(t.io, "src/nested");
+    try tmp.dir.createDirPath(t.io, "unrelated");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "src/nested/main.zig", .data = "const n = 1;\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var shell = try zircon.Shell.init(t.allocator, t.io, root, "src/nested/main.zig");
+    defer shell.deinit(t.allocator);
+    var source_visible = false;
+    for (shell.tree.items) |row| {
+        if (std.mem.eql(u8, row.name, "main.zig")) source_visible = true;
+        if (std.mem.eql(u8, row.name, "unrelated")) try t.expect(!row.expanded);
+    }
+    try t.expect(source_visible);
+}
+
+test "breadcrumb returns focus to the pane that supplied its document" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.command, .{.split_right});
+    const Call = struct {
+        fn primary(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            self.active_pane = .secondary;
+            var event: ui.Event(ui.Click) = .{ .data = .{} };
+            try self.onBreadcrumb(&event, cx, .{ .document = self.tabs.items[0].document, .prefix = 0, .pane = 0 });
+        }
+        fn focused(self: *const zircon.Shell) bool {
+            return self.active_pane == .primary;
+        }
+    };
+    try app.update(owner, Call.primary, .{});
+    try t.expect(try app.read(owner, Call.focused, .{}));
 }

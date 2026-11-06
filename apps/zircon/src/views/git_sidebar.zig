@@ -50,9 +50,19 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         const branch = if (self.git.status) |status| if (status.branch.len > 0) status.branch else "Detached HEAD" else "Loading…";
         try children.append(b.allocator(), try b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 8 }, .gap = 6, .align_items = .center }, &.{ try b.button(.{ .label = "Switch branch", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, branch, c.text, 12) }, .on_click = try b.onClickWith(Command.git_branches, Shell.onCommand), .style = .{ .direction = .row, .gap = 5, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .hover_background = c.hover, .overflow = .hidden } }), if (width < 220) try b.div(.{ .width = .{ .px = 0 }, .flex_shrink = 0 }, &.{}) else try b.button(.{ .label = if (@import("git_controls.zig").hasUpstream(self)) "Push" else "Publish", .children = &.{ try v.icon(b, .arrow_up, c.muted, 14), try v.text(b, if (self.git.busy) "Working…" else if (@import("git_controls.zig").hasUpstream(self)) "Push" else "Publish", c.text, 12) }, .on_click = if (self.git.busy) null else try b.onClickWith(if (@import("git_controls.zig").hasUpstream(self)) Command.git_push else Command.git_publish, Shell.onCommand), .style = v.buttonStyle(c, false) }), try v.iconButton(b, c, .git_network_menu, "Remote actions", .chevron_down, self.git.menu == .network) }));
         try children.append(b.allocator(), try v.rule(b, c));
+        var staged = false;
+        var conflicted = false;
+        if (self.git.status) |status| for (status.entries) |entry| {
+            staged = staged or entry.staged;
+            conflicted = conflicted or entry.conflicted;
+        };
+        const message_text = if (self.fields) |fields| try @import("../view.zig").fieldText(b, fields.commit) else "";
+        const commit_ready = staged and !conflicted and !self.git.busy and std.mem.trim(u8, message_text, " \t\r\n").len > 0;
+        var commit_style = v.buttonStyle(c, commit_ready);
+        if (!commit_ready) commit_style.background = c.hover;
         var commit: std.ArrayList(ui.Element) = .empty;
         if (self.fields) |fields| try commit.append(b.allocator(), try b.key(.{ .string = "commit-message" }, try b.styled(try b.view(fields.commit), .{ .height = .{ .px = 48 }, .flex_shrink = 0 })));
-        try commit.append(b.allocator(), try b.row(.{ .align_items = .center }, &.{ try v.icon(b, .commit, c.muted, 15), try b.div(.{ .flex_grow = 1 }, &.{}), try b.button(.{ .label = "Commit staged changes", .children = &.{try v.text(b, "Commit staged", c.on_primary, 12)}, .on_click = try b.onClickWith(Command.git_commit, Shell.onCommand), .style = v.buttonStyle(c, true) }) }));
+        try commit.append(b.allocator(), try b.row(.{ .align_items = .center }, &.{ try v.icon(b, .commit, c.muted, 15), try b.div(.{ .flex_grow = 1 }, &.{}), try b.button(.{ .label = "Commit staged changes", .children = &.{try v.text(b, "Commit staged", if (commit_ready) c.on_primary else c.muted, 12)}, .on_click = if (commit_ready) try b.onClickWith(Command.git_commit, Shell.onCommand) else null, .style = commit_style }) }));
         try children.append(b.allocator(), try b.column(.{ .height = .{ .px = 112 }, .flex_shrink = 0, .padding = ui.Insets.all(8), .gap = 12, .background = c.document }, commit.items));
         if (self.git.commits.len > 0) {
             const last = self.git.commits[0];

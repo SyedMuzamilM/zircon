@@ -266,3 +266,36 @@ test "installed font identities and Vim bindings persist without borrowed settin
     try store.update(.{ .font_family = .lilex });
     try t.expectEqual(@as(u16, 0), store.values().editor_font_name.len);
 }
+
+test "opening Light settings styles search fields before reading the borrowed workspace" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var shell = try zircon.Shell.init(t.allocator, t.io, ".", null);
+    const h = app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, shell) catch |err| {
+        shell.deinit(t.allocator);
+        return err;
+    };
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    const Call = struct {
+        fn light(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .theme = "zircon.light" }});
+        }
+        fn status(self: *const zircon.Shell) bool {
+            return self.status_is_error;
+        }
+    };
+    try app.update(owner, Call.light, .{});
+    _ = try app.step(0);
+    try app.update(owner, Ops.open, .{});
+    _ = try app.step(0);
+    try t.expect(!try app.read(owner, Call.status, .{}));
+    const child = try app.read(owner, Ops.child, .{});
+    const frame = &(try app.window(child)).frames.committed;
+    const search = try keyBounds(&app, child, "settings-search");
+    var light_background = false;
+    for (frame.scene.items) |item| if (item.kind == .rect and item.rect.x >= search.x and item.rect.y >= search.y and item.rect.width >= search.width - 2 and item.rect.height >= 28 and item.rect.height <= 31 and item.color.r > 0.8) {
+        light_background = true;
+    };
+    try t.expect(light_background);
+}
