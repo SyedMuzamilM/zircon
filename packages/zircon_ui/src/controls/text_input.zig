@@ -29,6 +29,7 @@ pub const TextInput = struct {
     dragging: bool = false,
     placeholder: []const u8 = "Type here…",
     appearance: Appearance = .{},
+    show_focus_border: bool = true,
     height: f32 = 30,
     font_size: f32 = 13,
     leading_icon: ?icons.Name = null,
@@ -45,7 +46,7 @@ pub const TextInput = struct {
     }
     pub fn render(self: *const TextInput, b: *Ui) !Element {
         try (TextStyle{ .size = self.font_size }).validate();
-        const field: Field = .{ .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked, .appearance = self.appearance, .height = self.height, .font_size = self.font_size, .leading_icon = self.leading_icon };
+        const field: Field = .{ .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .show_focus_border = self.show_focus_border, .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked, .appearance = self.appearance, .height = self.height, .font_size = self.font_size, .leading_icon = self.leading_icon };
         return b.listen(try b.key(.{ .string = "text-input" }, try b.custom(Field, field, .{ .height = .{ .px = self.height }, .overflow = .hidden })), .{ .focusable = true, .on_input = b.onInput(onInput) });
     }
     pub fn setAppearance(self: *TextInput, cx: *runtime.Context(TextInput), appearance: Appearance) void {
@@ -190,6 +191,7 @@ pub const TextInput = struct {
     }
 };
 const Field = struct {
+    show_focus_border: bool,
     text: []const u8,
     placeholder: []const u8,
     selection: p.TextRange,
@@ -215,8 +217,8 @@ const Field = struct {
         return caret;
     }
     pub fn paint(self: *Field, cx: *custom.PaintCx, bounds: g.Rect, metrics: *LayoutState, caret: *g.Rect) !void {
-        try cx.painter.fillRect(.{ .bounds = bounds, .color = self.appearance.background, .radius = 3 });
-        if (cx.focused) try cx.painter.strokeRect(bounds, self.appearance.focus_border, 1);
+        try cx.painter.fillRect(.{ .bounds = bounds, .color = self.appearance.background, .radius = @import("metrics.zig").control_radius });
+        if (cx.focused and self.show_focus_border) try cx.painter.strokeRect(bounds, self.appearance.focus_border, 1);
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
         if (self.leading_icon) |icon| try icons.draw(icon, cx.painter, .{ .x = bounds.x + 8, .y = bounds.y + (bounds.height - 14) / 2, .width = 14, .height = 14 }, self.appearance.placeholder);
