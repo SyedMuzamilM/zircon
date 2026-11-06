@@ -9,6 +9,7 @@ const syntax = @import("syntax.zig");
 const display = @import("display.zig");
 const annotations = @import("annotations.zig");
 const line_limit = 64 * 1024;
+const number_right_inset: f32 = 36;
 pub fn gutterWidth(lines: usize, font_size: f32) f32 {
     var digits: usize = 1;
     var remaining = lines;
@@ -268,7 +269,7 @@ const Canvas = struct {
                 const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{line.row + 1});
                 const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true };
                 const number_width = metrics.text(metrics.context, number, number_style) catch ui.Size{ .width = 20, .height = 16 };
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 36 - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (cx.focused and line.row == primary_row) self.theme.active_number else self.theme.line_number } });
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - number_right_inset - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (cx.focused and line.row == primary_row) self.theme.active_number else self.theme.line_number } });
             }
         }
         for (self.git_changes) |change| {
@@ -340,7 +341,7 @@ const Canvas = struct {
                 const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{change.old_start + i + 1});
                 const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true, .color = self.theme.git_deleted };
                 const measured = try metrics.text(metrics.context, number, number_style);
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + gutter - 18 - measured.width, .y = y + (self.line_height - measured.height) / 2, .width = measured.width + 2, .height = measured.height }, .text = number, .style = number_style });
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + gutter - number_right_inset - measured.width, .y = y + (self.line_height - measured.height) / 2, .width = measured.width + 2, .height = measured.height }, .text = number, .style = number_style });
             }
         }
     }

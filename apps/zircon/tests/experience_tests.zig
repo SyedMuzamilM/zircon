@@ -723,11 +723,19 @@ test "gutter click expands removed lines inline without changing buffer selectio
     };
     try t.expect(try app.read(owner, Check.expanded, .{}));
     var removed_number = false;
+    var removed_x: ?f32 = null;
+    var current_x: ?f32 = null;
     for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
-        if (std.mem.eql(u8, item.text, "1") and item.color.r > 0.7 and item.color.g < 0.6) removed_number = true;
+        if (std.mem.eql(u8, item.text, "1") and item.rect.x >= canvas.x and item.rect.x < canvas.x + 76) {
+            if (item.color.r > 0.7 and item.color.g < 0.6) {
+                removed_number = true;
+                removed_x = item.rect.x;
+            } else current_x = item.rect.x;
+        }
         try t.expect(!std.mem.eql(u8, item.text, "Copy SHA"));
     };
     try t.expect(removed_number);
+    try t.expectApproxEqAbs(current_x orelse return error.MissingLineNumber, removed_x.?, 0.01);
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-inline-hunk.png");
     try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
     try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
