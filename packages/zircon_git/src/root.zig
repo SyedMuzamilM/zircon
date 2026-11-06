@@ -70,7 +70,29 @@ pub const Repository = struct {
         if (path) |p| try args.append(a, p);
         const bytes = try self.command(a, args.items);
         defer a.free(bytes);
-        return diff_module.parse(a, bytes);
+        if (staged) return diff_module.parse(a, bytes);
+        var current = try self.status(a);
+        defer current.deinit();
+        var combined: std.ArrayList(u8) = .empty;
+        defer combined.deinit(a);
+        for (current.entries) |entry| {
+            if (entry.index != .untracked) continue;
+            if (path) |selected| if (!std.mem.eql(u8, selected, entry.path)) continue;
+            // Ordinary git diff omits untracked files. No-index emits Git's
+            // own new-file patch, including binary detection and path quoting.
+            const result = try process.run(a, self.io, self.root, &.{ "diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "/dev/null", entry.path });
+            defer process.release(a, result);
+            if (result.term != .exited or result.term.exited > 1) {
+                const message = try self.allocator.dupe(u8, result.stderr);
+                self.allocator.free(self.last_error);
+                self.last_error = message;
+                return error.GitCommandFailed;
+            }
+            if (combined.items.len == 0) try combined.appendSlice(a, bytes);
+            if (result.stdout.len > process.output_limit - combined.items.len) return error.DiffTooLarge;
+            try combined.appendSlice(a, result.stdout);
+        }
+        return diff_module.parse(a, if (combined.items.len > 0) combined.items else bytes);
     }
     /// A historical patch is computed from the selected commit, never relabelled
     /// working-tree output. Full object IDs avoid option/revision ambiguity.

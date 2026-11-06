@@ -42,6 +42,11 @@ test "unborn repository status staging and unstaging preserve file bytes" {
     try t.expectEqual(@as(usize, 1), status.entries.len);
     try t.expectEqualStrings("日本 file\nname.txt", status.entries[0].path);
     try t.expect(status.entries[0].index == .untracked);
+    var new_file = try repo.diff(t.allocator, "日本 file\nname.txt", false);
+    defer new_file.deinit();
+    try t.expectEqual(@as(usize, 1), new_file.hunks.len);
+    try t.expect(new_file.hunks[0].lines[0].kind == .addition);
+    try t.expectEqualStrings("first", new_file.hunks[0].lines[0].text);
     try repo.stage(&.{"日本 file\nname.txt"});
     var staged = try repo.status(t.allocator);
     defer staged.deinit();
