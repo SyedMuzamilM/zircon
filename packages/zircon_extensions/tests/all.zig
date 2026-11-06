@@ -229,3 +229,71 @@ test "install refuses a source containing the managed home and malformed PNG hea
     });
     try t.expectError(error.InvalidPngAsset, registry.install(source));
 }
+
+test "upgrade preserves activation and retained snapshots and rolls back publication failure" {
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try prepare(&tmp);
+    const source = try path(&tmp, t.allocator, "source");
+    defer t.allocator.free(source);
+    const home = try path(&tmp, t.allocator, "home");
+    defer t.allocator.free(home);
+    var registry = try extensions.Registry.init(t.allocator, t.io, home);
+    defer registry.deinit();
+    _ = try registry.install(source);
+    try registry.setEnabled("org.example.test", false);
+    var retained = registry.snapshot();
+    defer retained.deinit();
+    const updated = try std.mem.replaceOwned(u8, t.allocator, fixture, "1.0.0", "2.0.0");
+    defer t.allocator.free(updated);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "source/extension.json", .data = updated });
+    try registry.upgrade(source);
+    var next = registry.snapshot();
+    defer next.deinit();
+    try t.expectEqualStrings("2.0.0", next.installed()[0].version);
+    try t.expect(!next.installed()[0].enabled);
+    try t.expectEqualStrings("1.0.0", retained.installed()[0].version);
+    try tmp.dir.deleteFile(t.io, "home/state.json");
+    try tmp.dir.createDir(t.io, "home/state.json", .default_dir);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "source/extension.json", .data = fixture });
+    var failed = false;
+    registry.upgrade(source) catch {
+        failed = true;
+    };
+    try t.expect(failed);
+    var unchanged = registry.snapshot();
+    defer unchanged.deinit();
+    try t.expectEqualStrings("2.0.0", unchanged.installed()[0].version);
+    try tmp.dir.deleteTree(t.io, "home/state.json");
+    var reopened = try extensions.Registry.init(t.allocator, t.io, home);
+    defer reopened.deinit();
+    var disk = reopened.snapshot();
+    defer disk.deinit();
+    try t.expectEqualStrings("2.0.0", disk.installed()[0].version);
+}
+
+test "converted icon mappings share encoded assets and language suffixes support multipart names" {
+    var tmp = t.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try prepare(&tmp);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "source/icon.png", .data = @embedFile("fixtures/pixel.png") });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "source/extension.json", .data =
+        \\{"schema_version":1,"id":"zed.fixture","name":"Converted","version":"1","unsupported_features":["Debug adapters"],"contributes":{"icon_themes":[{"id":"icons","name":"Icons","extensions":[{"key":"py","icon":{"png":"icon.png"}},{"key":"pyi","icon":{"png":"icon.png"}}],"stems":[{"key":"Dockerfile","icon":{"png":"icon.png"}}]}],"languages":[{"id":"blade","name":"Blade","extensions":["blade.php"],"lsp_id":"blade","grammar":{"name":"html","builtin":true,"wasm":"","highlights":""}}]}}
+    });
+    const source = try path(&tmp, t.allocator, "source");
+    defer t.allocator.free(source);
+    const home = try path(&tmp, t.allocator, "home");
+    defer t.allocator.free(home);
+    var registry = try extensions.Registry.init(t.allocator, t.io, home);
+    defer registry.deinit();
+    _ = try registry.install(source);
+    var snapshot = registry.snapshot();
+    defer snapshot.deinit();
+    const theme = snapshot.resolveIconTheme("icons").?;
+    try t.expect(theme.resolve("a.py", false).png.bytes.ptr == theme.resolve("a.pyi", false).png.bytes.ptr);
+    try t.expect(theme.resolve("Dockerfile", false).png.bytes.ptr == theme.resolve("a.py", false).png.bytes.ptr);
+    try t.expectEqualStrings("blade", snapshot.languageForPath("view.blade.php").?.lsp_id.?);
+    try t.expect(snapshot.languageForPath("view.php") == null);
+    try t.expectEqualStrings("@builtin", snapshot.languageForPath("view.blade.php").?.grammar.?.wasm);
+    try t.expectEqualStrings("Debug adapters", snapshot.installed()[0].unsupported_features[0]);
+}

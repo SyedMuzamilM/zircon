@@ -103,10 +103,7 @@ pub const Registry = struct {
     }
     pub fn install(registry: *Registry, source_directory: []const u8) ![]const u8 {
         registry.check();
-        const canonical_source = try std.Io.Dir.cwd().realPathFileAlloc(registry.io, source_directory, registry.allocator);
-        defer registry.allocator.free(canonical_source);
-        if (std.mem.eql(u8, canonical_source, registry.home) or
-            (std.mem.startsWith(u8, registry.home, canonical_source) and registry.home.len > canonical_source.len and registry.home[canonical_source.len] == std.fs.path.sep)) return error.SourceContainsRegistryHome;
+        try registry.validateSource(source_directory);
         var arena = std.heap.ArenaAllocator.init(registry.allocator);
         defer arena.deinit();
         const validation = try manifest.load(arena.allocator(), registry.io, source_directory, true);
@@ -127,6 +124,35 @@ pub const Registry = struct {
         try registry.persist(candidate);
         registry.publish(candidate);
         return find(registry.current, validation.id).?.id;
+    }
+    /// Replace a package transactionally while preserving activation and retained snapshots.
+    pub fn upgrade(registry: *Registry, source_directory: []const u8) !void {
+        registry.check();
+        try registry.validateSource(source_directory);
+        var arena = std.heap.ArenaAllocator.init(registry.allocator);
+        defer arena.deinit();
+        const validation = try manifest.load(arena.allocator(), registry.io, source_directory, true);
+        const previous = find(registry.current, validation.id) orelse return error.ExtensionNotFound;
+        const enabled = previous.enabled;
+        const destination = try std.fs.path.join(registry.allocator, &.{ registry.home, validation.id });
+        defer registry.allocator.free(destination);
+        const stage = try registry.temporary("upgrade");
+        defer registry.allocator.free(stage);
+        defer std.Io.Dir.cwd().deleteTree(registry.io, stage) catch {};
+        try files.copyBundle(registry.allocator, registry.io, source_directory, stage);
+        const copied = try manifest.load(arena.allocator(), registry.io, stage, enabled);
+        if (!std.mem.eql(u8, copied.id, validation.id)) return error.BundleChangedDuringInstall;
+        const backup = try registry.temporary("backup");
+        defer registry.allocator.free(backup);
+        try std.Io.Dir.cwd().rename(destination, std.Io.Dir.cwd(), backup, registry.io);
+        errdefer std.Io.Dir.cwd().rename(backup, std.Io.Dir.cwd(), destination, registry.io) catch {};
+        try std.Io.Dir.cwd().renamePreserve(stage, std.Io.Dir.cwd(), destination, registry.io);
+        errdefer std.Io.Dir.cwd().deleteTree(registry.io, destination) catch {};
+        const candidate = try load(registry.allocator, registry.io, registry.home, .{ .id = validation.id, .enabled = enabled }, try registry.nextGeneration());
+        errdefer candidate.release();
+        try registry.persist(candidate);
+        registry.publish(candidate);
+        std.Io.Dir.cwd().deleteTree(registry.io, backup) catch {};
     }
     pub fn setEnabled(registry: *Registry, id: []const u8, enabled: bool) !void {
         registry.check();
@@ -154,6 +180,11 @@ pub const Registry = struct {
         // A retained snapshot already owns its manifest and asset bytes. Leftover
         // hidden trash after a cleanup error is inert and is never discovered.
         std.Io.Dir.cwd().deleteTree(registry.io, trash) catch {};
+    }
+    fn validateSource(registry: *Registry, source: []const u8) !void {
+        const canonical = try std.Io.Dir.cwd().realPathFileAlloc(registry.io, source, registry.allocator);
+        defer registry.allocator.free(canonical);
+        if (std.mem.eql(u8, canonical, registry.home) or (std.mem.startsWith(u8, registry.home, canonical) and registry.home.len > canonical.len and registry.home[canonical.len] == std.fs.path.sep)) return error.SourceContainsRegistryHome;
     }
     fn temporary(registry: *Registry, kind: []const u8) ![]u8 {
         registry.serial = std.math.add(u64, registry.serial, 1) catch return error.RegistryGenerationExhausted;
@@ -202,7 +233,7 @@ fn load(a: std.mem.Allocator, io: std.Io, home: []const u8, override: ?Activatio
         if (entry.kind == .sym_link) return error.SymlinkNotAllowed;
         if (entry.kind != .directory) continue;
         if (!manifest.validId(entry.name)) return error.InvalidExtensionId;
-        if (names.items.len >= 128) return error.TooManyExtensions;
+        if (names.items.len >= 2048) return error.TooManyExtensions;
         try names.append(arena, try arena.dupe(u8, entry.name));
     }
     std.mem.sort([]const u8, names.items, {}, struct {

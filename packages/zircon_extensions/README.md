@@ -1,6 +1,6 @@
 # Zircon extensions
 
-A UI-independent local contribution registry for themes, icon themes, lexical language definitions and language-server configurations. It loads versioned JSON data and packaged assets. It does not load native plugin code, run server executables or implement Zed/WASM extension compatibility.
+A UI-independent local contribution registry for themes, icon themes, lexical language definitions and language-server configurations. It loads versioned JSON data and packaged assets. The registry itself does not run plugin code or servers. The app has a separate [Zed adapter and worker](../../docs/zed-extensions.md) that converts official packages and executes supported WASM language-server hooks.
 
 ```zig
 var registry = try extensions.Registry.init(allocator, io, extension_home);
@@ -27,15 +27,15 @@ The real [Oxide example](examples/oxide/extension.json) contributes theme `oxide
 - `languages` contains `{id,name,extensions,filenames,keywords,line_comment,block_comment,string_delimiters}`. Extensions ignore ASCII case and an optional leading dot; filenames are exact basenames. Block comments use `{start,end,nested}`. String delimiters are a set drawn from single quote, double quote and backtick. These are lexical contribution rules, not parser grammars or semantic highlighting.
 - `language_servers` contains `{id,languages,command,args}`. Commands and arguments remain separate strings; the registry never interpolates a shell command or starts a process.
 
-`Snapshot.installed()` reports actual managed metadata and activation. `extension(id)`, `resolveTheme(id)`, `resolveIconTheme(id)`, `languageForPath(path)` and `serverForLanguage(language_id)` expose typed values. Resolution considers enabled packages in deterministic extension-ID order. There is no remote marketplace, fabricated download count or automatic executable download.
+`Snapshot.installed()` reports actual managed metadata and activation. `extension(id)`, `resolveTheme(id)`, `resolveIconTheme(id)`, `languageForPath(path)` and `serverForLanguage(language_id)` expose typed values. Resolution considers enabled packages in deterministic extension-ID order. Remote catalog and server installation belong to the app worker; the local registry does not perform network requests.
 
 ## Installation and persistence
 
-`Registry.init` creates/canonicalizes the supplied managed home and reads installed directories plus `state.json`. An invalid installed manifest/state file is returned as an error for the host to display. Installation validates the source, copies to a hidden staged directory, validates the copy, publishes its managed directory without clobbering another package, and atomically writes activation before replacing the effective snapshot. Any failure retains the previous effective snapshot and rolls back the new managed directory. Existing extension IDs return `ExtensionAlreadyInstalled`; updating currently requires explicit remove/install.
+`Registry.init` creates/canonicalizes the supplied managed home and reads installed directories plus `state.json`. An invalid installed manifest/state file is returned as an error for the host to display. Installation validates the source, copies to a hidden staged directory, validates the copy, publishes its managed directory without clobbering another package, and atomically writes activation before replacing the effective snapshot. Any failure retains the previous effective snapshot and rolls back the new managed directory. Existing extension IDs return `ExtensionAlreadyInstalled`; `upgrade()` atomically replaces the package while preserving activation and retained snapshots, rolling back the directory if publication fails.
 
 Enable/disable validates a complete candidate and writes a sibling temporary activation file, flushes it, and atomically replaces `state.json` before publication. Remove first renames only its managed directory to hidden trash and restores it if candidate loading or activation fails. Retained snapshots keep copied asset bytes. A failure to delete inert hidden trash after successful publication does not reactivate the package. Registry homes have a single writer; separate Registry instances must not mutate one home concurrently.
 
-Bundles contain only ordinary files/directories, at most 16 MiB total, 1,024 entries and 16 directory levels. There may be at most 128 installed packages. A manifest is at most 1 MiB. PNG assets are at most 8 MiB encoded, 8,192 pixels on either dimension and 16 million pixels total. Absolute contribution paths, `.`/`..`, empty path segments, backslashes and NUL are rejected. All bundle symlinks are refused. Source directories cannot contain the managed home. Sources must remain stable while being installed; this is not a sandbox against another process changing files concurrently.
+Bundles contain only ordinary files/directories, at most 128 MiB total, 16,384 entries and 16 directory levels. There may be at most 2,048 installed packages. A manifest is at most 16 MiB. PNG assets are at most 8 MiB encoded, 8,192 pixels on either dimension and 16 million pixels total. Absolute contribution paths, `.`/`..`, empty path segments, backslashes and NUL are rejected. All bundle symlinks are refused. Source directories cannot contain the managed home. Sources must remain stable while being installed; this is not a sandbox against another process changing files concurrently.
 
 ## Verification
 
@@ -47,3 +47,5 @@ Run from the repository root with Zig 0.17.1:
 ```
 
 Tests use real temporary directories and activation files. They verify contribution resolution, disable/reopen state, retained snapshots/assets after removal, invalid schemas/JSON/paths, symlink refusal, duplicate rollback, missing assets, failure retention and allocation cleanup. Rendering colors/icons and starting configured language servers are host integration checks, not implied by registry tests.
+
+Converted packages may include `unsupported_features`, icon `stems`, language `lsp_id` and `grammar`, and server `zed_wasm`/`zed_server` descriptors. Asset paths are validated relative paths and resolved against the final installed directory. Grammar descriptors with `builtin: true` select a worker-owned common grammar. PNG bytes are deduplicated per source path in each immutable generation. Multipart suffixes such as `blade.php` are recognized. Original package files and notices remain in the installed directory.

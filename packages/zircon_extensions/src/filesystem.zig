@@ -1,7 +1,7 @@
 //! Managed bundle I/O. A package is bounded regular files/directories; symlinks
 //! are refused throughout the bundle rather than resolving outside ownership.
 const std = @import("std");
-pub const max_bundle_bytes = 16 * 1024 * 1024;
+pub const max_bundle_bytes = 128 * 1024 * 1024;
 const Usage = struct { bytes: u64 = 0, entries: usize = 0 };
 pub fn validateRelative(path: []const u8) !void {
     if (path.len == 0 or path.len > 4096 or std.fs.path.isAbsolute(path) or std.mem.indexOfAny(u8, path, "\\\x00") != null) return error.InvalidContributionPath;
@@ -27,7 +27,7 @@ fn walk(a: std.mem.Allocator, io: std.Io, path: []const u8, destination: ?[]cons
     var iterator = dir.iterate();
     while (try iterator.next(io)) |entry| {
         usage.entries += 1;
-        if (usage.entries > 1024) return error.BundleTooManyFiles;
+        if (usage.entries > 16384) return error.BundleTooManyFiles;
         const metadata = try dir.statFile(io, entry.name, .{ .follow_symlinks = false });
         if (metadata.kind == .sym_link) return error.SymlinkNotAllowed;
         const next = try std.fs.path.join(a, &.{ path, entry.name });

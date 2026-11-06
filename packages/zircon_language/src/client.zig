@@ -8,7 +8,7 @@ const frame = @import("framing.zig");
 const model = @import("model.zig");
 const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
-pub const Config = struct { command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
+pub const Config = struct { environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
 const Pending = struct { kind: enum { initialize, completion, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
@@ -17,6 +17,7 @@ pub const Client = struct {
     owner: std.Thread.Id,
     child: std.process.Child,
     wake: ?Wake,
+    configuration: ?std.json.Parsed(std.json.Value) = null,
     output_thread: ?std.Thread = null,
     error_thread: ?std.Thread = null,
     writer_thread: ?std.Thread = null,
@@ -41,7 +42,10 @@ pub const Client = struct {
         defer argv.deinit(a);
         try argv.append(a, config.command);
         try argv.appendSlice(a, config.args);
-        var child = try std.process.spawn(io, .{ .argv = argv.items, .cwd = .{ .path = config.cwd }, .stdin = .pipe, .stdout = .pipe, .stderr = .pipe });
+        var environment = std.process.Environ.Map.init(a);
+        defer environment.deinit();
+        for (config.environment) |pair| try environment.put(pair[0], pair[1]);
+        var child = try std.process.spawn(io, .{ .environ_map = if (config.environment.len > 0) &environment else null, .argv = argv.items, .cwd = .{ .path = config.cwd }, .stdin = .pipe, .stdout = .pipe, .stderr = .pipe });
         var transferred = false;
         errdefer if (!transferred) forceKill(&child, io);
         const self = try a.create(Client);
@@ -58,10 +62,15 @@ pub const Client = struct {
             self.cleanupData();
             a.destroy(self);
         }
+        if (config.workspace_configuration != .null) {
+            const bytes = try std.json.Stringify.valueAlloc(a, config.workspace_configuration, .{});
+            defer a.free(bytes);
+            self.configuration = try std.json.parseFromSlice(std.json.Value, transport_allocator, bytes, .{ .allocate = .alloc_always });
+        }
         try self.pending.put(transport_allocator, 1, .{ .kind = .initialize });
-        const root_uri = try model.fileUri(a, config.cwd);
+        const root_uri = try model.fileUri(a, config.root_path orelse config.cwd);
         defer a.free(root_uri);
-        try self.enqueue(.{ .jsonrpc = "2.0", .id = @as(u64, 1), .method = "initialize", .params = .{ .processId = @as(?u32, null), .rootUri = root_uri, .capabilities = .{ .textDocument = .{ .synchronization = .{ .didSave = false }, .completion = .{ .completionItem = .{ .snippetSupport = false, .insertReplaceSupport = false } }, .publishDiagnostics = .{ .versionSupport = true } } }, .clientInfo = .{ .name = "Zircon", .version = "0.1.0" } } });
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = @as(u64, 1), .method = "initialize", .params = .{ .processId = @as(?u32, null), .rootUri = root_uri, .initializationOptions = config.initialization_options, .capabilities = .{ .textDocument = .{ .synchronization = .{ .didSave = false }, .completion = .{ .completionItem = .{ .snippetSupport = false, .insertReplaceSupport = false } }, .publishDiagnostics = .{ .versionSupport = true } } }, .clientInfo = .{ .name = "Zircon", .version = "0.1.0" } } });
         self.writer_thread = try std.Thread.spawn(.{}, writerMain, .{self});
         self.output_thread = try std.Thread.spawn(.{}, readMain, .{self});
         self.error_thread = try std.Thread.spawn(.{}, stderrMain, .{self});
@@ -198,6 +207,7 @@ pub const Client = struct {
         }
     }
     fn cleanupData(self: *Client) void {
+        if (self.configuration) |*configuration| configuration.deinit();
         for (self.outgoing.items) |bytes| transport_allocator.free(bytes);
         self.outgoing.deinit(transport_allocator);
         for (self.incoming.items) |*message| message.deinit();
@@ -394,6 +404,27 @@ fn parse(self: *Client, body: []const u8) !void {
     if (field(root, "method")) |method_value| {
         const method = try string(method_value);
         if (id) |request_id| {
+            if (std.mem.eql(u8, method, "workspace/configuration")) {
+                const params = field(root, "params") orelse return error.InvalidMessage;
+                const items = field(params, "items") orelse return error.InvalidMessage;
+                if (items != .array or items.array.items.len > 1024) return error.InvalidMessage;
+                const values = try a.alloc(std.json.Value, items.array.items.len);
+                for (items.array.items, values) |item, *value| {
+                    value.* = if (self.configuration) |configuration| configuration.value else .null;
+                    if (field(item, "section")) |section| if (section == .string and section.string.len > 0) {
+                        var segments = std.mem.splitScalar(u8, section.string, '.');
+                        while (segments.next()) |part| value.* = field(value.*, part) orelse .null;
+                    };
+                }
+                try self.enqueue(.{ .jsonrpc = "2.0", .id = request_id, .result = values });
+                arena.deinit();
+                return;
+            }
+            if (std.mem.eql(u8, method, "client/registerCapability") or std.mem.eql(u8, method, "client/unregisterCapability") or std.mem.eql(u8, method, "window/workDoneProgress/create")) {
+                try self.enqueue(.{ .jsonrpc = "2.0", .id = request_id, .result = @as(?u8, null) });
+                arena.deinit();
+                return;
+            }
             try self.enqueue(.{ .jsonrpc = "2.0", .id = request_id, .@"error" = .{ .code = @as(i32, -32601), .message = "Method not supported by Zircon" } });
             arena.deinit();
             return;
@@ -448,7 +479,8 @@ fn parse(self: *Client, body: []const u8) !void {
             const capabilities = field(result, "capabilities") orelse return error.InvalidInitializeResult;
             const supported = if (field(capabilities, "completionProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.completion_supported.store(supported, .release);
-            try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = .{} });
+            try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
+            if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
             self.publish(.{ .arena = arena, .data = .initialized });
         },

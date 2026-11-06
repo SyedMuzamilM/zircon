@@ -3,7 +3,7 @@
 const std = @import("std");
 const m = @import("model.zig");
 const fs = @import("filesystem.zig");
-pub const max_json_bytes = 1024 * 1024;
+pub const max_json_bytes = 16 * 1024 * 1024;
 pub const RawColors = struct {
     document: []const u8 = "#171b22",
     chrome: []const u8 = "#202630",
@@ -21,10 +21,11 @@ pub const RawSyntax = struct { plain: []const u8 = "#d9e1ed", keyword: []const u
 const RawTheme = struct { id: []const u8, name: []const u8, colors: RawColors = .{}, syntax: RawSyntax = .{} };
 const RawIcon = struct { symbol: ?[]const u8 = null, png: ?[]const u8 = null };
 const RawMapping = struct { key: []const u8, icon: RawIcon };
-const RawIcons = struct { id: []const u8, name: []const u8, files: []const RawMapping = &.{}, extensions: []const RawMapping = &.{}, folders: []const RawMapping = &.{}, default_file: RawIcon = .{ .symbol = "·" }, default_folder: RawIcon = .{ .symbol = "▸" } };
-const RawLanguage = struct { id: []const u8, name: []const u8, extensions: []const []const u8 = &.{}, filenames: []const []const u8 = &.{}, keywords: []const []const u8 = &.{}, line_comment: ?[]const u8 = null, block_comment: ?m.BlockComment = null, string_delimiters: []const u8 = "\"'" };
-const RawServer = struct { id: []const u8, languages: []const []const u8, command: []const u8, args: []const []const u8 = &.{} };
+const RawIcons = struct { id: []const u8, name: []const u8, files: []const RawMapping = &.{}, extensions: []const RawMapping = &.{}, folders: []const RawMapping = &.{}, stems: []const RawMapping = &.{}, default_file: RawIcon = .{ .symbol = "·" }, default_folder: RawIcon = .{ .symbol = "▸" } };
+const RawLanguage = struct { lsp_id: ?[]const u8 = null, grammar: ?m.Grammar = null, id: []const u8, name: []const u8, extensions: []const []const u8 = &.{}, filenames: []const []const u8 = &.{}, keywords: []const []const u8 = &.{}, line_comment: ?[]const u8 = null, block_comment: ?m.BlockComment = null, string_delimiters: []const u8 = "\"'" };
+const RawServer = struct { zed_wasm: ?[]const u8 = null, zed_server: ?[]const u8 = null, id: []const u8, languages: []const []const u8, command: []const u8, args: []const []const u8 = &.{} };
 const Raw = struct {
+    unsupported_features: []const []const u8 = &.{},
     schema_version: u32,
     id: []const u8,
     name: []const u8,
@@ -51,6 +52,8 @@ pub fn load(a: std.mem.Allocator, io: std.Io, directory: []const u8, enabled: bo
     try label(raw.name, 256);
     try label(raw.version, 64);
     if (raw.description.len > 4096 or !std.unicode.utf8ValidateSlice(raw.description)) return error.InvalidManifest;
+    if (raw.unsupported_features.len > 32) return error.InvalidManifest;
+    for (raw.unsupported_features) |name| try label(name, 128);
     const count = raw.contributes.themes.len + raw.contributes.icon_themes.len + raw.contributes.languages.len + raw.contributes.language_servers.len;
     if (count == 0 or count > 256) return error.InvalidContributionCount;
     const themes = try a.alloc(m.Theme, raw.contributes.themes.len);
@@ -63,11 +66,12 @@ pub fn load(a: std.mem.Allocator, io: std.Io, directory: []const u8, enabled: bo
         inline for (@typeInfo(RawSyntax).@"struct".field_names) |field| @field(syntax, field) = try m.Color.parse(@field(theme.syntax, field));
         themes[i] = .{ .id = theme.id, .name = theme.name, .colors = colors, .syntax = syntax };
     }
+    var icon_cache: std.StringHashMapUnmanaged(m.Icon) = .empty;
     const icons = try a.alloc(m.IconTheme, raw.contributes.icon_themes.len);
     for (raw.contributes.icon_themes, 0..) |theme, i| {
         if (!validId(theme.id)) return error.InvalidContributionId;
         try label(theme.name, 256);
-        icons[i] = .{ .id = theme.id, .name = theme.name, .files = try mappings(a, io, directory, theme.files), .extensions = try mappings(a, io, directory, theme.extensions), .folders = try mappings(a, io, directory, theme.folders), .default_file = try icon(a, io, directory, theme.default_file), .default_folder = try icon(a, io, directory, theme.default_folder) };
+        icons[i] = .{ .id = theme.id, .name = theme.name, .files = try mappings(a, io, directory, &icon_cache, theme.files), .extensions = try mappings(a, io, directory, &icon_cache, theme.extensions), .folders = try mappings(a, io, directory, &icon_cache, theme.folders), .stems = try mappings(a, io, directory, &icon_cache, theme.stems), .default_file = try icon(a, io, directory, &icon_cache, theme.default_file), .default_folder = try icon(a, io, directory, &icon_cache, theme.default_folder) };
     }
     const languages = try a.alloc(m.Language, raw.contributes.languages.len);
     for (raw.contributes.languages, 0..) |language, i| {
@@ -90,7 +94,12 @@ pub fn load(a: std.mem.Allocator, io: std.Io, directory: []const u8, enabled: bo
         }
         if (language.string_delimiters.len > 8) return error.InvalidLanguage;
         for (language.string_delimiters) |delimiter| if (delimiter != '\'' and delimiter != '"' and delimiter != '`') return error.InvalidLanguage;
-        languages[i] = .{ .id = language.id, .name = language.name, .extensions = language.extensions, .filenames = language.filenames, .keywords = language.keywords, .line_comment = language.line_comment, .block_comment = language.block_comment, .string_delimiters = language.string_delimiters };
+        if (language.lsp_id) |id| try label(id, 128);
+        const grammar: ?m.Grammar = if (language.grammar) |g| blk: {
+            if (!validId(g.name)) return error.InvalidLanguage;
+            break :blk .{ .builtin = g.builtin, .name = g.name, .wasm = if (g.builtin) "@builtin" else try assetPath(a, io, directory, g.wasm), .highlights = if (g.builtin) "" else try assetPath(a, io, directory, g.highlights) };
+        } else null;
+        languages[i] = .{ .lsp_id = language.lsp_id, .grammar = grammar, .id = language.id, .name = language.name, .extensions = language.extensions, .filenames = language.filenames, .keywords = language.keywords, .line_comment = language.line_comment, .block_comment = language.block_comment, .string_delimiters = language.string_delimiters };
     }
     const servers = try a.alloc(m.Server, raw.contributes.language_servers.len);
     for (raw.contributes.language_servers, 0..) |server, i| {
@@ -98,27 +107,31 @@ pub fn load(a: std.mem.Allocator, io: std.Io, directory: []const u8, enabled: bo
         try label(server.command, 4096);
         for (server.languages) |language| if (!validId(language)) return error.InvalidLanguageServer;
         for (server.args) |arg| if (arg.len > 4096 or !std.unicode.utf8ValidateSlice(arg) or std.mem.indexOfScalar(u8, arg, 0) != null) return error.InvalidLanguageServer;
-        servers[i] = .{ .id = server.id, .languages = server.languages, .command = server.command, .args = server.args };
+        if (server.zed_server) |name| try label(name, 128);
+        if (std.mem.eql(u8, server.command, "@zircon-builtin") and server.zed_server == null) return error.InvalidLanguageServer;
+        if (!std.mem.eql(u8, server.command, "@zircon-builtin") and ((server.zed_wasm == null) != (server.zed_server == null))) return error.InvalidLanguageServer;
+        servers[i] = .{ .zed_server = server.zed_server, .zed_wasm = if (server.zed_wasm) |wasm_path| try assetPath(a, io, directory, wasm_path) else null, .id = server.id, .languages = server.languages, .command = server.command, .args = server.args };
     }
-    return .{ .id = raw.id, .name = raw.name, .version = raw.version, .description = raw.description, .enabled = enabled, .themes = themes, .icon_themes = icons, .languages = languages, .language_servers = servers };
+    return .{ .unsupported_features = raw.unsupported_features, .id = raw.id, .name = raw.name, .version = raw.version, .description = raw.description, .enabled = enabled, .themes = themes, .icon_themes = icons, .languages = languages, .language_servers = servers };
 }
-fn mappings(a: std.mem.Allocator, io: std.Io, directory: []const u8, raw: []const RawMapping) ![]m.IconMapping {
+fn mappings(a: std.mem.Allocator, io: std.Io, directory: []const u8, cache: *std.StringHashMapUnmanaged(m.Icon), raw: []const RawMapping) ![]m.IconMapping {
     if (raw.len > 4096) return error.InvalidIconTheme;
     const values = try a.alloc(m.IconMapping, raw.len);
     for (raw, 0..) |mapping, i| {
         try label(mapping.key, 256);
         for (raw[0..i]) |previous| if (std.mem.eql(u8, mapping.key, previous.key)) return error.DuplicateIconMapping;
-        values[i] = .{ .key = mapping.key, .icon = try icon(a, io, directory, mapping.icon) };
+        values[i] = .{ .key = mapping.key, .icon = try icon(a, io, directory, cache, mapping.icon) };
     }
     return values;
 }
-fn icon(a: std.mem.Allocator, io: std.Io, directory: []const u8, raw: RawIcon) !m.Icon {
+fn icon(a: std.mem.Allocator, io: std.Io, directory: []const u8, cache: *std.StringHashMapUnmanaged(m.Icon), raw: RawIcon) !m.Icon {
     if ((raw.symbol == null) == (raw.png == null)) return error.InvalidIcon;
     if (raw.symbol) |symbol| {
         try label(symbol, 64);
         return .{ .symbol = symbol };
     }
     const relative = raw.png.?;
+    if (cache.get(relative)) |cached| return cached;
     try fs.validateRelative(relative);
     const path = try std.fs.path.join(a, &.{ directory, relative });
     const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, a, .limited(8 * 1024 * 1024)) catch |err| return if (err == error.StreamTooLong) error.AssetTooLarge else err;
@@ -127,7 +140,9 @@ fn icon(a: std.mem.Allocator, io: std.Io, directory: []const u8, raw: RawIcon) !
     const width = std.mem.readInt(u32, bytes[16..20], .big);
     const height = std.mem.readInt(u32, bytes[20..24], .big);
     if (width == 0 or height == 0 or width > 8192 or height > 8192 or @as(u64, width) * height > 16 * 1024 * 1024) return error.InvalidPngAsset;
-    return .{ .png = .{ .path = relative, .bytes = bytes } };
+    const result: m.Icon = .{ .png = .{ .path = relative, .bytes = bytes } };
+    try cache.put(a, relative, result);
+    return result;
 }
 pub fn validateUnique(extensions: []const m.Extension) !void {
     for (extensions, 0..) |extension, i| {
@@ -139,4 +154,12 @@ pub fn validateUnique(extensions: []const m.Extension) !void {
             }
         }
     }
+}
+
+fn assetPath(a: std.mem.Allocator, io: std.Io, directory: []const u8, relative: []const u8) ![]const u8 {
+    try fs.validateRelative(relative);
+    const path = try std.fs.path.join(a, &.{ directory, relative });
+    const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+    if (stat.kind != .file or stat.size > 64 * 1024 * 1024) return error.InvalidManifest;
+    return path;
 }

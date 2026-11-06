@@ -4,3 +4,5 @@ zig-pkg/
 .tools/
 .DS_Store
 artifacts/
+
+/tools/zed-extension-host/target/

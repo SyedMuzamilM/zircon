@@ -22,12 +22,15 @@ pub const IconTheme = struct {
     files: []const IconMapping,
     extensions: []const IconMapping,
     folders: []const IconMapping,
+    stems: []const IconMapping = &.{},
     default_file: Icon,
     default_folder: Icon,
     pub fn resolve(theme: *const IconTheme, path: []const u8, directory: bool) Icon {
         const name = std.fs.path.basename(path);
         for (if (directory) theme.folders else theme.files) |mapping| if (std.mem.eql(u8, mapping.key, name)) return mapping.icon;
         if (!directory) {
+            const stem = std.fs.path.stem(name);
+            for (theme.stems) |mapping| if (std.mem.eql(u8, mapping.key, stem) or std.mem.eql(u8, mapping.key, name)) return mapping.icon;
             const extension = std.mem.trimStart(u8, std.fs.path.extension(name), ".");
             for (theme.extensions) |mapping| if (std.ascii.eqlIgnoreCase(std.mem.trimStart(u8, mapping.key, "."), extension)) return mapping.icon;
         }
@@ -35,9 +38,12 @@ pub const IconTheme = struct {
     }
 };
 pub const BlockComment = struct { start: []const u8, end: []const u8, nested: bool = false };
+pub const Grammar = struct { builtin: bool = false, name: []const u8, wasm: []const u8, highlights: []const u8 };
 pub const Language = struct {
     id: []const u8,
     name: []const u8,
+    lsp_id: ?[]const u8 = null,
+    grammar: ?Grammar = null,
     extensions: []const []const u8,
     filenames: []const []const u8,
     keywords: []const []const u8,
@@ -48,12 +54,16 @@ pub const Language = struct {
         const name = std.fs.path.basename(path);
         for (language.filenames) |filename| if (std.mem.eql(u8, filename, name)) return true;
         const extension = std.mem.trimStart(u8, std.fs.path.extension(name), ".");
-        for (language.extensions) |candidate| if (std.ascii.eqlIgnoreCase(extension, std.mem.trimStart(u8, candidate, "."))) return true;
+        for (language.extensions) |candidate| {
+            const suffix = std.mem.trimStart(u8, candidate, ".");
+            if (std.ascii.eqlIgnoreCase(extension, suffix) or (name.len > suffix.len and name[name.len - suffix.len - 1] == '.' and std.ascii.eqlIgnoreCase(name[name.len - suffix.len ..], suffix))) return true;
+        }
         return false;
     }
 };
-pub const Server = struct { id: []const u8, languages: []const []const u8, command: []const u8, args: []const []const u8 };
+pub const Server = struct { zed_wasm: ?[]const u8 = null, zed_server: ?[]const u8 = null, id: []const u8, languages: []const []const u8, command: []const u8, args: []const []const u8 };
 pub const Extension = struct {
+    unsupported_features: []const []const u8 = &.{},
     id: []const u8,
     name: []const u8,
     version: []const u8,

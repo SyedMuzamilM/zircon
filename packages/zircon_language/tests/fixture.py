@@ -54,7 +54,10 @@ while True:
         sys.stderr.flush()
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": {"textDocumentSync": 1, "completionProvider": {}}}})
     elif method == "initialized":
+        assert isinstance(message.get("params"), dict), "initialized params must be a JSON object"
         initialized = True
+        send({"jsonrpc": "2.0", "id": "configuration-1", "method": "workspace/configuration", "params": {"items": [{"section": "fixture"}]}})
+        send({"jsonrpc": "2.0", "id": "progress-1", "method": "window/workDoneProgress/create", "params": {"token": "fixture-progress"}})
         send({"jsonrpc": "2.0", "id": "server-1", "method": "workspace/unsupported", "params": {}})
     elif method == "textDocument/didOpen":
         assert initialized
@@ -86,3 +89,7 @@ while True:
         completions = [item for item in completions if item["id"] != params["id"]]
     elif message.get("id") == "server-1":
         assert message["error"]["code"] == -32601
+    elif message.get("id") == "configuration-1":
+        assert message["result"] == [None]
+    elif message.get("id") == "progress-1":
+        assert message["result"] is None
