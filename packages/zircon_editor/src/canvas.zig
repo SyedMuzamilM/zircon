@@ -32,7 +32,7 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
     return b.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
 const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22 };
-const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32 };
+const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32, content_width: f32 };
 const Canvas = struct {
     snapshot: text.Snapshot,
     block_cursor: bool,
@@ -69,12 +69,14 @@ const Canvas = struct {
         const gutter: f32 = if (self.show_line_numbers) gutterWidth(self.snapshot.lineCount(), self.font_size) else 20;
         var caret: ui.Rect = .{ .x = bounds.x + gutter - self.horizontal, .y = bounds.y, .width = 1.5, .height = self.line_height - 4 };
         const style: ui.TextStyle = .{ .size = self.font_size, .mono = true };
+        var content_width: f32 = 0;
         for (lines, 0..) |*line, i| {
             const row = visible.start + i;
             const range = try self.snapshot.lineRange(row);
             const oversized = range.end - range.start > line_limit;
             const original = if (oversized) "[Line exceeds the 64 KiB display limit]" else try self.snapshot.copy(cx.allocator, range);
             const expanded = try display.Line.build(cx.allocator, original, self.tab_width);
+            content_width = @max(content_width, (try metrics.text(metrics.context, expanded.bytes, style)).width);
             const initial = if (row >= self.state_start and row - self.state_start < self.states.len) self.states[row - self.state_start] else null;
             const lexed = if (self.profile != null and !oversized) try @import("profile.zig").lex(cx.allocator, original, self.profile.?, initial orelse .{}) else try syntax.lex(cx.allocator, original, if (initial != null and !oversized) self.language else .plain, initial orelse .{});
             line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = lexed.spans, .y = bounds.y + annotations.rowY(row, self.line_height, self.git_changes) - self.scroll, .oversized = oversized, .height = self.line_height };
@@ -99,7 +101,7 @@ const Canvas = struct {
                 try cx.setTextInput(.{ .text = surrounding, .revision = self.snapshot.revision(), .selection = .{ .start = selected.start - begin, .end = selected.end - begin }, .marked = if (self.marked) |marked| .{ .start = marked.start - begin, .end = marked.end - begin } else null, .caret = caret, .base_byte = begin, .base_utf16 = try self.snapshot.utf16Offset(begin) });
             }
         }
-        return .{ .lines = lines, .caret = caret, .gutter = gutter };
+        return .{ .lines = lines, .caret = caret, .gutter = gutter, .content_width = content_width };
     }
     pub fn paint(self: *Canvas, cx: *ui.PaintCx, bounds: ui.Rect, metrics: *LayoutState, prepared: *Prepared) !void {
         try cx.painter.fillRect(.{ .bounds = bounds, .color = self.theme.background });
@@ -121,13 +123,26 @@ const Canvas = struct {
             const x = bounds.x + prepared.gutter - self.horizontal;
             try cx.painter.pushClip(.{ .x = bounds.x + prepared.gutter - 4, .y = bounds.y, .width = @max(0, bounds.width - prepared.gutter + 4), .height = bounds.height });
             if (!line.oversized) {
+                var indent: usize = 0;
+                while (indent < line.original.len and (line.original[indent] == ' ' or line.original[indent] == '\t')) indent += 1;
+                const cells = line.display.displayOffset(indent);
+                const advance = @max(1, metrics.caret(" ", style, 1));
+                const step = @as(f32, @floatFromInt(self.tab_width));
+                var guide = @as(usize, @intFromFloat(@floor(self.horizontal / advance / step))) * self.tab_width;
+                const last_guide = @min(cells, @as(usize, @intFromFloat(@ceil((self.horizontal + bounds.width) / advance))));
+                var tint = self.theme.line_number;
+                tint.a = 0.2;
+                while (guide < last_guide) : (guide += self.tab_width) {
+                    const guide_x = @as(f32, @floatFromInt(guide)) * advance;
+                    try cx.painter.fillRect(.{ .bounds = .{ .x = x + guide_x, .y = line.y, .width = 1, .height = self.line_height }, .color = tint });
+                }
                 for (self.selections) |item| {
                     const range = item.range();
                     if (range.start == range.end or range.end <= line.range.start or range.start > line.range.end) continue;
                     const start = @max(range.start, line.range.start) - line.range.start;
                     const end = @min(range.end, line.range.end) - line.range.start;
                     const left = line.display.caret(metrics.*, style, start);
-                    const right = if (range.end > line.range.end) @max(left, bounds.x + bounds.width - x) else line.display.caret(metrics.*, style, end);
+                    const right = line.display.caret(metrics.*, style, end) + if (range.end > line.range.end) self.font_size * 0.6 else @as(f32, 0);
                     try cx.painter.fillRect(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y, .width = @abs(right - left), .height = self.line_height }, .color = if (cx.focused) self.theme.selection else self.theme.inactive_selection });
                 }
                 if (self.search.len > 0 and std.mem.indexOfScalar(u8, self.search, '\n') == null) {
@@ -188,6 +203,13 @@ const Canvas = struct {
         if (self.blame) |blame| if (try @import("blame_view.zig").layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
             try @import("blame_view.zig").paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
         };
+        const available = @max(1, bounds.width - prepared.gutter - 12);
+        const content_width = @max(prepared.content_width, self.horizontal + available);
+        if (prepared.content_width > available or self.horizontal > 0) {
+            const thumb = @max(24, available * available / @max(1, content_width));
+            const offset = (available - thumb) * self.horizontal / @max(1, content_width - available);
+            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter + offset, .y = bounds.y + bounds.height - 7, .width = @min(available, thumb), .height = 4 }, .radius = 2, .color = self.theme.scrollbar });
+        }
         const content = annotations.rowY(self.snapshot.lineCount(), self.line_height, self.git_changes);
         if (content > bounds.height and bounds.height > 0) {
             const height = @max(24, bounds.height * bounds.height / content);

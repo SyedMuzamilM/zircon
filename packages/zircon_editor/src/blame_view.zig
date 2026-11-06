@@ -31,9 +31,9 @@ pub fn paint(cx: *ui.PaintCx, geometry: Layout, blame: annotations.Blame, theme:
     if (geometry.label.width > 0) try cx.painter.drawText(.{ .bounds = geometry.label, .text = geometry.label_text, .style = .{ .size = font - 1, .color = theme.line_number } });
     if (!blame.expanded) return;
     const card = geometry.card;
-    try cx.painter.fillRect(.{ .bounds = .{ .x = card.x + 2, .y = card.y + 3, .width = card.width, .height = card.height }, .color = .{ .r = 0, .g = 0, .b = 0, .a = 0.15 }, .radius = 5 });
-    try cx.painter.fillRect(.{ .bounds = card, .color = theme.active_line, .radius = 5 });
-    try cx.painter.strokeRect(card, theme.scrollbar, 1);
+    try cx.painter.fillRect(.{ .bounds = .{ .x = card.x + 2, .y = card.y + 3, .width = card.width, .height = card.height }, .color = .{ .r = 0, .g = 0, .b = 0, .a = 0.15 }, .radius = ui.controls.metrics.popover_radius });
+    try cx.painter.fillRect(.{ .bounds = card, .color = theme.scrollbar, .radius = ui.controls.metrics.popover_radius });
+    try cx.painter.fillRect(.{ .bounds = .{ .x = card.x + 1, .y = card.y + 1, .width = @max(0, card.width - 2), .height = @max(0, card.height - 2) }, .color = theme.active_line, .radius = ui.controls.metrics.popover_radius - 1 });
     try ui.controls.icons.draw(.user, cx.painter, .{ .x = card.x + 12, .y = card.y + 13, .width = 14, .height = 14 }, theme.line_number);
     const title = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(cx.painter.allocator, "{s} <{s}>", .{ blame.author, blame.email });
     try cx.painter.drawText(.{ .bounds = .{ .x = card.x + 34, .y = card.y + 11, .width = @max(0, card.width - 70), .height = 20 }, .text = title, .style = .{ .size = 13, .color = theme.foreground } });

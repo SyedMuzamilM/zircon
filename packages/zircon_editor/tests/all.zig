@@ -530,7 +530,8 @@ test "multiline selections fill continuous rows and Normal mode suppresses nativ
     try t.expectEqual(@as(usize, 3), count);
     try t.expectApproxEqAbs(bands[0].y + bands[0].height, bands[1].y, 0.01);
     try t.expectApproxEqAbs(bands[1].y + bands[1].height, bands[2].y, 0.01);
-    try t.expect(bands[1].width > 500);
+    try t.expect(bands[1].width > 0 and bands[1].width < 20);
+    try t.expect(bands[0].width < 100);
     const Mode = struct {
         fn set(self: *View, cx: *ui.Context(View), enabled: bool) void {
             self.state.setVim(enabled);
@@ -673,4 +674,46 @@ test "macOS line deletion consumes CRLF at boundaries and merges multicursor ran
     result = try state.execute(&document, .{ .delete_to = .{ .direction = .home } });
     release(&result);
     try expectText(&document, "one\r\n\r\nlast");
+}
+
+test "default selection is distinct from active line and gutter labels retain contrast" {
+    for ([_]editor.Theme{ .{}, editor.Theme.light }) |theme| {
+        try t.expect(!std.meta.eql(theme.selection, theme.active_line));
+        const high = @max(luminance(theme.line_number), luminance(theme.background));
+        const low = @min(luminance(theme.line_number), luminance(theme.background));
+        try t.expect((high + 0.05) / (low + 0.05) >= 3);
+    }
+}
+fn luminance(color: ui.Color) f32 {
+    var channels = [_]f32{ color.r, color.g, color.b };
+    for (&channels) |*channel| channel.* = if (channel.* <= 0.04045) channel.* / 12.92 else std.math.pow(f32, (channel.* + 0.055) / 1.055, 2.4);
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+}
+
+test "narrow editor advertises horizontal overflow and scrolls to reveal source" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "const message = \"A source line that deliberately exceeds the narrow editor width\";\n");
+    var state = try editor.Editor.init(t.allocator);
+    const scrollbar = state.theme.scrollbar;
+    const h = app.openWindow(View, .{ .visible = false, .width = 250, .height = 180 }, .{ .document = document, .state = state }) catch |err| {
+        document.deinit();
+        state.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var horizontal = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and std.meta.eql(item.color, scrollbar) and item.rect.height == 4 and item.rect.width > 24) {
+        horizontal = true;
+    };
+    try t.expect(horizontal);
+    try app.dispatch(h, .{ .scroll = .{ .position = .{ .x = 150, .y = 80 }, .x = -100, .y = 0 } });
+    _ = try app.step(0);
+    const Read = struct {
+        fn offset(self: *const View) f32 {
+            return self.state.horizontal;
+        }
+    };
+    const owner = try app.windowEntity(View, h);
+    try t.expectEqual(@as(f32, 100), try app.read(owner, Read.offset, .{}));
 }
