@@ -16,6 +16,10 @@ pub const diffLines = diff_module.diffLines;
 pub const Commit = history_module.Commit;
 pub const deinitHistory = history_module.deinitHistory;
 pub const Blame = history_module.Blame;
+pub const References = @import("references.zig").References;
+pub const Branch = @import("references.zig").Branch;
+pub const Stash = @import("references.zig").Stash;
+pub const Network = union(enum) { fetch: []const u8, pull: bool, push: struct { remote: []const u8 = "", publish: bool = false, force_with_lease: bool = false } };
 pub const Baseline = enum { head, index };
 var temp_counter = std.atomic.Value(u64).init(1);
 /// Clone runs in the caller's worker. Restrict remote-helper syntax at this
@@ -72,11 +76,27 @@ pub const Repository = struct {
         return status_module.parse(a, bytes);
     }
     pub fn diff(self: *Repository, a: std.mem.Allocator, path: ?[]const u8, staged: bool) !Diff {
+        return self.compare(a, path, staged, false);
+    }
+    pub fn allChanges(self: *Repository, a: std.mem.Allocator) !Diff {
+        return self.compare(a, null, false, true);
+    }
+    fn compare(self: *Repository, a: std.mem.Allocator, path: ?[]const u8, staged: bool, against_head: bool) !Diff {
         if (path) |p| try validatePath(p);
         var args: std.ArrayList([]const u8) = .empty;
         defer args.deinit(a);
         try args.appendSlice(a, &.{ "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3" });
         if (staged) try args.append(a, "--cached");
+        var empty_tree: ?[]u8 = null;
+        defer if (empty_tree) |value| a.free(value);
+        if (against_head) {
+            var state = try self.status(a);
+            defer state.deinit();
+            if (state.unborn) {
+                empty_tree = try self.command(a, &.{ "hash-object", "-t", "tree", "-w", "--stdin" });
+                try args.append(a, std.mem.trim(u8, empty_tree.?, "\r\n"));
+            } else try args.append(a, "HEAD");
+        }
         try args.append(a, "--");
         if (path) |p| try args.append(a, p);
         const bytes = try self.command(a, args.items);
@@ -220,6 +240,72 @@ pub const Repository = struct {
         defer a.free(output);
         return history_module.parseBlame(a, output);
     }
+    pub fn references(self: *Repository, a: std.mem.Allocator) !References {
+        const branches = try self.command(a, &.{ "for-each-ref", "--sort=refname", "--format=%(refname)%00%(objectname)%00%(subject)%00%(authorname)%00%(upstream:short)%00%(upstream:track)%00", "refs/heads", "refs/remotes" });
+        defer a.free(branches);
+        const remotes = try self.command(a, &.{"remote"});
+        defer a.free(remotes);
+        const stashes = try self.command(a, &.{ "stash", "list", "--format=%gd%x00%H%x00%gs%x00" });
+        defer a.free(stashes);
+        return @import("references.zig").parse(a, branches, remotes, stashes);
+    }
+    pub fn network(self: *Repository, request: Network) !void {
+        const al = self.allocator;
+        const output = switch (request) {
+            .fetch => |remote| blk: {
+                if (remote.len == 0) break :blk try self.command(al, &.{ "fetch", "--prune" });
+                try validateRefArgument(remote);
+                break :blk try self.command(al, &.{ "fetch", "--prune", "--", remote });
+            },
+            .pull => |rebase| try self.command(al, &.{ "pull", if (rebase) "--rebase" else "--ff-only" }),
+            .push => |push| blk: {
+                var state = try self.status(al);
+                defer state.deinit();
+                if (state.detached) return error.DetachedHead;
+                if (push.remote.len > 0) try validateRefArgument(push.remote);
+                var args: std.ArrayList([]const u8) = .empty;
+                defer args.deinit(al);
+                try args.append(al, "push");
+                if (push.force_with_lease) try args.append(al, "--force-with-lease");
+                if (push.publish) try args.append(al, "--set-upstream");
+                if (push.remote.len > 0) try args.appendSlice(al, &.{ "--", push.remote, "HEAD" });
+                break :blk try self.command(al, args.items);
+            },
+        };
+        al.free(output);
+    }
+    pub fn switchBranch(self: *Repository, name: []const u8, create: bool, track: bool) !void {
+        try validateRefArgument(name);
+        const validated = try self.command(self.allocator, &.{ "check-ref-format", "--branch", name });
+        self.allocator.free(validated);
+        const output = try self.command(self.allocator, if (create) &.{ "switch", "-c", name } else if (track) &.{ "switch", "--track", "--", name } else &.{ "switch", "--no-guess", "--", name });
+        self.allocator.free(output);
+    }
+    pub fn stashSave(self: *Repository, include_untracked: bool) !void {
+        const output = try self.command(self.allocator, if (include_untracked) &.{ "--no-literal-pathspecs", "stash", "push", "--include-untracked", "--message", "Zircon stash" } else &.{ "--no-literal-pathspecs", "stash", "push", "--message", "Zircon stash" });
+        self.allocator.free(output);
+    }
+    pub fn stashApply(self: *Repository, oid: []const u8, pop: bool) !void {
+        if (!history_module.validOid(oid)) return error.InvalidGitReferences;
+        const output = try self.command(self.allocator, &.{ "stash", "apply", "--", oid });
+        self.allocator.free(output);
+        if (pop) {
+            var refs = try self.references(self.allocator);
+            defer refs.deinit();
+            for (refs.stashes) |stash| if (std.mem.eql(u8, stash.oid, oid)) {
+                const dropped = try self.command(self.allocator, &.{ "stash", "drop", "--", stash.reference });
+                self.allocator.free(dropped);
+                return;
+            };
+            return error.StashMoved;
+        }
+    }
+    pub fn stashDiff(self: *Repository, a: std.mem.Allocator, oid: []const u8) !Diff {
+        if (!history_module.validOid(oid)) return error.InvalidGitReferences;
+        const output = try self.command(a, &.{ "stash", "show", "--patch", "--include-untracked", oid, "--" });
+        defer a.free(output);
+        return diff_module.parse(a, output);
+    }
     pub fn commitMessage(self: *Repository, a: std.mem.Allocator, oid: []const u8) ![]u8 {
         if (!history_module.validOid(oid)) return error.InvalidGitHistory;
         return self.command(a, &.{ "show", "-s", "--format=%B", oid, "--" });
@@ -249,4 +335,8 @@ test {
 
 fn stripLineEnding(bytes: []const u8) []const u8 {
     return if (std.mem.endsWith(u8, bytes, "\n")) bytes[0 .. bytes.len - 1] else bytes;
+}
+
+fn validateRefArgument(value: []const u8) !void {
+    if (value.len == 0 or value[0] == '-' or std.mem.indexOfAny(u8, value, "\x00\r\n") != null or std.mem.indexOf(u8, value, "@{") != null) return error.InvalidGitReference;
 }

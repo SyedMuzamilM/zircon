@@ -9,7 +9,6 @@ const v = @import("../views/components.zig");
 const Category = enum { general, appearance, editor, version_control };
 const Change = enum { lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
 const Picker = enum { none, theme, icons, code_font, ui_font };
-const Contribution = struct { id: [256]u8 = @splat(0), len: u16, icons: bool };
 const Row = enum { theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
 const row_height: f32 = 88;
 pub const View = struct {
@@ -18,6 +17,8 @@ pub const View = struct {
     workspace: ?ui.Entity(Shell) = null,
     window: ?ui.WindowHandle = null,
     query: ?ui.Entity(ui.controls.TextInput) = null,
+    choice_query: ?ui.Entity(ui.controls.TextInput) = null,
+    choice_index: usize = 0,
     category: Category = .general,
     scroll: ui.controls.Scroll = .{},
     picker: Picker = .none,
@@ -36,6 +37,11 @@ pub const View = struct {
             input.deinit(input.allocator);
             return err;
         };
+        var choice = try ui.controls.TextInput.init(self.allocator, "");
+        choice.placeholder = "Search choices…";
+        choice.leading_icon = .search;
+        self.choice_query = try cx.createChild(ui.controls.TextInput, choice);
+        _ = try cx.observe(self.choice_query.?, onChoiceQuery);
         _ = try cx.observe(self.query.?, onQuery);
         _ = try cx.observe(self.settings, onSettings);
         try self.onSettings(cx, self.settings);
@@ -58,6 +64,12 @@ pub const View = struct {
         };
         self.follows_system = follows;
         if (self.query) |query| try cx.update(query, ui.controls.TextInput.setAppearance, .{v.inputAppearance(palette(values, snapshot, self.system_dark))});
+        if (self.choice_query) |query| try cx.update(query, ui.controls.TextInput.setAppearance, .{v.inputAppearance(palette(values, snapshot, self.system_dark))});
+        cx.notify();
+    }
+    fn onChoiceQuery(self: *View, cx: *ui.Context(View), _: ui.Entity(ui.controls.TextInput)) void {
+        self.choice_index = 0;
+        self.picker_scroll.offset = 0;
         cx.notify();
     }
     fn onQuery(self: *View, cx: *ui.Context(View), _: ui.Entity(ui.controls.TextInput)) void {
@@ -133,6 +145,26 @@ pub const View = struct {
             return;
         }
         if (e.data != .key_down) return;
+        if (self.picker != .none and (e.data.key_down.key == .up or e.data.key_down.key == .down or e.data.key_down.key == .enter)) {
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            var query: []u8 = &.{};
+            if (self.choice_query) |handle| try cx.read(handle, ui.controls.TextInput.copy, .{ arena.allocator(), &query });
+            var generation: ?ext.Snapshot = null;
+            if (self.workspace) |workspace| try cx.read(workspace, Shell.copyExtensions, .{&generation});
+            defer if (generation) |*snapshot| snapshot.deinit();
+            const choices = try choiceList(arena.allocator(), self.picker, generation, query);
+            if (choices.len > 0) {
+                if (e.data.key_down.key == .enter) try self.apply(cx, choices[@min(self.choice_index, choices.len - 1)].patch) else {
+                    self.choice_index = if (e.data.key_down.key == .down) (self.choice_index + 1) % choices.len else (self.choice_index + choices.len - 1) % choices.len;
+                    self.picker_scroll.reveal(@as(f32, @floatFromInt(self.choice_index)) * 32, @as(f32, @floatFromInt(self.choice_index + 1)) * 32, @as(f32, @floatFromInt(choices.len)) * 32, 224);
+                }
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            cx.notify();
+            return;
+        }
         if (e.data.key_down.key == .escape and self.picker != .none) {
             self.picker = .none;
             e.preventDefault();
@@ -145,7 +177,9 @@ pub const View = struct {
             e.stopPropagation();
         }
     }
-    fn openPicker(self: *View, e: *ui.Event(ui.Click), cx: *ui.Context(View), picker: Picker) void {
+    fn openPicker(self: *View, e: *ui.Event(ui.Click), cx: *ui.Context(View), picker: Picker) !void {
+        if (self.choice_query) |query| try cx.update(query, resetChoice, .{});
+        self.choice_index = 0;
         self.picker = picker;
         self.picker_scroll.offset = 0;
         self.picker_y = e.bounds.y + e.bounds.height + 3;
@@ -184,10 +218,6 @@ pub const View = struct {
         };
         if (self.workspace) |workspace| if (path) |file| try cx.update(workspace, Open.apply, .{file});
         if (self.window) |window| try cx.app.requestCloseWindow(window);
-    }
-    fn contribution(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), value: Contribution) !void {
-        const id = value.id[0..value.len];
-        try self.apply(cx, if (value.icons) .{ .icon_theme = id } else .{ .theme = id });
     }
     fn apply(self: *View, cx: *ui.Context(View), patch: model.Patch) !void {
         cx.update(self.settings, model.Settings.apply, .{patch}) catch |err| {
@@ -306,7 +336,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
     var controls: std.ArrayList(ui.Element) = .empty;
     switch (row) {
         .theme, .icons => {
-            var name: []const u8 = if (row == .theme) (if (std.mem.eql(u8, values.theme, "zircon.system")) "System" else if (std.mem.eql(u8, values.theme, "zircon.light")) "One Light" else "One Dark") else "Lucide";
+            var name: []const u8 = if (row == .theme) (if (std.mem.eql(u8, values.theme, "zircon.system")) "System" else if (std.mem.eql(u8, values.theme, "zircon.light")) "One Light" else "One Dark") else "Zircon icons";
             if (snapshot) |generation| {
                 if (row == .theme) {
                     if (generation.resolveTheme(values.theme)) |theme| name = theme.name;
@@ -360,34 +390,78 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
     }
     return b.key(.{ .string = @tagName(row) }, try b.column(.{ .height = .{ .px = row_height }, .flex_shrink = 0 }, &.{ try b.row(.{ .flex_grow = 1, .gap = 18, .align_items = .center }, &.{ try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 7, .overflow = .hidden }, &.{ try v.text(b, title, c.text, 14), try v.text(b, help, c.muted, 12) }), try b.row(.{ .gap = 4, .align_items = .center, .flex_shrink = 0 }, controls.items) }), try v.rule(b, c) }));
 }
-fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, generation: ?ext.Snapshot) !ui.Element {
-    _ = values;
-    var choices: std.ArrayList(ui.Element) = .empty;
-    switch (self.picker) {
-        .theme => try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .automatic, "System"), try changeButton(b, c, .dark, "One Dark"), try changeButton(b, c, .light, "One Light") }),
-        .icons => try choices.append(b.allocator(), try changeButton(b, c, .default_icons, "Lucide")),
-        .code_font => try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .lilex, "Lilex"), try changeButton(b, c, .menlo, "Menlo"), try changeButton(b, c, .monaco, "Monaco") }),
-        .ui_font => try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .plex, "IBM Plex Sans"), try changeButton(b, c, .system, "System") }),
-        .none => {},
-    }
-    if (self.picker == .theme or self.picker == .icons) if (generation) |snapshot| for (snapshot.installed()) |entry| {
-        if (!entry.enabled) continue;
-        if (self.picker == .theme) {
-            for (entry.themes) |theme| try choices.append(b.allocator(), try contributionButton(b, c, theme.id, theme.name, false));
-        } else {
-            for (entry.icon_themes) |icons| try choices.append(b.allocator(), try contributionButton(b, c, icons.id, icons.name, true));
-        }
-    };
-    const total = @as(f32, @floatFromInt(choices.items.len)) * 32 + 10;
-    const height = @min(total, 280);
-    const popup = try b.listen(try b.key(.{ .string = "settings-choices" }, try b.column(.{ .width = .{ .px = 240 }, .height = .{ .px = height }, .gap = 4, .padding = ui.Insets.all(5), .radius = 4, .background = c.panel, .scroll_y = @min(self.picker_scroll.offset, @max(0, total - height)), .overflow = .hidden }, choices.items)), .{ .on_input = try b.onInputWith(total, View.scrollPicker) });
-    return b.modal(try b.listen(try b.stack(.{ .align_items = .end, .padding = .{ .top = @min(self.picker_y, @max(0, b.viewport().height - height - 16)), .right = 30 } }, &.{popup}), .{ .on_input = b.onInput(View.closePicker) }));
+fn resetChoice(input: *ui.controls.TextInput, cx: *ui.Context(ui.controls.TextInput)) void {
+    input.bytes.clearRetainingCapacity();
+    input.cursor = 0;
+    input.anchor = 0;
+    input.marked = null;
+    input.revision +%= 1;
+    cx.notify();
 }
-fn contributionButton(b: *ui.Ui, c: v.Palette, id: []const u8, name: []const u8, icons: bool) !ui.Element {
-    if (id.len > 256) return error.ContributionIdTooLong;
-    var payload: Contribution = .{ .len = @intCast(id.len), .icons = icons };
-    @memcpy(payload.id[0..id.len], id);
-    return b.button(.{ .label = name, .on_click = try b.onClickWith(payload, View.contribution), .style = choiceStyle(c) });
+const Choice = struct { name: []const u8, patch: model.Patch };
+fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, query: []const u8) ![]const Choice {
+    var choices: std.ArrayList(Choice) = .empty;
+    const fixed: []const Choice = switch (picker) {
+        .theme => &.{ .{ .name = "System", .patch = .{ .theme = "zircon.system" } }, .{ .name = "One Dark", .patch = .{ .theme = "zircon.dark" } }, .{ .name = "One Light", .patch = .{ .theme = "zircon.light" } } },
+        .icons => &.{.{ .name = "Zircon icons", .patch = .{ .icon_theme = "zircon.default" } }},
+        .code_font => &.{ .{ .name = "Lilex", .patch = .{ .font_family = .lilex } }, .{ .name = "Menlo", .patch = .{ .font_family = .menlo } }, .{ .name = "Monaco", .patch = .{ .font_family = .monaco } } },
+        .ui_font => &.{ .{ .name = "IBM Plex Sans", .patch = .{ .ui_font_family = .plex } }, .{ .name = "System", .patch = .{ .ui_font_family = .system } } },
+        .none => &.{},
+    };
+    for (fixed) |choice| if (@import("../view.zig").matches(query, choice.name)) try choices.append(a, choice);
+    if (generation) |snapshot| for (snapshot.installed()) |entry| {
+        if (!entry.enabled) continue;
+        if (picker == .theme) for (entry.themes) |theme| {
+            if (@import("../view.zig").matches(query, theme.name)) try choices.append(a, .{ .name = theme.name, .patch = .{ .theme = theme.id } });
+        } else if (picker == .icons) for (entry.icon_themes) |icons| {
+            if (@import("../view.zig").matches(query, icons.name)) try choices.append(a, .{ .name = icons.name, .patch = .{ .icon_theme = icons.id } });
+        };
+    };
+    return choices.toOwnedSlice(a);
+}
+fn selectedChoice(values: model.Values, patch: model.Patch) bool {
+    return switch (patch) {
+        .theme => |id| std.mem.eql(u8, id, values.theme),
+        .icon_theme => |id| std.mem.eql(u8, id, values.icon_theme),
+        .font_family => |f| f == values.font_family,
+        .ui_font_family => |f| f == values.ui_font_family,
+        else => false,
+    };
+}
+const ChoiceTarget = struct { index: u32, picker: Picker };
+fn choose(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), target: ChoiceTarget) !void {
+    if (self.picker != target.picker) return;
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    var query: []u8 = &.{};
+    if (self.choice_query) |handle| try cx.read(handle, ui.controls.TextInput.copy, .{ arena.allocator(), &query });
+    var generation: ?ext.Snapshot = null;
+    if (self.workspace) |workspace| try cx.read(workspace, Shell.copyExtensions, .{&generation});
+    defer if (generation) |*snapshot| snapshot.deinit();
+    const choices = try choiceList(arena.allocator(), self.picker, generation, query);
+    if (target.index < choices.len) try self.apply(cx, choices[target.index].patch);
+}
+fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, generation: ?ext.Snapshot) !ui.Element {
+    const query = if (self.choice_query) |handle| try @import("../view.zig").fieldText(b, handle) else "";
+    const choices = try choiceList(b.allocator(), self.picker, generation, query);
+    var rows: std.ArrayList(ui.Element) = .empty;
+    for (choices, 0..) |choice, i| {
+        const current = selectedChoice(values, choice.patch);
+        var style = v.buttonStyle(c, false);
+        style.height = .{ .px = 32 };
+        style.justify_content = .start;
+        style.background = if (i == self.choice_index) c.selected else null;
+        try rows.append(b.allocator(), try b.button(.{ .label = choice.name, .children = &.{ try b.div(.{ .width = .{ .px = 16 }, .flex_shrink = 0, .justify_content = .center }, if (current) &.{try v.icon(b, .check, c.accent, 14)} else &.{}), try v.text(b, choice.name, c.text, 13) }, .on_click = try b.onClickWith(ChoiceTarget{ .index = @intCast(i), .picker = self.picker }, choose), .style = style }));
+    }
+    if (rows.items.len == 0) try rows.append(b.allocator(), try v.text(b, "No matching choices", c.muted, 12));
+    const total = @as(f32, @floatFromInt(@max(1, rows.items.len))) * 32;
+    const height = @min(total, 224);
+    const list = try b.listen(try b.column(.{ .height = .{ .px = height }, .min_height = .{ .px = 0 }, .scroll_y = @min(self.picker_scroll.offset, @max(0, total - height)), .overflow = .hidden }, rows.items), .{ .on_input = try b.onInputWith(total, View.scrollPicker) });
+    var children: std.ArrayList(ui.Element) = .empty;
+    if (self.choice_query) |handle| try children.append(b.allocator(), try b.autofocus(try b.key(.{ .string = "settings-choice-query" }, try b.view(handle))));
+    try children.appendSlice(b.allocator(), &.{ try v.rule(b, c), list });
+    const popup = try b.key(.{ .string = "settings-choices" }, try b.column(.{ .width = .{ .px = 264 }, .height = .{ .px = height + 54 }, .gap = 6, .padding = ui.Insets.all(6), .radius = 4, .background = c.panel, .overflow = .hidden }, children.items));
+    return b.modal(try b.listen(try b.stack(.{ .align_items = .end, .padding = .{ .top = @min(self.picker_y, @max(0, b.viewport().height - height - 70)), .right = 30 } }, &.{popup}), .{ .on_input = b.onInput(View.closePicker) }));
 }
 const Switch = struct {
     enabled: bool,

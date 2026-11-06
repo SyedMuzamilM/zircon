@@ -31,6 +31,7 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
         };
         self.fields = .{ .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
     }
+    _ = try cx.observe(self.fields.?.path, Shell.onGitPickerQuery);
     try self.styleInputs(cx);
     try @import("project_index.zig").start(self, cx);
     try @import("services/git.zig").start(self, cx, .refresh);
@@ -45,6 +46,11 @@ pub fn loadTree(self: *Shell) !void {
         errdefer freeRow(self.allocator, row);
         try self.tree.append(self.allocator, row);
     }
+}
+pub fn refreshTree(self: *Shell) !void {
+    for (self.tree.items) |row| freeRow(self.allocator, row);
+    self.tree.clearRetainingCapacity();
+    try loadTree(self);
 }
 fn copyRow(a: std.mem.Allocator, entry: ws.Entry, depth: u16) !model.TreeRow {
     const name = try a.dupe(u8, entry.name);
@@ -245,46 +251,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
-    if (e.data == .pointer_down and self.git.repository) {
-        var snap = record.doc.snapshot();
-        defer snap.deinit();
-        const x = e.data.pointer_down.position.x - e.bounds.x;
-        const gutter = if (selected.editor.show_line_numbers) @import("zircon_editor").gutterWidth(snap.lineCount(), selected.editor.font_size) else 20;
-        if (selected.editor.inline_blame) |blame| if (!blame.expanded and blame.revision == snap.revision()) {
-            const y = e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset;
-            if (selected.editor.rowAt(y, snap.revision()) == blame.line) {
-                const range = try snap.lineRange(blame.line);
-                const bytes = try snap.copy(self.allocator, range);
-                defer self.allocator.free(bytes);
-                const metrics = try e.textMetrics();
-                const width = try metrics.text(metrics.context, bytes, .{ .size = selected.editor.font_size, .mono = true });
-                if (x >= gutter + width.width - selected.editor.horizontal + 20) {
-                    try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = blame.line + 1 } });
-                    e.preventDefault();
-                    cx.notify();
-                    return true;
-                }
-            }
-        };
-        if (x >= 0 and x < gutter - 8) {
-            const line = @min(snap.lineCount() - 1, selected.editor.rowAt(e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset, snap.revision()));
-            if (selected.editor.inline_blame != null and selected.editor.inline_blame.?.line == line and selected.editor.inline_blame.?.expanded) selected.editor.hideBlame() else try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = line + 1 } });
-            e.preventDefault();
-            cx.notify();
-            return true;
-        }
-    }
-    if (e.data == .pointer_down and e.data.pointer_down.button == .primary) if (selected.editor.inline_blame) |blame| {
-        const y = e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset;
-        const top = selected.editor.rowY(blame.line + 1, record.doc.revision()) - (if (blame.expanded) editing.blame_height else 0);
-        if (blame.expanded and blame.revision == record.doc.revision() and y >= top and y < top + editing.blame_height) {
-            const x = e.data.pointer_down.position.x - e.bounds.x;
-            if (y >= top + 168 and x > e.bounds.width - 120 and !blame.uncommitted) try e.writeClipboard(blame.oid) else if (y < top + 38 and x > e.bounds.width - 50) selected.editor.hideBlame();
-            e.preventDefault();
-            cx.notify();
-            return true;
-        }
-    };
+    if (try @import("editor_git.zig").handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
     var outcome = try selected.editor.handle(&record.doc, e);
     if (outcome.change != null or outcome.reset) {
         self.allocator.free(self.status);
@@ -339,10 +306,17 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .complete => try @import("services/language.zig").request(self, cx),
         .git_changes => {
+            self.git.stash_view = false;
+            std.heap.page_allocator.free(self.git.selected_commit);
+            self.git.selected_commit = &.{};
+            std.heap.page_allocator.free(self.git.selected_path);
+            self.git.selected_path = &.{};
+            self.git.combined = true;
+            self.panel = .git_diff;
             self.left_panel = .git_changes;
             self.git.sidebar_scroll.offset = 0;
             self.sidebar_visible = true;
-            try @import("services/git.zig").start(self, cx, .refresh);
+            try @import("services/git.zig").start(self, cx, .all_diff);
         },
         .git_history => {
             self.left_panel = .git_history;
@@ -350,8 +324,54 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.sidebar_visible = true;
             try @import("services/git.zig").start(self, cx, .refresh);
         },
-        .git_refresh => try @import("services/git.zig").start(self, cx, .refresh),
+        .git_network_menu => self.git.menu = .network,
+        .git_changes_menu => self.git.menu = .changes,
+        .git_branches => {
+            self.git.needs_metadata = true;
+            self.git.picker_index = 0;
+            self.git.picker_scroll.offset = 0;
+            self.git.menu = .branches;
+            try setField(cx, self.fields.?.path, "", "Switch or type to create a branch…");
+            try @import("services/git.zig").start(self, cx, .refresh);
+        },
+        .git_stashes => {
+            self.git.needs_metadata = true;
+            self.git.picker_index = 0;
+            self.git.picker_scroll.offset = 0;
+            std.heap.page_allocator.free(self.git.stash_oid);
+            self.git.stash_oid = &.{};
+            self.git.menu = .stashes;
+            self.git.stash_selected = null;
+            try setField(cx, self.fields.?.path, "", "Search stashes…");
+            try @import("services/git.zig").start(self, cx, .refresh);
+        },
+        .git_fetch_from, .git_push_to => {
+            self.git.picker_index = 0;
+            self.git.picker_scroll.offset = 0;
+            self.git.menu = if (which == .git_fetch_from) .fetch_remote else .push_remote;
+            try setField(cx, self.fields.?.path, "", "Search remotes…");
+        },
+        .git_fetch => try @import("services/git.zig").start(self, cx, .{ .network = .{ .fetch = "" } }),
+        .git_pull, .git_pull_rebase => try @import("services/git.zig").start(self, cx, .{ .network = .{ .pull = which == .git_pull_rebase } }),
+        .git_push, .git_publish, .git_force_push => {
+            const remote = @import("views/git_controls.zig").defaultRemote(self);
+            try @import("services/git.zig").start(self, cx, .{ .network = .{ .push = .{ .remote = if (which == .git_publish) remote else "", .publish = which == .git_publish, .force_with_lease = which == .git_force_push } } });
+        },
+        .git_stash_all, .git_stash_tracked => try @import("services/git.zig").start(self, cx, .{ .stash_save = which == .git_stash_all }),
+        .git_stash_pop, .git_stash_apply, .git_stash_show => try @import("views/git_controls.zig").stashAction(self, cx, which),
+        .git_create_branch => {
+            const name = try field(cx, self.fields.?.path, self.allocator);
+            defer self.allocator.free(name);
+            try @import("services/git.zig").start(self, cx, .{ .switch_branch = .{ .name = std.mem.trim(u8, name, " "), .create = true } });
+            self.git.menu = .none;
+        },
+        .git_refresh => {
+            self.git.needs_metadata = true;
+            try @import("services/git.zig").start(self, cx, .refresh);
+        },
         .git_diff_all => {
+            self.git.stash_view = false;
+            self.git.combined = true;
             std.heap.page_allocator.free(self.git.selected_path);
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_path = &.{};
@@ -370,6 +390,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try @import("services/git.zig").start(self, cx, .{ .commit = message });
         },
         .git_working_diff, .git_staged_diff => {
+            self.git.combined = false;
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
             self.panel = .git_diff;
@@ -410,9 +431,51 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .replace => try show(self, cx, .replace),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
         .split_menu => self.split_menu_open = !self.split_menu_open,
+        .git_next_change, .git_previous_change, .git_toggle_hunk => {
+            const current = try active(self);
+            const record = try self.workspace.getConst(current.id);
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            const row = (try snapshot.pointAt(current.editor.primary().head)).line;
+            const changes = current.editor.visibleChanges(snapshot.revision());
+            if (changes.len > 0) {
+                var index: usize = 0;
+                if (which == .git_toggle_hunk) {
+                    for (changes, 0..) |change, i| if (row >= change.start and row < @max(change.end, change.start + 1)) {
+                        current.editor.git_changes[i].expanded = !change.expanded;
+                        break;
+                    };
+                } else {
+                    if (which == .git_next_change) {
+                        for (changes, 0..) |change, i| if (change.start > row) {
+                            index = i;
+                            break;
+                        };
+                    } else {
+                        index = changes.len - 1;
+                        var i = changes.len;
+                        while (i > 0) {
+                            i -= 1;
+                            if (changes[i].start < row) {
+                                index = i;
+                                break;
+                            }
+                        }
+                    }
+                    const position = try snapshot.lineStart(@min(changes[index].start, snapshot.lineCount() - 1));
+                    try current.editor.setSelection(snapshot, .{ .start = position, .end = position });
+                    current.editor.reveal(snapshot);
+                }
+            }
+        },
         .git_blame => {
             const current = try active(self);
-            if (current.editor.inline_blame != null and current.editor.inline_blame.?.expanded) current.editor.hideBlame() else {
+            if (current.editor.inline_blame != null and current.editor.inline_blame.?.expanded) {
+                current.editor.hideBlame();
+                current.editor.blame_pinned = false;
+                current.editor.blame_hovered = false;
+            } else {
+                current.editor.blame_pinned = true;
                 const record = try self.workspace.getConst(current.id);
                 var snapshot = record.doc.snapshot();
                 defer snapshot.deinit();
@@ -574,6 +637,7 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
     }
 }
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    @import("editor_git.zig").dismissOutside(self, cx, e);
     if (e.data == .focus and !e.data.focus) self.dragging = .none;
     if (e.data == .appearance) {
         if (self.system_dark == e.data.appearance) return;
@@ -583,6 +647,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
     }
     if (e.data != .key_down) return;
     const key = e.data.key_down;
+    if (try @import("views/git_controls.zig").input(self, e, cx)) return;
     if ((self.menu_open or self.split_menu_open) and key.key == .escape) {
         self.menu_open = false;
         self.split_menu_open = false;
@@ -603,6 +668,8 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         const current = try active(self);
         if (current.editor.inline_blame != null and current.editor.inline_blame.?.expanded) {
             current.editor.hideBlame();
+            current.editor.blame_pinned = false;
+            current.editor.blame_hovered = false;
             e.preventDefault();
             e.stopPropagation();
             cx.notify();

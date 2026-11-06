@@ -9,7 +9,7 @@ pub fn titlebar(self: *const Shell, b: *ui.Ui) !ui.Element {
     var items: std.ArrayList(ui.Element) = .empty;
     try items.append(b.allocator(), try b.div(.{ .width = .{ .px = 70 }, .flex_shrink = 0 }, &.{}));
     try items.append(b.allocator(), try b.button(.{ .label = "Open", .children = &.{ try v.text(b, std.fs.path.basename(self.workspace.root_path), c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.open_project, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 6, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = 3, .hover_background = c.hover, .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .viewport_width = 40 }, .overflow = .hidden } }));
-    if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.button(.{ .label = "Git changes", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, status.branch, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.git_changes, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = 3, .hover_background = c.hover, .flex_shrink = 1, .overflow = .hidden } }));
+    if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.button(.{ .label = "Git changes", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, status.branch, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.git_branches, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = 3, .hover_background = c.hover, .flex_shrink = 1, .overflow = .hidden } }));
     try items.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
     try items.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .quick_open, "Go to file", .search, false), try v.iconButton(b, c, .workspace_menu, "Workspace menu", .more, self.menu_open) });
     const row = try b.dragRegion(try b.key(.{ .string = "toolbar" }, try b.row(.{ .height = .{ .px = v.metrics.titlebar - 1 }, .flex_shrink = 0, .align_items = .center, .gap = 6, .padding = .{ .left = 8, .right = 8 }, .background = c.chrome }, items.items)));
@@ -52,7 +52,7 @@ pub fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             shown_tools += 1;
             const name: []const u8 = switch (tool) {
                 .search => "Project search",
-                .git_diff => if (self.git.selected_commit.len > 0) "Commit changes" else "Uncommitted changes",
+                .git_diff => if (self.git.stash_view) "Stash changes" else if (self.git.selected_commit.len > 0) "Commit changes" else "Uncommitted changes",
                 .extensions => "Extensions",
             };
             const glyph: v.Icon = switch (tool) {

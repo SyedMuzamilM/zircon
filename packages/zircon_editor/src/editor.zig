@@ -18,6 +18,11 @@ pub const Editor = struct {
     theme: @import("theme.zig").Theme = .{},
     git_changes: []@import("annotations.zig").GitChange = &.{},
     git_revision: u64 = 0,
+    git_baseline: []u8 = &.{},
+    blame_hovered: bool = false,
+    blame_bounds: ui.Rect = .{},
+    blame_pinned: bool = false,
+    blame_message_scroll: f32 = 0,
     show_git_gutters: bool = true,
     inline_blame: ?@import("annotations.zig").Blame = null,
     show_line_numbers: bool = true,
@@ -41,6 +46,7 @@ pub const Editor = struct {
     }
     pub fn deinit(self: *Editor) void {
         self.allocator.free(self.git_changes);
+        self.allocator.free(self.git_baseline);
         if (self.inline_blame) |*blame| blame.deinit(self.allocator);
         self.selections.deinit(self.allocator);
         self.syntax_cache.deinit();
@@ -87,8 +93,7 @@ pub const Editor = struct {
         self.inline_blame = null;
     }
     pub fn rowAt(self: *const Editor, y: f32, revision: u64) usize {
-        const blame = if (self.inline_blame != null and self.inline_blame.?.revision == revision) self.inline_blame else null;
-        return @import("annotations.zig").sourceRow(y, self.line_height, blame);
+        return @import("annotations.zig").sourceRow(y, self.line_height, self.visibleChanges(revision));
     }
     pub fn primary(self: *const Editor) selection.Selection {
         return self.selections.primary();
@@ -289,8 +294,10 @@ pub const Editor = struct {
         self.scroll.reveal(start, start + self.line_height, self.contentHeight(snapshot), self.last_viewport.height);
     }
     pub fn rowY(self: *const Editor, row: usize, revision: u64) f32 {
-        const blame = if (self.inline_blame != null and self.inline_blame.?.revision == revision) self.inline_blame else null;
-        return @import("annotations.zig").rowY(row, self.line_height, blame);
+        return @import("annotations.zig").rowY(row, self.line_height, self.visibleChanges(revision));
+    }
+    pub fn visibleChanges(self: *const Editor, revision: u64) []const @import("annotations.zig").GitChange {
+        return if (self.show_git_gutters and self.git_revision == revision) self.git_changes else &.{};
     }
     pub fn contentHeight(self: *const Editor, snapshot: text.Snapshot) f32 {
         return self.rowY(snapshot.lineCount(), snapshot.revision());

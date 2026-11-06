@@ -3,7 +3,7 @@ const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const editor = @import("zircon_editor");
 const t = std.testing;
-test "inline blame geometry reserves space and ignores obsolete revisions" {
+test "blame details never displace source rows or caret geometry" {
     var document = try text.Document.init(t.allocator, "one\ntwo\nthree\nfour\nfive\n");
     defer document.deinit();
     var state = try editor.Editor.init(t.allocator);
@@ -12,9 +12,9 @@ test "inline blame geometry reserves space and ignores obsolete revisions" {
     defer snapshot.deinit();
     try state.setBlame(.{ .line = 1, .revision = snapshot.revision(), .author = "Author", .summary = "Summary", .oid = "01234567", .timestamp = 0 });
     const y = state.rowY(2, snapshot.revision());
-    try t.expectApproxEqAbs(@as(f32, 2 * 22 + 208), y, 0.01);
+    try t.expectApproxEqAbs(@as(f32, 2 * 22), y, 0.01);
     try t.expectEqual(@as(usize, 2), state.rowAt(y + 1, snapshot.revision()));
-    try t.expectEqual(@as(usize, 1), state.rowAt(2 * 22 + 20, snapshot.revision()));
+    try t.expectEqual(@as(usize, 2), state.rowAt(2 * 22 + 20, snapshot.revision()));
     state.last_viewport.height = 22;
     try state.setSelection(snapshot, .{ .start = 8, .end = 8 });
     state.reveal(snapshot);
@@ -367,4 +367,45 @@ test "canceling unchanged composition must not undo previous committed typing" {
     const actual = try snapshot.copy(t.allocator, .{ .start = 0, .end = snapshot.byteLen() });
     defer t.allocator.free(actual);
     try t.expectEqualStrings("Xabc", actual);
+}
+
+test "adjacent modified rows paint one continuous Git gutter marker" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "first\nsecond\nlast\n");
+    var state = try editor.Editor.init(t.allocator);
+    state.git_revision = document.revision();
+    state.git_changes = try t.allocator.dupe(editor.GitChange, &.{.{ .kind = .modified, .start = 0, .end = 2 }});
+    const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+        document.deinit();
+        state.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var markers: usize = 0;
+    var height: f32 = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.x == 4 and item.rect.width == 3) {
+        markers += 1;
+        height += item.rect.height;
+    };
+    try t.expectEqual(@as(usize, 1), markers);
+    try t.expectApproxEqAbs(@as(f32, 44), height, 0.01);
+}
+
+test "expanded removed rows map to current source across start middle and EOF hunks" {
+    const changes = [_]editor.GitChange{
+        .{ .kind = .deleted, .start = 0, .end = 0, .old_start = 0, .old_count = 2, .removed = "one\ntwo\n", .expanded = true },
+        .{ .kind = .modified, .start = 2, .end = 3, .old_start = 4, .old_count = 1, .removed = "middle\n", .expanded = true },
+        .{ .kind = .deleted, .start = 4, .end = 4, .old_start = 6, .old_count = 2, .removed = "last\nend", .expanded = true },
+    };
+    for (0..5) |row| {
+        const y = editor.annotations.rowY(row, 22, &changes);
+        try t.expectEqual(row, editor.annotations.sourceRow(y + 1, 22, &changes));
+    }
+    try t.expectEqual(@as(usize, 0), editor.annotations.sourceRow(10, 22, &changes));
+    try t.expectEqual(@as(usize, 2), editor.annotations.sourceRow(4 * 22 + 10, 22, &changes));
+    try t.expectEqual(@as(usize, 4), editor.annotations.sourceRow(7 * 22 + 10, 22, &changes));
+    const columns = editor.annotations.changedColumns("café🙂", "cafè🙂");
+    try t.expectEqual(@as(usize, 3), columns.start);
+    try t.expectEqual(@as(usize, 5), columns.end);
 }

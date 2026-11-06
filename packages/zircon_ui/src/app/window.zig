@@ -174,7 +174,6 @@ pub const Window = struct {
         if (input == .pointer_leave) {
             w.pointer_position = null;
             if (w.frames.committed.hovered_node != null) w.dirty = true;
-            return;
         }
         errdefer w.dirty = true;
         switch (input) {

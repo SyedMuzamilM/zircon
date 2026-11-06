@@ -27,10 +27,10 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     var rows: std.ArrayList(ui.Element) = .empty;
     var tools: std.ArrayList(ui.Element) = .empty;
     if (self.git.selected_commit.len > 0) {
-        try tools.appendSlice(b.allocator(), &.{ try v.icon(b, .commit, c.muted, 16), try v.text(b, try std.fmt.allocPrint(b.allocator(), "Commit {s}", .{self.git.selected_commit[0..@min(7, self.git.selected_commit.len)]}), c.text, 12) });
-    } else if (self.git.selected_path.len > 0) {
+        try tools.appendSlice(b.allocator(), &.{ try v.icon(b, .commit, c.muted, 16), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (self.git.stash_view) "Stash" else "Commit", self.git.selected_commit[0..@min(7, self.git.selected_commit.len)] }), c.text, 12) });
+    } else if (self.git.selected_path.len > 0 and !self.git.combined) {
         try tools.appendSlice(b.allocator(), &.{ try comparison(b, c, .git_working_diff, "Worktree", !self.git.staged_diff), try comparison(b, c, .git_staged_diff, "Staged", self.git.staged_diff) });
-    } else try tools.append(b.allocator(), try v.text(b, "Uncommitted changes", c.muted, 12));
+    } else try tools.append(b.allocator(), try b.styled(try v.text(b, if (self.git.combined) "All uncommitted changes · HEAD → worktree" else "Uncommitted changes", c.muted, 12), .{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .overflow = .hidden, .text = .{ .size = 12, .color = c.muted } }));
     try tools.append(b.allocator(), try b.div(.{ .flex_grow = 1, .min_width = .{ .px = 0 } }, &.{}));
     if (self.git.diff) |diff| {
         var added: usize = 0;

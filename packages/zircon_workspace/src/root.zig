@@ -126,6 +126,30 @@ pub const Workspace = struct {
         record.disk = stamp;
         record.saved_state = content_state;
     }
+    /// Refresh a clean open buffer after a Git worktree mutation. Recheck dirty
+    /// state at completion so edits made while Git ran are never overwritten.
+    pub fn reloadClean(workspace: *Workspace, id: DocumentId) !bool {
+        const record = try workspace.get(id);
+        if (record.dirty() or record.path == null) return false;
+        const loaded = persistence.read(workspace.allocator, workspace.io, record.path.?) catch |err| {
+            if (err == error.FileNotFound) {
+                record.saved_state = null;
+                record.disk = null;
+                return false;
+            }
+            return err;
+        };
+        defer workspace.allocator.free(loaded.bytes);
+        try validateText(loaded.bytes);
+        if (record.disk != null and std.meta.eql(record.disk.?, loaded.stamp)) return false;
+        var snapshot_value = record.doc.snapshot();
+        defer snapshot_value.deinit();
+        var change = try record.doc.apply(record.doc.revision(), &.{.{ .range = .{ .start = 0, .end = snapshot_value.byteLen() }, .text = loaded.bytes }}, 0);
+        change.deinit();
+        record.saved_state = record.doc.stateId();
+        record.disk = loaded.stamp;
+        return true;
+    }
     pub fn close(workspace: *Workspace, id: DocumentId, decision: CloseDecision) !bool {
         const record = try workspace.get(id);
         if (decision == .cancel) return false;

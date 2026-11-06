@@ -24,16 +24,21 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
     const count = @min(1024, snapshot.lineCount() - @min(start, snapshot.lineCount()));
     const states = try b.allocator().alloc(?syntax.State, count);
     for (states, 0..) |*item, i| item.* = state.syntax_cache.state(snapshot, start + i);
-    const value: Canvas = .{ .snapshot = snapshot, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = if (state.show_git_gutters and state.git_revision == snapshot.revision()) try b.allocator().dupe(annotations.GitChange, state.git_changes) else &.{}, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .selections = selections, .scroll = state.scroll.offset, .horizontal = state.horizontal, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search = try b.allocator().dupe(u8, state.search_query) };
+    const changes = try b.allocator().dupe(annotations.GitChange, state.visibleChanges(snapshot.revision()));
+    for (changes) |*change| if (change.expanded) {
+        change.removed = try b.allocator().dupe(u8, change.removed);
+    };
+    const value: Canvas = .{ .snapshot = snapshot, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .selections = selections, .scroll = state.scroll.offset, .horizontal = state.horizontal, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search = try b.allocator().dupe(u8, state.search_query) };
     return b.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
-const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false };
+const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22 };
 const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32 };
 const Canvas = struct {
     snapshot: text.Snapshot,
     profile: ?@import("profile.zig").Profile,
     blame: ?annotations.Blame,
     git_changes: []const annotations.GitChange,
+    blame_message_scroll: f32,
     theme: @import("theme.zig").Theme,
     show_line_numbers: bool,
     selections: []const selection.Selection,
@@ -56,8 +61,8 @@ const Canvas = struct {
         return .{ .size = cx.available, .state = cx.measurer };
     }
     pub fn prepaint(self: *Canvas, cx: *ui.PrepaintCx, bounds: ui.Rect, metrics: *LayoutState) !Prepared {
-        const first = annotations.sourceRow(self.scroll, self.line_height, self.blame);
-        const visible = try ui.controls.visibleRows(self.snapshot.lineCount(), self.line_height, @as(f32, @floatFromInt(first)) * self.line_height, bounds.height + annotations.blame_height, 2);
+        const first = annotations.sourceRow(self.scroll, self.line_height, self.git_changes);
+        const visible = try ui.controls.visibleRows(self.snapshot.lineCount(), self.line_height, @as(f32, @floatFromInt(first)) * self.line_height, bounds.height, 2);
         const lines = try cx.allocator.alloc(RenderLine, visible.end - visible.start);
         const gutter: f32 = if (self.show_line_numbers) gutterWidth(self.snapshot.lineCount(), self.font_size) else 20;
         var caret: ui.Rect = .{ .x = bounds.x + gutter - self.horizontal, .y = bounds.y, .width = 1.5, .height = self.line_height - 4 };
@@ -70,7 +75,7 @@ const Canvas = struct {
             const expanded = try display.Line.build(cx.allocator, original, self.tab_width);
             const initial = if (row >= self.state_start and row - self.state_start < self.states.len) self.states[row - self.state_start] else null;
             const lexed = if (self.profile != null and !oversized) try @import("profile.zig").lex(cx.allocator, original, self.profile.?, initial orelse .{}) else try syntax.lex(cx.allocator, original, if (initial != null and !oversized) self.language else .plain, initial orelse .{});
-            line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = lexed.spans, .y = bounds.y + annotations.rowY(row, self.line_height, self.blame) - self.scroll, .oversized = oversized };
+            line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = lexed.spans, .y = bounds.y + annotations.rowY(row, self.line_height, self.git_changes) - self.scroll, .oversized = oversized, .height = self.line_height };
             if (self.selections.len > 0 and (try self.snapshot.pointAt(self.selections[0].head)).line == row) {
                 caret.x = bounds.x + gutter - self.horizontal + if (oversized) @as(f32, 0) else expanded.caret(metrics.*, style, @min(self.selections[0].head - range.start, original.len));
                 caret.y = line.y + 3;
@@ -100,6 +105,15 @@ const Canvas = struct {
         const primary_row = if (self.selections.len > 0) (try self.snapshot.pointAt(self.selections[0].head)).line else 0;
         for (prepared.lines) |line| {
             if (line.row == primary_row) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
+            for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end) {
+                var fill = self.theme.git_added;
+                fill.a = 0.15;
+                try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = fill });
+                if (change.old_count == change.end - change.start and !line.oversized) {
+                    const columns = annotations.changedColumns(annotations.lineAt(change.removed, line.row - change.start), line.original);
+                    try highlightColumns(cx, metrics.*, line, style, bounds.x + prepared.gutter - self.horizontal, columns.start, columns.end, self.theme.git_added);
+                }
+            };
             const x = bounds.x + prepared.gutter - self.horizontal;
             try cx.painter.pushClip(.{ .x = bounds.x + prepared.gutter - 4, .y = bounds.y, .width = @max(0, bounds.width - prepared.gutter + 4), .height = bounds.height });
             if (!line.oversized) {
@@ -140,47 +154,72 @@ const Canvas = struct {
             };
             cx.painter.popClip();
             try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (line.row == primary_row) self.theme.active_line else self.theme.background });
-            for (self.git_changes) |change| if ((line.row >= change.start and line.row < change.end) or (change.kind == .deleted and line.row == @min(change.start, self.snapshot.lineCount() - 1))) {
-                try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + 4, .y = line.y + 2, .width = 3, .height = self.line_height - 4 }, .color = ui.Color.rgb(switch (change.kind) {
-                    .added => @as(u24, 0x75b88a),
-                    .modified => 0xd8b579,
-                    .deleted => 0xd1787c,
-                }) });
-            };
 
             if (self.show_line_numbers) {
                 const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{line.row + 1});
-                const number_width = metrics.text(metrics.context, number, style) catch ui.Size{ .width = 20, .height = 16 };
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 18 - number_width.width, .y = line.y + 3, .width = number_width.width + 2, .height = self.line_height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (line.row == primary_row) self.theme.active_number else self.theme.line_number } });
+                const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true };
+                const number_width = metrics.text(metrics.context, number, number_style) catch ui.Size{ .width = 20, .height = 16 };
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 18 - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (line.row == primary_row) self.theme.active_number else self.theme.line_number } });
             }
         }
-        if (self.blame) |blame| {
-            for (prepared.lines) |line| if (line.row == blame.line and !line.oversized) {
-                const measured = try metrics.text(metrics.context, line.display.bytes, style);
-                const annotation_x = bounds.x + prepared.gutter - self.horizontal + measured.width + 28;
-                const annotation = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(cx.painter.allocator, "{s} · {s}", .{ blame.author, try annotations.date(cx.painter.allocator, blame.timestamp) });
-                if (annotation_x < bounds.x + bounds.width - 24) try cx.painter.drawText(.{ .bounds = .{ .x = annotation_x, .y = line.y + 3, .width = bounds.x + bounds.width - annotation_x - 12, .height = self.line_height }, .text = annotation, .style = .{ .size = self.font_size - 1, .color = self.theme.line_number } });
-            };
-            const y = bounds.y + @as(f32, @floatFromInt(blame.line + 1)) * self.line_height - self.scroll;
-            if (blame.expanded and y < bounds.y + bounds.height and y + annotations.blame_height > bounds.y) {
-                const card: ui.Rect = .{ .x = bounds.x + prepared.gutter, .y = y + 4, .width = @max(0, bounds.width - prepared.gutter - 12), .height = annotations.blame_height - 8 };
-                try cx.painter.fillRect(.{ .bounds = card, .color = self.theme.active_line, .radius = 5 });
-                try cx.painter.strokeRect(card, self.theme.scrollbar, 1);
-                const width = @max(0, card.width - 28);
-                const title = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(cx.painter.allocator, "{s} <{s}>", .{ blame.author, blame.email });
-                try cx.painter.drawText(.{ .bounds = .{ .x = card.x + 14, .y = y + 14, .width = @max(0, width - 28), .height = 22 }, .text = title, .style = .{ .size = 13, .color = self.theme.foreground } });
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + bounds.width - 36, .y = y + 14, .width = 16, .height = 22 }, .text = "×", .style = .{ .size = 14, .color = self.theme.line_number } });
-                try drawBlameMessage(cx, metrics.*, .{ .x = card.x + 14, .y = y + 46, .width = width, .height = 112 }, if (blame.uncommitted) "This line has changes that have not been committed." else if (blame.message.len > 0) blame.message else blame.summary, self.theme.foreground);
-                const footer = if (blame.uncommitted) "Working tree" else try std.fmt.allocPrint(cx.painter.allocator, "{s} · {s}", .{ try annotations.date(cx.painter.allocator, blame.timestamp), blame.oid[0..@min(8, blame.oid.len)] });
-                try cx.painter.drawText(.{ .bounds = .{ .x = card.x + 14, .y = y + 174, .width = @max(0, width - 100), .height = 20 }, .text = footer, .style = .{ .size = 12, .color = self.theme.line_number } });
-                if (!blame.uncommitted) try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + bounds.width - 108, .y = y + 174, .width = 90, .height = 20 }, .text = "Copy SHA", .style = .{ .size = 12, .color = self.theme.caret } });
-            }
+        for (self.git_changes) |change| {
+            if (change.expanded) try self.paintRemoved(cx, metrics.*, prepared.gutter, bounds, change);
+            try cx.painter.fillRect(.{ .bounds = annotations.marker(change, self.git_changes, self.line_height, bounds, self.scroll), .color = switch (change.kind) {
+                .added => self.theme.git_added,
+                .modified => self.theme.git_modified,
+                .deleted => self.theme.git_deleted,
+            } });
         }
-        const content = @as(f32, @floatFromInt(self.snapshot.lineCount())) * self.line_height + if (self.blame != null and self.blame.?.expanded) annotations.blame_height else @as(f32, 0);
+        if (self.blame) |blame| if (try @import("blame_view.zig").layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
+            try @import("blame_view.zig").paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
+        };
+        const content = annotations.rowY(self.snapshot.lineCount(), self.line_height, self.git_changes);
         if (content > bounds.height and bounds.height > 0) {
             const height = @max(24, bounds.height * bounds.height / content);
             const y = bounds.y + (bounds.height - height) * self.scroll / @max(1, content - bounds.height);
             try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + bounds.width - 7, .y = y, .width = 4, .height = height }, .color = self.theme.scrollbar, .radius = 2 });
+        }
+    }
+    fn paintRemoved(self: *Canvas, cx: *ui.PaintCx, metrics: LayoutState, gutter: f32, bounds: ui.Rect, change: annotations.GitChange) !void {
+        var rows = std.mem.splitScalar(u8, change.removed, '\n');
+        var i: usize = 0;
+        const top = bounds.y + annotations.changeY(change, self.line_height, self.git_changes) - self.scroll;
+        while (i < change.old_count) : (i += 1) {
+            const raw = rows.next() orelse "";
+            const original = std.mem.trimEnd(u8, raw, "\r");
+            const y = top + @as(f32, @floatFromInt(i)) * self.line_height;
+            if (y + self.line_height < bounds.y or y >= bounds.y + bounds.height) continue;
+            var fill = self.theme.git_deleted;
+            fill.a = 0.16;
+            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = y, .width = bounds.width, .height = self.line_height }, .color = fill });
+            const safe = if (original.len <= line_limit) original else "[Removed line exceeds the display limit]";
+            const expanded = try display.Line.build(cx.painter.allocator, safe, self.tab_width);
+            const lexed = try syntax.lex(cx.painter.allocator, safe, self.language, .{});
+            const line: RenderLine = .{ .row = change.old_start + i, .range = .{ .start = 0, .end = safe.len }, .original = safe, .display = expanded, .spans = lexed.spans, .y = y, .height = self.line_height };
+            const style: ui.TextStyle = .{ .size = self.font_size, .mono = true };
+            if (change.old_count == change.end - change.start and change.start + i < self.snapshot.lineCount()) {
+                const current_range = try self.snapshot.lineRange(change.start + i);
+                if (current_range.end - current_range.start <= line_limit) {
+                    const current = try self.snapshot.copy(cx.painter.allocator, current_range);
+                    const columns = annotations.changedColumns(current, safe);
+                    try highlightColumns(cx, metrics, line, style, bounds.x + gutter - self.horizontal, columns.start, columns.end, self.theme.git_deleted);
+                }
+            }
+            try cx.painter.pushClip(.{ .x = bounds.x + gutter, .y = bounds.y, .width = @max(0, bounds.width - gutter), .height = bounds.height });
+            var cursor: usize = 0;
+            for (lexed.spans) |span| {
+                if (span.start > cursor) try drawRun(cx, line, self.theme, metrics, style, bounds.x + gutter - self.horizontal, cursor, span.start, .plain);
+                try drawRun(cx, line, self.theme, metrics, style, bounds.x + gutter - self.horizontal, span.start, span.end, span.kind);
+                cursor = span.end;
+            }
+            if (cursor < safe.len) try drawRun(cx, line, self.theme, metrics, style, bounds.x + gutter - self.horizontal, cursor, safe.len, .plain);
+            cx.painter.popClip();
+            if (self.show_line_numbers) {
+                const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{change.old_start + i + 1});
+                const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true, .color = self.theme.git_deleted };
+                const measured = try metrics.text(metrics.context, number, number_style);
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + gutter - 18 - measured.width, .y = y + (self.line_height - measured.height) / 2, .width = measured.width + 2, .height = measured.height }, .text = number, .style = number_style });
+            }
         }
     }
 };
@@ -190,27 +229,17 @@ fn drawRun(cx: *ui.PaintCx, line: RenderLine, theme: @import("theme.zig").Theme,
     if (begin == finish) return;
     const left = metrics.caret(line.display.bytes, style, begin);
     const right = metrics.caret(line.display.bytes, style, finish);
+    const measured = try metrics.text(metrics.context, line.display.bytes[begin..finish], style);
     var actual = style;
     actual.color = theme.tokens[@backingInt(kind)];
-    try cx.painter.drawText(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y + 3, .width = @max(1, @abs(right - left) + 2), .height = style.size * 1.6 }, .text = line.display.bytes[begin..finish], .style = actual });
+    try cx.painter.drawText(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y + (line.height - measured.height) / 2, .width = @max(1, @abs(right - left) + 2), .height = measured.height }, .text = line.display.bytes[begin..finish], .style = actual });
 }
 
-fn drawBlameMessage(cx: *ui.PaintCx, metrics: Canvas.LayoutState, bounds: ui.Rect, message: []const u8, color: ui.Color) !void {
-    const style: ui.TextStyle = .{ .size = 12, .color = color };
-    var remaining = std.mem.trim(u8, message, "\r\n");
-    var row: usize = 0;
-    while (remaining.len > 0 and row < 6) : (row += 1) {
-        const newline = std.mem.indexOfScalar(u8, remaining, '\n') orelse remaining.len;
-        var end = @min(newline, metrics.index(remaining[0..newline], style, bounds.width));
-        if (end == 0 and newline > 0) {
-            end = 1;
-            while (end < newline and remaining[end] & 0xc0 == 0x80) end += 1;
-        }
-        if (end < newline) if (std.mem.lastIndexOfScalar(u8, remaining[0..end], ' ')) |space| {
-            if (space > 0) end = space;
-        };
-        try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x, .y = bounds.y + @as(f32, @floatFromInt(row)) * 18, .width = bounds.width, .height = 18 }, .text = remaining[0..end], .style = style });
-        remaining = if (end == newline and end < remaining.len) remaining[end + 1 ..] else remaining[end..];
-        remaining = std.mem.trimStart(u8, remaining, " ");
-    }
+fn highlightColumns(cx: *ui.PaintCx, metrics: ui.layout.Measurer, line: RenderLine, style: ui.TextStyle, x: f32, start: usize, end: usize, color: ui.Color) !void {
+    if (end <= start) return;
+    const left = line.display.caret(metrics, style, start);
+    const right = line.display.caret(metrics, style, end);
+    var fill = color;
+    fill.a = 0.25;
+    try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y, .width = @max(0, right - left), .height = line.height }, .color = fill });
 }

@@ -237,3 +237,146 @@ test "untracked baselines are empty and path conversion rejects sibling director
     try t.expectEqualStrings("sub/file.txt", relative);
     try t.expectError(error.InvalidPath, repo.relativePath(t.allocator, "/outside/not-in-repository"));
 }
+
+test "branch stash and network workflows use real repositories and a local bare remote" {
+    var local = t.tmpDir(.{});
+    defer local.cleanup();
+    var bare = t.tmpDir(.{});
+    defer bare.cleanup();
+    var peer = t.tmpDir(.{});
+    defer peer.cleanup();
+    const root = try init(&local);
+    defer t.allocator.free(root);
+    const remote = try bare.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(remote);
+    const other = try peer.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(other);
+    try command(remote, &.{ "init", "--bare", "-b", "main" });
+    try local.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "initial\n" });
+    try command(root, &.{ "add", "source.txt" });
+    try command(root, &.{ "commit", "-m", "Initial" });
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    try repo.switchBranch("feature/test", true, false);
+    try repo.switchBranch("main", false, false);
+    try t.expectError(error.InvalidGitReference, repo.switchBranch("--bad", true, false));
+    try local.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "changed\n" });
+    try local.dir.writeFile(t.io, .{ .sub_path = "new.txt", .data = "untracked\n" });
+    try repo.stashSave(false);
+    var refs = try repo.references(t.allocator);
+    try t.expectEqual(@as(usize, 2), refs.branches.len);
+    try t.expectEqual(@as(usize, 1), refs.stashes.len);
+    const oid = try t.allocator.dupe(u8, refs.stashes[0].oid);
+    defer t.allocator.free(oid);
+    refs.deinit();
+    var patch = try repo.stashDiff(t.allocator, oid);
+    try t.expect(std.mem.indexOf(u8, patch.text, "+changed") != null);
+    patch.deinit();
+    _ = try local.dir.statFile(t.io, "new.txt", .{});
+    try repo.stashApply(oid, false);
+    try command(root, &.{ "restore", "source.txt" });
+    try repo.stashApply(oid, true);
+    try repo.stashSave(true);
+    try t.expectError(error.FileNotFound, local.dir.statFile(t.io, "new.txt", .{}));
+    refs = try repo.references(t.allocator);
+    const all_oid = try t.allocator.dupe(u8, refs.stashes[0].oid);
+    defer t.allocator.free(all_oid);
+    refs.deinit();
+    patch = try repo.stashDiff(t.allocator, all_oid);
+    try t.expect(std.mem.indexOf(u8, patch.text, "new.txt") != null);
+    patch.deinit();
+    try repo.stashApply(all_oid, true);
+    try command(root, &.{ "add", "source.txt", "new.txt" });
+    try command(root, &.{ "commit", "-m", "Changes" });
+    try command(root, &.{ "remote", "add", "origin", remote });
+    try repo.network(.{ .push = .{ .remote = "origin", .publish = true } });
+    try command(root, &.{ "clone", remote, other });
+    try command(other, &.{ "config", "user.name", "Peer" });
+    try command(other, &.{ "config", "user.email", "peer@zircon.invalid" });
+    try peer.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "from peer\n" });
+    try command(other, &.{ "add", "source.txt" });
+    try command(other, &.{ "commit", "-m", "Peer change" });
+    try command(other, &.{"push"});
+    try repo.network(.{ .fetch = "origin" });
+    refs = try repo.references(t.allocator);
+    try t.expectEqual(@as(usize, 1), refs.remotes.len);
+    var behind = false;
+    for (refs.branches) |branch| if (std.mem.eql(u8, branch.name, "main")) {
+        behind = std.mem.indexOf(u8, branch.tracking, "behind 1") != null;
+    };
+    refs.deinit();
+    try t.expect(behind);
+    try repo.network(.{ .pull = false });
+    const pulled = try local.dir.readFileAlloc(t.io, "source.txt", t.allocator, .limited(1024));
+    defer t.allocator.free(pulled);
+    try t.expectEqualStrings("from peer\n", pulled);
+    try command(other, &.{ "switch", "-c", "remote-feature" });
+    try command(other, &.{ "push", "--set-upstream", "origin", "remote-feature" });
+    try repo.network(.{ .fetch = "origin" });
+    try repo.switchBranch("origin/remote-feature", false, true);
+    var status = try repo.status(t.allocator);
+    defer status.deinit();
+    try t.expectEqualStrings("remote-feature", status.branch);
+}
+
+test "combined review includes staged unstaged and untracked files including an unborn repository" {
+    var temp = t.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try init(&temp);
+    defer t.allocator.free(root);
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    try temp.dir.writeFile(t.io, .{ .sub_path = "staged.zig", .data = "const staged = 1;\n" });
+    try repo.stage(&.{"staged.zig"});
+    try temp.dir.writeFile(t.io, .{ .sub_path = "staged.zig", .data = "const staged = 2;\n" });
+    var patch = try repo.allChanges(t.allocator);
+    try t.expect(std.mem.indexOf(u8, patch.text, "+const staged = 2;") != null);
+    try t.expect(std.mem.indexOf(u8, patch.text, "+const staged = 1;") == null);
+    patch.deinit();
+    try repo.stage(&.{"staged.zig"});
+    try repo.commit("Initial");
+    try temp.dir.writeFile(t.io, .{ .sub_path = "staged.zig", .data = "const staged = 3;\n" });
+    try repo.stage(&.{"staged.zig"});
+    try temp.dir.writeFile(t.io, .{ .sub_path = "working.zig", .data = "const working = true;\n" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "untracked.zig", .data = "const untracked = true;\n" });
+    patch = try repo.allChanges(t.allocator);
+    defer patch.deinit();
+    var staged = false;
+    var working = false;
+    var untracked = false;
+    for (patch.hunks) |hunk| {
+        if (std.mem.eql(u8, hunk.path, "staged.zig")) staged = true;
+        if (std.mem.eql(u8, hunk.path, "working.zig")) working = true;
+        if (std.mem.eql(u8, hunk.path, "untracked.zig")) untracked = true;
+    }
+    try t.expect(staged and working and untracked);
+}
+
+test "conflicting stash pop preserves its stash and reports the failed apply" {
+    var temp = t.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try init(&temp);
+    defer t.allocator.free(root);
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    try temp.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "base\n" });
+    try repo.stage(&.{"source.txt"});
+    try repo.commit("Base");
+    try temp.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "stashed\n" });
+    try repo.stashSave(false);
+    var refs = try repo.references(t.allocator);
+    const oid = try t.allocator.dupe(u8, refs.stashes[0].oid);
+    defer t.allocator.free(oid);
+    refs.deinit();
+    try temp.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "different\n" });
+    try repo.stage(&.{"source.txt"});
+    try repo.commit("Different");
+    try t.expectError(error.GitCommandFailed, repo.stashApply(oid, true));
+    refs = try repo.references(t.allocator);
+    defer refs.deinit();
+    try t.expectEqual(@as(usize, 1), refs.stashes.len);
+    try t.expectEqualStrings(oid, refs.stashes[0].oid);
+    var status = try repo.status(t.allocator);
+    defer status.deinit();
+    try t.expect(status.entries[0].conflicted);
+}

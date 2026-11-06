@@ -243,6 +243,7 @@ pub const Shell = struct {
     }
     pub fn onCommand(self: *Shell, e: *ui.Event(ui.Click), cx: *ui.Context(Shell), which: Command) !void {
         self.rememberPanel();
+        self.git.menu = .none;
         self.menu_open = false;
         if (which != .split_menu) self.split_menu_open = false;
         if (self.overlay == .palette) self.overlay = .none;
@@ -356,11 +357,16 @@ pub const Shell = struct {
             self.git.selected_commit = &.{};
             self.panel = .git_diff;
             self.rememberPanel();
-            @import("services/git.zig").start(self, cx, .{ .diff = .{ .path = path, .staged = status.entries[index].staged and !status.entries[index].unstaged } }) catch |err| try self.reportError(err);
+            @import("services/git.zig").start(self, cx, if (self.git.combined) blk: {
+                std.heap.page_allocator.free(self.git.reveal_path);
+                self.git.reveal_path = try std.heap.page_allocator.dupe(u8, path);
+                break :blk .all_diff;
+            } else .{ .diff = .{ .path = path, .staged = status.entries[index].staged and !status.entries[index].unstaged } }) catch |err| try self.reportError(err);
         };
         cx.notify();
     }
     pub fn onGitCommit(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+        self.git.stash_view = false;
         if (index >= self.git.commits.len) return;
         const oid = try std.heap.page_allocator.dupe(u8, self.git.commits[index].oid);
         std.heap.page_allocator.free(self.git.selected_commit);
@@ -434,6 +440,12 @@ pub const Shell = struct {
         const height = if (self.search.results) |results| @import("views/search.zig").contentHeight(results, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.search.scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
+        cx.notify();
+    }
+    pub fn onGitPickerQuery(self: *Shell, cx: *ui.Context(Shell), _: ui.Entity(ui.controls.TextInput)) void {
+        if (self.git.menu == .none) return;
+        self.git.picker_index = 0;
+        self.git.picker_scroll.offset = 0;
         cx.notify();
     }
     pub fn onSearchQuery(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {

@@ -29,6 +29,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
+    if (self.git.menu != .none) try layers.append(b.allocator(), try @import("views/git_controls.zig").render(self, b));
     if (self.split_menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").splitMenu(self, b));
     if (self.menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").menu(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlay(self, b));

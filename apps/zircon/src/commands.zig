@@ -1,6 +1,6 @@
 //! One command catalogue drives shortcuts, toolbar controls and the palette.
 const ui = @import("zircon_ui");
-pub const Command = enum { open_project, browse_project, submit_project, workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, split_menu, split_left, split_right, split_up, split_down, close_split, git_blame, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
+pub const Command = enum { open_project, browse_project, submit_project, workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_network_menu, git_changes_menu, git_branches, git_stashes, git_fetch, git_fetch_from, git_pull, git_pull_rebase, git_push, git_push_to, git_force_push, git_publish, git_stash_all, git_stash_tracked, git_stash_pop, git_stash_apply, git_stash_show, git_create_branch, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, split_menu, split_left, split_right, split_up, split_down, close_split, git_blame, git_next_change, git_previous_change, git_toggle_hunk, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
     .{ .command = .open_project, .label = "Open folder or Git repository", .shortcut = "⇧⌘O" },
@@ -10,6 +10,19 @@ pub const commands = [_]Entry{
     .{ .command = .complete, .label = "Request language completion", .shortcut = "⌃Space" },
     .{ .command = .git_changes, .label = "Git: show changes" },
     .{ .command = .git_history, .label = "Git: show history" },
+    .{ .command = .git_fetch, .label = "Git: fetch" },
+    .{ .command = .git_fetch_from, .label = "Git: fetch from…" },
+    .{ .command = .git_pull, .label = "Git: pull, fast-forward only" },
+    .{ .command = .git_pull_rebase, .label = "Git: pull with rebase" },
+    .{ .command = .git_push, .label = "Git: push" },
+    .{ .command = .git_push_to, .label = "Git: push to…" },
+    .{ .command = .git_force_push, .label = "Git: force push with lease" },
+    .{ .command = .git_publish, .label = "Git: publish branch" },
+    .{ .command = .git_branches, .label = "Git: switch or create branch" },
+    .{ .command = .git_stash_all, .label = "Git: stash all, including untracked" },
+    .{ .command = .git_stash_tracked, .label = "Git: stash tracked changes" },
+    .{ .command = .git_stashes, .label = "Git: view stashes" },
+    .{ .command = .git_stash_pop, .label = "Git: pop latest stash" },
     .{ .command = .git_refresh, .label = "Git: refresh" },
     .{ .command = .git_diff_all, .label = "Git: view all changes" },
     .{ .command = .extensions, .label = "Open extensions" },
@@ -26,6 +39,9 @@ pub const commands = [_]Entry{
     .{ .command = .split_up, .label = "Split up", .shortcut = "⌥⌘↑" },
     .{ .command = .split_down, .label = "Split down", .shortcut = "⌥⌘↓" },
     .{ .command = .close_split, .label = "Close split" },
+    .{ .command = .git_toggle_hunk, .label = "Git: expand or collapse changes at cursor" },
+    .{ .command = .git_next_change, .label = "Git: next change" },
+    .{ .command = .git_previous_change, .label = "Git: previous change" },
     .{ .command = .git_blame, .label = "Git: toggle line blame", .shortcut = "⌥⌘B" },
     .{ .command = .split, .label = "Split editor", .shortcut = "⌥⌘S" },
     .{ .command = .toggle_sidebar, .label = "Toggle project sidebar", .shortcut = "⌘B" },

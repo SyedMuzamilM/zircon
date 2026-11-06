@@ -381,8 +381,9 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
             return if (self.git.diff) |value| value.text.len == 0 else false;
         }
     };
-    try t.expect(try app.read(owner, Updated.empty, .{}));
-    try click(&app, h, "Staged");
+    // The combined HEAD-to-worktree view keeps staged changes visible.
+    try t.expect(!try app.read(owner, Updated.empty, .{}));
+    try send(&app, h, .git_staged_diff);
     try settle(&app);
     try t.expect(!try app.read(owner, Updated.empty, .{}));
     try click(&app, h, "Unstage main.zig");
@@ -429,6 +430,8 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try app.dispatch(h, .{ .pointer_down = .{ .position = gutter } });
     try app.dispatch(h, .{ .pointer_up = .{ .position = gutter } });
     try settle(&app);
+    try send(&app, h, .git_blame);
+    try settle(&app);
     try t.expect(try app.read(owner, Ops.blame, .{}));
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-inline-blame.png");
     var copy_label = false;
@@ -440,7 +443,12 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
         if (std.mem.indexOf(u8, item.text, "fixture@zircon.invalid") != null) author_label = true;
     };
     try t.expect(copy_label and author_label and body_label);
-    const copy_point: ui.Point = .{ .x = canvas.x + canvas.width - 60, .y = canvas.y + 2 * 22.4 + 180 };
+    var copy_rect: ?ui.Rect = null;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, "Copy SHA")) {
+        copy_rect = item.rect;
+    };
+    const copy_bounds = copy_rect orelse return error.CopyControlMissing;
+    const copy_point: ui.Point = .{ .x = copy_bounds.x + 8, .y = copy_bounds.y + 8 };
     try app.dispatch(h, .{ .pointer_down = .{ .position = copy_point } });
     try app.dispatch(h, .{ .pointer_up = .{ .position = copy_point } });
     var clipboard: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .c } }, ._surface = (try app.window(h)).surface };
@@ -452,9 +460,10 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
     _ = try app.step(0);
     try t.expect(!try app.read(owner, Ops.blame, .{}));
-    const unsaved: ui.Point = .{ .x = canvas.x + 6, .y = canvas.y + 6 };
+    const unsaved: ui.Point = .{ .x = canvas.x + 80, .y = canvas.y + 6 };
     try app.dispatch(h, .{ .pointer_down = .{ .position = unsaved } });
     try app.dispatch(h, .{ .pointer_up = .{ .position = unsaved } });
+    try send(&app, h, .git_blame);
     try settle(&app);
     var uncommitted = false;
     for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
@@ -592,4 +601,159 @@ test "automatic blame waits for the current line and keeps source geometry uncha
         annotation = true;
     };
     try t.expect(annotation);
+    var target: ?ui.Rect = null;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.indexOf(u8, item.text, "Blame author ·") != null) {
+        target = item.rect;
+    };
+    const rect = target orelse return error.AnnotationNotFound;
+    const source_bounds = try elementBounds(&app, h, "primary-editor");
+    try t.expectApproxEqAbs(source_bounds.y + 11.2, rect.y + rect.height / 2, 0.01);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = rect.x + 10, .y = rect.y + 8 } } });
+    const hover_deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (try app.tasksPending()) {
+        _ = try app.step(1);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, hover_deadline)) return error.JourneyTimeout;
+        std.Io.sleep(t.io, .fromMilliseconds(1), .awake) catch {};
+    }
+    _ = try app.step(1);
+    var details = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, "Copy SHA")) {
+        details = true;
+    };
+    try t.expect(details);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-blame-hover.png");
+    try app.dispatch(h, .pointer_leave);
+    _ = try app.step(1);
+    var remaining_card = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, "Copy SHA")) {
+        remaining_card = true;
+    };
+    try t.expect(!remaining_card);
+}
+
+test "gutter click expands removed lines inline without changing buffer selection or dirty state" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try command(root, &.{ "init", "-q" });
+    try command(root, &.{ "config", "user.name", "Gutter author" });
+    try command(root, &.{ "config", "user.email", "gutter@zircon.invalid" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 1;\nconst b = 2;\nconst c = 5;\n" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Original lines" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 3;\nconst b = 4;\nconst c = 5;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try settle(&app);
+    const canvas = try elementBounds(&app, h, "primary-editor");
+    const point: ui.Point = .{ .x = canvas.x + 6, .y = canvas.y + 10 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
+    _ = try app.step(0);
+    const Check = struct {
+        fn expanded(self: *const zircon.Shell) !bool {
+            const tab = self.tabs.items[self.active];
+            const state = &tab.editor;
+            return state.git_changes.len == 1 and state.git_changes[0].expanded and state.primary().head == 0 and !(try self.workspace.getConst(tab.document)).dirty() and state.rowY(0, state.git_revision) == state.line_height * 2 and std.mem.indexOf(u8, state.git_changes[0].removed, "const a = 1;") != null;
+        }
+        fn collapsed(self: *const zircon.Shell) bool {
+            return !self.tabs.items[self.active].editor.git_changes[0].expanded;
+        }
+    };
+    try t.expect(try app.read(owner, Check.expanded, .{}));
+    var removed_number = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
+        if (std.mem.eql(u8, item.text, "1") and item.color.r > 0.7 and item.color.g < 0.6) removed_number = true;
+        try t.expect(!std.mem.eql(u8, item.text, "Copy SHA"));
+    };
+    try t.expect(removed_number);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-inline-hunk.png");
+    try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
+    _ = try app.step(0);
+    try t.expect(try app.read(owner, Check.collapsed, .{}));
+}
+
+test "Git controls create branches stash changes and reload clean open documents" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try command(root, &.{ "init", "-b", "main" });
+    try command(root, &.{ "config", "user.name", "Git controls" });
+    try command(root, &.{ "config", "user.email", "controls@zircon.invalid" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 1;\n" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Initial" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 2;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try settle(&app);
+    try send(&app, h, .git_changes);
+    try settle(&app);
+    try click(&app, h, "Change actions");
+    _ = try app.step(0);
+    try click(&app, h, "Stash tracked");
+    try settle(&app);
+    const Read = struct {
+        fn original(self: *const zircon.Shell) !bool {
+            const record = try self.workspace.getConst(self.tabs.items[0].document);
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            const bytes = try snapshot.copy(t.allocator, .{ .start = 0, .end = snapshot.byteLen() });
+            defer t.allocator.free(bytes);
+            return std.mem.eql(u8, bytes, "const a = 1;\n") and !record.dirty();
+        }
+        fn branch(self: *const zircon.Shell) bool {
+            return self.git.status != null and std.mem.eql(u8, self.git.status.?.branch, "feature/ui");
+        }
+        fn noStashes(self: *const zircon.Shell) bool {
+            return self.git.references != null and self.git.references.?.stashes.len == 0;
+        }
+    };
+    try t.expect(try app.read(owner, Read.original, .{}));
+    try send(&app, h, .git_branches);
+    try settle(&app);
+    try app.dispatch(h, .{ .text = "feature/ui" });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+    try settle(&app);
+    try t.expect(try app.read(owner, Read.branch, .{}));
+    try send(&app, h, .git_stashes);
+    try settle(&app);
+    var stash_label: ?[]u8 = null;
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button and std.mem.indexOf(u8, node.kind.button.label, "Zircon stash") != null) {
+        stash_label = try t.allocator.dupe(u8, node.kind.button.label);
+        break;
+    };
+    defer if (stash_label) |label| t.allocator.free(label);
+    try click(&app, h, stash_label orelse return error.StashNotShown);
+    try settle(&app);
+    try click(&app, h, "Pop selected stash");
+    try settle(&app);
+    try t.expect(try app.read(owner, Read.noStashes, .{}));
+    try t.expect(!try app.read(owner, Read.original, .{}));
+    try send(&app, h, .back_to_editor);
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "// unsaved\n" });
+    _ = try app.step(0);
+    const Refuse = struct {
+        fn apply(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            var event: ui.Event(ui.Click) = .{ .data = .{} };
+            try self.onCommand(&event, cx, .git_stash_all);
+        }
+    };
+    try app.update(owner, Refuse.apply, .{});
+    try t.expect((try app.window(h)).frames.committed.root != null);
+    const Error = struct {
+        fn refused(self: *const zircon.Shell) bool {
+            return self.status_is_error and std.mem.indexOf(u8, self.status, "Save your edited files") != null;
+        }
+    };
+    try t.expect(try app.read(owner, Error.refused, .{}));
 }

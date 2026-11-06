@@ -20,12 +20,10 @@ fn sendKey(app: *ui.App, h: ui.WindowHandle, key: ui.Key, mods: ui.Modifiers) !v
 }
 fn nativeKey(window: objc.Id, code: u16, characters: []const u8, flags: usize) !void {
     const number = objc.send(isize, window, "windowNumber", .{});
-    const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
     const event = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, flags, native.now(), number, @as(objc.Id, null), objc.string(characters), objc.string(characters), false, code });
-    if (objc.send(bool, window, "isKeyWindow", .{})) objc.send(void, app, "postEvent:atStart:", .{ event, false }) else {
-        try std.Io.Dir.cwd().writeFile(t.io, .{ .sub_path = "/tmp/zircon-editor-input-mode.txt", .data = "macOS did not grant foreground activation. Native keys dispatched through NSWindow.sendEvent and its real first responder.\n" });
-        objc.send(void, window, "sendEvent:", .{event});
-    }
+    // Bind synthetic keys to this window. Posting to NSApplication lets focus
+    // changes redirect queued keystrokes into a later test's window.
+    objc.send(void, window, "sendEvent:", .{event});
     for (0..32) |_| try native.pump(0);
 }
 fn command(app: *ui.App, owner: ui.Entity(zircon.Shell), which: zircon.Command) !void {
@@ -47,7 +45,7 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
     var shell = try zircon.Shell.init(t.allocator, t.io, root_path, "hello.zig");
-    const h = app.openWindow(zircon.Shell, .{ .title = "Zircon · Native verification", .chrome = .integrated, .width = 1160, .height = 760 }, shell) catch |err| {
+    const h = app.openWindow(zircon.Shell, .{ .title = "Zircon · Native verification", .visible = false, .chrome = .integrated, .width = 1160, .height = 760 }, shell) catch |err| {
         shell.deinit(t.allocator);
         return err;
     };
@@ -91,7 +89,6 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
     try app.closeWindow(child);
     _ = try app.step(0.2);
     _ = try app.window(h);
-    objc.send(void, window, "makeKeyAndOrderFront:", .{@as(objc.Id, null)});
     _ = objc.send(bool, window, "makeFirstResponder:", .{view});
 
     try nativeKey(window, 0, "a", 1 << 20);

@@ -191,3 +191,54 @@ test "separate settings child changes shared editor appearance and closes indepe
     _ = try app.step(7);
     try t.expectError(error.WindowNotFound, app.window(reopened));
 }
+
+test "settings choice search filters independently and commits only with Enter" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const shell = try zircon.Shell.init(t.allocator, t.io, ".", null);
+    const main = try app.openWindow(zircon.Shell, .{ .visible = false }, shell);
+    const owner = try app.windowEntity(zircon.Shell, main);
+    try app.update(owner, zircon.Shell.bootstrap, .{main});
+    _ = try app.step(0);
+    try app.update(owner, Ops.open, .{});
+    const child = try app.read(owner, Ops.child, .{});
+    _ = try app.step(1);
+    try clickLabel(&app, child, "One Dark");
+    _ = try app.step(1);
+    try app.dispatch(child, .{ .text = "light" });
+    _ = try app.step(1);
+    try t.expect(try hasText(&app, child, "One Light"));
+    try t.expect(!try app.read(owner, Ops.light, .{}));
+    try app.dispatch(child, .{ .key_down = .{ .key = .enter } });
+    _ = try app.step(1);
+    try t.expect(try app.read(owner, Ops.light, .{}));
+    try clickLabel(&app, child, "One Light");
+    _ = try app.step(1);
+    try app.dispatch(child, .{ .text = "unknown choice" });
+    _ = try app.step(1);
+    try t.expect(try hasText(&app, child, "No matching choices"));
+    try app.dispatch(child, .{ .key_down = .{ .key = .enter } });
+    _ = try app.step(1);
+    try t.expect(try app.read(owner, Ops.light, .{}));
+    try app.dispatch(child, .{ .key_down = .{ .key = .escape } });
+    _ = try app.step(1);
+    try clickLabel(&app, child, "Editor");
+    _ = try app.step(1);
+    try clickLabel(&app, child, "Lilex");
+    _ = try app.step(1);
+    try app.dispatch(child, .{ .text = "men" });
+    _ = try app.step(1);
+    try app.dispatch(child, .{ .key_down = .{ .key = .down } });
+    try app.dispatch(child, .{ .key_down = .{ .key = .enter } });
+    _ = try app.step(1);
+    const Check = struct {
+        fn settings(self: *const zircon.Shell) ui.Entity(zircon.Settings) {
+            return self.settings.?;
+        }
+        fn menlo(self: *const zircon.Settings) bool {
+            return self.store.values().font_family == .menlo;
+        }
+    };
+    const preferences = try app.read(owner, Check.settings, .{});
+    try t.expect(try app.read(preferences, Check.menlo, .{}));
+}
