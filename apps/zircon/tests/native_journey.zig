@@ -225,3 +225,96 @@ test "native search and palette typing refresh replacement ranges between keystr
     const appearance = objc.send(objc.Id, window, "appearance", .{});
     try t.expectEqualStrings("NSAppearanceNameDarkAqua", objc.fromString(objc.send(objc.Id, appearance, "name", .{})));
 }
+
+test "native Vim commands block insertion and switch native input with Insert and Visual modes" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "vim.txt", .data = "one two\nthree\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var shell = try zircon.Shell.init(t.allocator, t.io, root, "vim.txt");
+    shell.editor_options.vim_mode = true;
+    shell.tabs.items[0].editor.setVim(true);
+    const h = try app.openWindow(zircon.Shell, .{ .title = "Zircon Vim verification", .visible = false, .chrome = .integrated, .width = 1000, .height = 700 }, shell);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "settings.json", .data = "{\"vim_mode\":true}" });
+    const settings_path = try tmp.dir.realPathFileAlloc(t.io, "settings.json", t.allocator);
+    defer t.allocator.free(settings_path);
+    try app.update(owner, zircon.Shell.loadSettings, .{settings_path});
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    try t.expect((try app.window(h)).frames.committed.text_input == null);
+    const autorelease = objc.Pool.init();
+    defer autorelease.deinit();
+    const nsapp = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const windows = objc.send(objc.Id, nsapp, "windows", .{});
+    var window: objc.Id = null;
+    for (0..objc.send(usize, windows, "count", .{})) |i| {
+        const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{i});
+        if (std.mem.eql(u8, objc.fromString(objc.send(objc.Id, candidate, "title", .{})), "Zircon Vim verification")) {
+            window = candidate;
+            break;
+        }
+    }
+    try t.expect(window != null);
+    _ = objc.send(bool, window, "makeFirstResponder:", .{objc.send(objc.Id, window, "contentView", .{})});
+    try nativeKey(window, 2, "d", 0);
+    _ = try app.step(0);
+    try nativeKey(window, 13, "w", 0);
+    _ = try app.step(0);
+    try expectSource(&app, owner, "two\nthree\n");
+    try nativeKey(window, 32, "u", 0);
+    _ = try app.step(0);
+    try nativeKey(window, 34, "i", 0);
+    _ = try app.step(0);
+    try t.expect((try app.window(h)).frames.committed.text_input != null);
+    try nativeKey(window, 7, "X", 1 << 17);
+    _ = try app.step(0);
+    try nativeKey(window, 53, "\x1b", 0);
+    _ = try app.step(0);
+    try expectSource(&app, owner, "Xone two\nthree\n");
+    try t.expect((try app.window(h)).frames.committed.text_input == null);
+    try nativeKey(window, 9, "v", 0);
+    _ = try app.step(0);
+    try nativeKey(window, 37, "l", 0);
+    _ = try app.step(0);
+    const Read = struct {
+        fn selected(self: *const zircon.Shell) usize {
+            const range = self.tabs.items[0].editor.primary().range();
+            return range.end - range.start;
+        }
+        fn fontCount(self: *const zircon.SettingsView) usize {
+            return self.font_families.len;
+        }
+    };
+    try t.expectEqual(@as(usize, 2), try app.read(owner, Read.selected, .{}));
+    try (try app.window(h)).snapshot("/tmp/zircon-vim-visual.png");
+    try nativeKey(window, 53, "\x1b", 0);
+    _ = try app.step(0);
+    try nativeKey(window, 0, "A", 1 << 17);
+    _ = try app.step(0);
+    try nativeKey(window, 51, "\x7f", 1 << 20);
+    _ = try app.step(0);
+    try expectSource(&app, owner, "\nthree\n");
+    try nativeKey(window, 53, "\x1b", 0);
+    _ = try app.step(0);
+    try command(&app, owner, .settings);
+    _ = try app.step(0);
+    const Settings = struct {
+        fn child(self: *const zircon.Shell) ui.WindowHandle {
+            return self.settings_window.?;
+        }
+    };
+    const child = try app.read(owner, Settings.child, .{});
+    const settings_owner = try app.windowEntity(zircon.SettingsView, child);
+    try t.expect(try app.read(settings_owner, Read.fontCount, .{}) > 10);
+}
+
+fn expectSource(app: *ui.App, owner: ui.Entity(zircon.Shell), expected: []const u8) !void {
+    var actual: []u8 = undefined;
+    try app.read(owner, bytes, .{ t.allocator, &actual });
+    defer t.allocator.free(actual);
+    try t.expectEqualStrings(expected, actual);
+}

@@ -7,13 +7,14 @@ const model = @import("model.zig");
 const Shell = @import("../shell.zig").Shell;
 const v = @import("../views/components.zig");
 const Category = enum { general, appearance, editor, version_control };
-const Change = enum { lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
+const Change = enum { vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
 const Picker = enum { none, theme, icons, code_font, ui_font };
-const Row = enum { theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
+const Row = enum { vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
 const row_height: f32 = 88;
 pub const View = struct {
     allocator: std.mem.Allocator,
     settings: ui.Entity(model.Settings),
+    font_families: []ui.typography.FontName = &.{},
     workspace: ?ui.Entity(Shell) = null,
     window: ?ui.WindowHandle = null,
     query: ?ui.Entity(ui.controls.TextInput) = null,
@@ -22,14 +23,20 @@ pub const View = struct {
     category: Category = .general,
     scroll: ui.controls.Scroll = .{},
     picker: Picker = .none,
-    picker_y: f32 = 0,
+    picker_anchor: ui.Rect = .{},
     system_dark: bool = true,
     follows_system: bool = false,
     picker_scroll: ui.controls.Scroll = .{},
     error_value: ?anyerror = null,
+    pub fn deinit(self: *View, _: std.mem.Allocator) void {
+        self.allocator.free(self.font_families);
+    }
     pub fn bootstrap(self: *View, cx: *ui.Context(View), window: ui.WindowHandle) !void {
         self.window = window;
-        if ((try cx.app.window(window)).surface) |surface| self.system_dark = surface.systemDark();
+        if ((try cx.app.window(window)).surface) |surface| {
+            self.system_dark = surface.systemDark();
+            self.font_families = try surface.fontFamilies(self.allocator);
+        }
         var input = try ui.controls.TextInput.init(self.allocator, "");
         input.placeholder = "Search settings…";
         input.leading_icon = .search;
@@ -95,13 +102,13 @@ pub const View = struct {
             try nav.append(b.allocator(), try b.autofocus(search));
         }
         try nav.append(b.allocator(), try b.div(.{ .height = .{ .px = 7 }, .flex_shrink = 0 }, &.{}));
-        inline for (std.meta.tags(Category)) |category| try nav.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ try v.icon(b, if (self.category == category) .chevron_down else .chevron_right, c.muted, 14), try v.text(b, categoryName(category), c.text, 13) }, .on_click = try b.onClickWith(category, select), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 9, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .radius = 3, .background = if (self.category == category) c.hover else null, .hover_background = c.hover } }));
+        inline for (std.meta.tags(Category)) |category| try nav.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ try v.icon(b, if (self.category == category) .chevron_down else .chevron_right, c.muted, 14), try v.text(b, categoryName(category), c.text, 13) }, .on_click = try b.onClickWith(category, select), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 9, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .radius = v.metrics.control_radius, .background = if (self.category == category) c.hover else null, .hover_background = c.hover } }));
         try nav.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
         try nav.append(b.allocator(), try v.rule(b, c));
         try nav.append(b.allocator(), try v.text(b, "Zircon settings", c.muted, 11));
         const sidebar = try b.column(.{ .width = .{ .px = 238 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 12, .bottom = 14 }, .gap = 5, .background = c.sidebar }, nav.items);
         var header_items: std.ArrayList(ui.Element) = .empty;
-        try header_items.appendSlice(b.allocator(), &.{ try b.styled(try v.text(b, "User", c.accent, 13), .{ .padding = .{ .left = 7, .right = 7, .top = 4, .bottom = 4 }, .radius = 3, .background = c.hover, .text = .{ .size = 13, .color = c.accent } }), try v.text(b, "Settings", c.text, 13), try b.div(.{ .flex_grow = 1 }, &.{}) });
+        try header_items.appendSlice(b.allocator(), &.{ try b.styled(try v.text(b, "User", c.accent, 13), .{ .padding = .{ .left = 7, .right = 7, .top = 4, .bottom = 4 }, .radius = v.metrics.control_radius, .background = c.hover, .text = .{ .size = 13, .color = c.accent } }), try v.text(b, "Settings", c.text, 13), try b.div(.{ .flex_grow = 1 }, &.{}) });
         if (path != null and self.workspace != null) try header_items.append(b.allocator(), try b.button(.{ .label = "Edit in settings.json", .on_click = b.onClick(editJson), .style = choiceStyle(c) }));
         const header = try b.dragRegion(try b.row(.{ .height = .{ .px = 60 }, .flex_shrink = 0, .padding = .{ .left = 32, .right = 30, .top = 13 }, .gap = 8, .align_items = .center, .background = c.document }, header_items.items));
         var rows: std.ArrayList(ui.Element) = .empty;
@@ -153,7 +160,7 @@ pub const View = struct {
             var generation: ?ext.Snapshot = null;
             if (self.workspace) |workspace| try cx.read(workspace, Shell.copyExtensions, .{&generation});
             defer if (generation) |*snapshot| snapshot.deinit();
-            const choices = try choiceList(arena.allocator(), self.picker, generation, query);
+            const choices = try choiceList(arena.allocator(), self.picker, generation, query, self.font_families);
             if (choices.len > 0) {
                 if (e.data.key_down.key == .enter) try self.apply(cx, choices[@min(self.choice_index, choices.len - 1)].patch) else {
                     self.choice_index = if (e.data.key_down.key == .down) (self.choice_index + 1) % choices.len else (self.choice_index + choices.len - 1) % choices.len;
@@ -182,7 +189,7 @@ pub const View = struct {
         self.choice_index = 0;
         self.picker = picker;
         self.picker_scroll.offset = 0;
-        self.picker_y = e.bounds.y + e.bounds.height + 3;
+        self.picker_anchor = e.bounds;
         cx.notify();
     }
     fn scrollPicker(self: *View, e: *ui.Event(ui.Input), cx: *ui.Context(View), total: f32) void {
@@ -235,6 +242,7 @@ pub const View = struct {
         var values: model.Values = undefined;
         try cx.read(self.settings, model.Settings.copy, .{ arena.allocator(), &values });
         try self.apply(cx, switch (which) {
+            .vim => .{ .vim_mode = !values.vim_mode },
             .lilex => .{ .font_family = .lilex },
             .menlo => .{ .font_family = .menlo },
             .monaco => .{ .font_family = .monaco },
@@ -272,7 +280,7 @@ fn categoryName(category: Category) []const u8 {
 fn contains(category: Category, row: Row) bool {
     return category == .general or switch (row) {
         .theme, .icons, .ui_font_family, .ui_font_size, .motion => category == .appearance,
-        .font_family, .font, .line_height, .ligatures, .tabs, .numbers => category == .editor,
+        .vim, .font_family, .font, .line_height, .ligatures, .tabs, .numbers => category == .editor,
         .gutters, .blame => category == .version_control,
     };
 }
@@ -280,6 +288,7 @@ fn rowSearch(row: Row) []const u8 {
     return switch (row) {
         .theme => "Color theme appearance colors",
         .icons => "File icon theme appearance",
+        .vim => "Vim modal editing normal visual insert key bindings",
         .font_family => "Editor font family Lilex Menlo Monaco typography",
         .ui_font_family => "Interface font family IBM Plex Sans System typography",
         .ui_font_size => "Interface font size typography",
@@ -306,6 +315,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
     const title: []const u8 = switch (row) {
         .theme => "Color theme",
         .icons => "File icon theme",
+        .vim => "Vim mode",
         .font_family => "Editor font",
         .ui_font_family => "Interface font",
         .ui_font_size => "Interface font size",
@@ -321,7 +331,8 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
     const help: []const u8 = switch (row) {
         .theme => "Choose the colors used throughout the editor.",
         .icons => "Choose icons for files and folders in the project panel.",
-        .font_family => "Lilex is bundled. Menlo and Monaco use macOS fonts.",
+        .vim => "Normal, Insert and Visual modes. Escape returns to Normal.",
+        .font_family => "Choose a bundled or installed font family.",
         .ui_font_family => "Typeface used in tabs, sidebars, controls and settings.",
         .ui_font_size => "Scale interface text independently from editor text.",
         .line_height => "Vertical space per line, as a multiple of the font size.",
@@ -344,10 +355,10 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                     if (generation.resolveIconTheme(values.icon_theme)) |icons| name = icons.name;
                 }
             }
-            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .theme) Picker.theme else Picker.icons, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 10, .right = 8 }, .align_items = .center, .justify_content = .space_between, .radius = 3, .background = c.sidebar, .hover_background = c.hover } }));
+            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .theme) Picker.theme else Picker.icons, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 10, .right = 8 }, .align_items = .center, .justify_content = .space_between, .radius = v.metrics.control_radius, .background = c.sidebar, .hover_background = c.hover } }));
         },
         .font_family, .ui_font_family => {
-            const name: []const u8 = if (row == .font_family) switch (values.font_family) {
+            const name: []const u8 = if (row == .font_family and values.editor_font_name.len > 0) values.editor_font_name.slice() else if (row == .ui_font_family and values.interface_font_name.len > 0) values.interface_font_name.slice() else if (row == .font_family) switch (values.font_family) {
                 .lilex => "Lilex",
                 .menlo => "Menlo",
                 .monaco => "Monaco",
@@ -355,7 +366,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .plex => "IBM Plex Sans",
                 .system => "System",
             };
-            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .font_family) Picker.code_font else Picker.ui_font, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .justify_content = .space_between, .background = c.element, .hover_background = c.hover, .radius = 3 } }));
+            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .font_family) Picker.code_font else Picker.ui_font, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .justify_content = .space_between, .background = c.element, .hover_background = c.hover, .radius = v.metrics.control_radius } }));
         },
         .ui_font_size, .line_height => {
             const is_ui = row == .ui_font_size;
@@ -370,8 +381,9 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 try controls.append(b.allocator(), try b.button(.{ .label = choice[1], .on_click = try b.onClickWith(choice[0], View.change), .style = style }));
             }
         },
-        .numbers, .gutters, .blame, .motion, .ligatures => {
+        .vim, .numbers, .gutters, .blame, .motion, .ligatures => {
             const enabled = switch (row) {
+                .vim => values.vim_mode,
                 .ligatures => values.font_ligatures,
                 .numbers => values.line_numbers,
                 .gutters => values.git_gutters,
@@ -379,13 +391,14 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 else => values.reduced_motion,
             };
             const change: Change = switch (row) {
+                .vim => .vim,
                 .ligatures => .ligatures,
                 .numbers => .numbers,
                 .gutters => .gutters,
                 .blame => .blame,
                 else => .motion,
             };
-            try controls.append(b.allocator(), try b.button(.{ .label = title, .children = &.{try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 })}, .on_click = try b.onClickWith(change, View.change), .style = .{ .width = .{ .px = 38 }, .height = .{ .px = 28 }, .align_items = .center, .justify_content = .center, .radius = 3, .hover_background = c.hover, .flex_shrink = 0 } }));
+            try controls.append(b.allocator(), try b.button(.{ .label = title, .children = &.{try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 })}, .on_click = try b.onClickWith(change, View.change), .style = .{ .width = .{ .px = 38 }, .height = .{ .px = 28 }, .align_items = .center, .justify_content = .center, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 0 } }));
         },
     }
     return b.key(.{ .string = @tagName(row) }, try b.column(.{ .height = .{ .px = row_height }, .flex_shrink = 0 }, &.{ try b.row(.{ .flex_grow = 1, .gap = 18, .align_items = .center }, &.{ try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 7, .overflow = .hidden }, &.{ try v.text(b, title, c.text, 14), try v.text(b, help, c.muted, 12) }), try b.row(.{ .gap = 4, .align_items = .center, .flex_shrink = 0 }, controls.items) }), try v.rule(b, c) }));
@@ -399,7 +412,7 @@ fn resetChoice(input: *ui.controls.TextInput, cx: *ui.Context(ui.controls.TextIn
     cx.notify();
 }
 const Choice = struct { name: []const u8, patch: model.Patch };
-fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, query: []const u8) ![]const Choice {
+fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, query: []const u8, families: []const ui.typography.FontName) ![]const Choice {
     var choices: std.ArrayList(Choice) = .empty;
     const fixed: []const Choice = switch (picker) {
         .theme => &.{ .{ .name = "System", .patch = .{ .theme = "zircon.system" } }, .{ .name = "One Dark", .patch = .{ .theme = "zircon.dark" } }, .{ .name = "One Light", .patch = .{ .theme = "zircon.light" } } },
@@ -409,6 +422,15 @@ fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, q
         .none => &.{},
     };
     for (fixed) |choice| if (@import("../view.zig").matches(query, choice.name)) try choices.append(a, choice);
+    if (picker == .code_font or picker == .ui_font) for (families) |family| {
+        const name = family.slice();
+        var duplicate = false;
+        for (fixed) |choice| if (std.ascii.eqlIgnoreCase(choice.name, name)) {
+            duplicate = true;
+            break;
+        };
+        if (!duplicate and @import("../view.zig").matches(query, name)) try choices.append(a, .{ .name = try a.dupe(u8, name), .patch = if (picker == .code_font) .{ .editor_font_name = family } else .{ .interface_font_name = family } });
+    };
     if (generation) |snapshot| for (snapshot.installed()) |entry| {
         if (!entry.enabled) continue;
         if (picker == .theme) for (entry.themes) |theme| {
@@ -423,8 +445,10 @@ fn selectedChoice(values: model.Values, patch: model.Patch) bool {
     return switch (patch) {
         .theme => |id| std.mem.eql(u8, id, values.theme),
         .icon_theme => |id| std.mem.eql(u8, id, values.icon_theme),
-        .font_family => |f| f == values.font_family,
-        .ui_font_family => |f| f == values.ui_font_family,
+        .font_family => |f| values.editor_font_name.len == 0 and f == values.font_family,
+        .ui_font_family => |f| values.interface_font_name.len == 0 and f == values.ui_font_family,
+        .editor_font_name => |f| std.meta.eql(f, values.editor_font_name),
+        .interface_font_name => |f| std.meta.eql(f, values.interface_font_name),
         else => false,
     };
 }
@@ -438,14 +462,19 @@ fn choose(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), target: Ch
     var generation: ?ext.Snapshot = null;
     if (self.workspace) |workspace| try cx.read(workspace, Shell.copyExtensions, .{&generation});
     defer if (generation) |*snapshot| snapshot.deinit();
-    const choices = try choiceList(arena.allocator(), self.picker, generation, query);
+    const choices = try choiceList(arena.allocator(), self.picker, generation, query, self.font_families);
     if (target.index < choices.len) try self.apply(cx, choices[target.index].patch);
 }
 fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, generation: ?ext.Snapshot) !ui.Element {
     const query = if (self.choice_query) |handle| try @import("../view.zig").fieldText(b, handle) else "";
-    const choices = try choiceList(b.allocator(), self.picker, generation, query);
+    const choices = try choiceList(b.allocator(), self.picker, generation, query, self.font_families);
+    const total = @as(f32, @floatFromInt(@max(1, choices.len))) * 32;
+    const height = @min(total, @max(32, @min(224, b.viewport().height - 78)));
+    const offset = @min(self.picker_scroll.offset, @max(0, total - height));
+    const visible = try ui.controls.visibleRows(choices.len, 32, offset, height, 1);
     var rows: std.ArrayList(ui.Element) = .empty;
-    for (choices, 0..) |choice, i| {
+    if (visible.start > 0) try rows.append(b.allocator(), try b.div(.{ .height = .{ .px = @as(f32, @floatFromInt(visible.start)) * 32 }, .flex_shrink = 0 }, &.{}));
+    for (choices[visible.start..visible.end], visible.start..) |choice, i| {
         const current = selectedChoice(values, choice.patch);
         var style = v.buttonStyle(c, false);
         style.height = .{ .px = 32 };
@@ -453,15 +482,15 @@ fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         style.background = if (i == self.choice_index) c.selected else null;
         try rows.append(b.allocator(), try b.button(.{ .label = choice.name, .children = &.{ try b.div(.{ .width = .{ .px = 16 }, .flex_shrink = 0, .justify_content = .center }, if (current) &.{try v.icon(b, .check, c.accent, 14)} else &.{}), try v.text(b, choice.name, c.text, 13) }, .on_click = try b.onClickWith(ChoiceTarget{ .index = @intCast(i), .picker = self.picker }, choose), .style = style }));
     }
-    if (rows.items.len == 0) try rows.append(b.allocator(), try v.text(b, "No matching choices", c.muted, 12));
-    const total = @as(f32, @floatFromInt(@max(1, rows.items.len))) * 32;
-    const height = @min(total, 224);
-    const list = try b.listen(try b.column(.{ .height = .{ .px = height }, .min_height = .{ .px = 0 }, .scroll_y = @min(self.picker_scroll.offset, @max(0, total - height)), .overflow = .hidden }, rows.items), .{ .on_input = try b.onInputWith(total, View.scrollPicker) });
+    if (visible.end < choices.len) try rows.append(b.allocator(), try b.div(.{ .height = .{ .px = @as(f32, @floatFromInt(choices.len - visible.end)) * 32 }, .flex_shrink = 0 }, &.{}));
+    if (choices.len == 0) try rows.append(b.allocator(), try v.text(b, "No matching choices", c.muted, 12));
+    const list = try b.listen(try b.column(.{ .height = .{ .px = height }, .min_height = .{ .px = 0 }, .scroll_y = offset, .overflow = .hidden }, rows.items), .{ .on_input = try b.onInputWith(total, View.scrollPicker) });
     var children: std.ArrayList(ui.Element) = .empty;
     if (self.choice_query) |handle| try children.append(b.allocator(), try b.autofocus(try b.key(.{ .string = "settings-choice-query" }, try b.view(handle))));
     try children.appendSlice(b.allocator(), &.{ try v.rule(b, c), list });
-    const popup = try b.key(.{ .string = "settings-choices" }, try b.column(.{ .width = .{ .px = 264 }, .height = .{ .px = height + 54 }, .gap = 6, .padding = ui.Insets.all(6), .radius = 4, .background = c.panel, .overflow = .hidden }, children.items));
-    return b.modal(try b.listen(try b.stack(.{ .align_items = .end, .padding = .{ .top = @min(self.picker_y, @max(0, b.viewport().height - height - 70)), .right = 30 } }, &.{popup}), .{ .on_input = b.onInput(View.closePicker) }));
+    const placement = v.popoverBounds(b.viewport(), self.picker_anchor, .{ .width = 264, .height = height + 54 });
+    const popup = try b.key(.{ .string = "settings-choices" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .gap = 6, .padding = ui.Insets.all(6), .radius = v.metrics.popover_radius, .background = c.panel, .overflow = .hidden }, children.items));
+    return b.modal(try b.listen(try b.stack(.{ .align_items = .start, .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}), .{ .on_input = b.onInput(View.closePicker) }));
 }
 const Switch = struct {
     enabled: bool,

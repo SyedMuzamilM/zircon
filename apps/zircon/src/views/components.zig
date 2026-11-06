@@ -1,11 +1,13 @@
 //! Small visual controls shared by workspace, panels and preferences. Icons are
-//! framework geometry; actions keep their readable labels for keyboard/tests.
+//! shared SVG assets; actions keep their readable labels for keyboard/tests.
 const std = @import("std");
 const ui = @import("zircon_ui");
 const Shell = @import("../shell.zig").Shell;
 pub const Palette = @import("../theme.zig").Palette;
 pub const Icon = ui.controls.icons.Name;
 pub const metrics = struct {
+    pub const control_radius: f32 = 3;
+    pub const popover_radius: f32 = 5;
     pub const titlebar: f32 = 34;
     pub const tabs: f32 = 32;
     pub const status: f32 = 24;
@@ -27,10 +29,10 @@ pub fn iconButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Comm
     return b.button(.{ .label = label, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(action, Shell.onCommand), .style = iconButtonStyle(c, selected) });
 }
 pub fn iconButtonStyle(c: Palette, selected: bool) ui.Style {
-    return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = 3, .background = if (selected) c.selected else null, .hover_background = c.hover };
+    return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover };
 }
 pub fn buttonStyle(c: Palette, primary: bool) ui.Style {
-    return .{ .direction = .row, .height = .{ .px = metrics.control }, .gap = 6, .align_items = .center, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = 3, .background = if (primary) c.primary else c.element, .hover_background = if (primary) c.primary_hover else c.hover, .text = .{ .size = 12, .color = if (primary) c.on_primary else c.text }, .flex_shrink = 0 };
+    return .{ .direction = .row, .height = .{ .px = metrics.control }, .gap = 6, .align_items = .center, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = metrics.control_radius, .background = if (primary) c.primary else c.element, .hover_background = if (primary) c.primary_hover else c.hover, .text = .{ .size = 12, .color = if (primary) c.on_primary else c.text }, .flex_shrink = 0 };
 }
 pub fn inputAppearance(c: Palette) ui.controls.TextInput.Appearance {
     return .{ .background = c.document, .foreground = c.text, .placeholder = c.muted, .selection = c.selected, .caret = c.accent, .focus_border = c.accent };
@@ -79,5 +81,16 @@ pub fn menuRow(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command
     return b.key(.{ .number = @backingInt(action) }, try b.button(.{ .label = label, .children = &.{
         try b.styled(try text(b, label, c.text, 13), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden, .text = .{ .size = 13, .color = c.text } }),
         try text(b, shortcut, c.muted, 12),
-    }, .on_click = try b.onClickWith(action, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 20, .padding = .{ .left = 10, .right = 10 }, .radius = 3, .background = if (selected) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }));
+    }, .on_click = try b.onClickWith(action, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 20, .padding = .{ .left = 10, .right = 10 }, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }));
+}
+
+/// Align to the invoking control, flip above it when needed, and stay inside
+/// the window even when a split pane or sidebar is narrower than the menu.
+pub fn popoverBounds(viewport: ui.Size, anchor: ui.Rect, requested: ui.Size) ui.Rect {
+    const inset: f32 = 6;
+    const width = @min(requested.width, @max(0, viewport.width - inset * 2));
+    const height = @min(requested.height, @max(0, viewport.height - inset * 2));
+    const below = anchor.y + anchor.height + 4;
+    const preferred_y = if (below + height <= viewport.height - inset) below else anchor.y - height - 4;
+    return .{ .x = std.math.clamp(anchor.x + anchor.width - width, inset, @max(inset, viewport.width - width - inset)), .y = std.math.clamp(preferred_y, inset, @max(inset, viewport.height - height - inset)), .width = width, .height = height };
 }

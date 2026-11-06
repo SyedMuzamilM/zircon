@@ -252,7 +252,12 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
     if (try @import("editor_git.zig").handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
-    var outcome = try selected.editor.handle(&record.doc, e);
+    var outcome = if (self.key_bindings.resolve(e.data) == .delete_line) try selected.editor.execute(&record.doc, .delete_line) else try selected.editor.handle(&record.doc, e);
+    if (outcome.handled and self.key_bindings.resolve(e.data) == .delete_line) e.preventDefault();
+    if (outcome.request_find) {
+        self.vim_find_pending = true;
+        try show(self, cx, .find);
+    }
     if (outcome.change != null or outcome.reset) {
         self.allocator.free(self.status);
         self.status = &.{};
@@ -536,6 +541,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .quit => try cx.app.requestCloseWindow(self.window.?),
         .dismiss => {
             self.overlay = .none;
+            self.vim_find_pending = false;
             self.pending = null;
         },
         .discard_dirty => {
@@ -606,14 +612,15 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 }
                 _ = try current.editor.findNext(&record.doc, query, false);
             } else {
-                const found = try current.editor.findNext(&record.doc, query, which == .find_previous);
+                const found = try current.editor.findNext(&record.doc, query, (which == .find_previous) != (self.vim_find_pending and current.editor.vim.search_backward));
                 if (!found) try self.setStatus(try self.allocator.dupe(u8, "No matches"));
             }
         },
-        .undo, .redo, .select_all => {
+        .delete_line, .undo, .redo, .select_all => {
             const current = try active(self);
             const record = try self.workspace.get(current.id);
             var result = try current.editor.execute(&record.doc, switch (which) {
+                .delete_line => .delete_line,
                 .undo => .undo,
                 .redo => .redo,
                 else => .select_all,
@@ -701,6 +708,11 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
                 else => .dismiss,
             };
             if (self.overlay == .palette or self.overlay == .quick_open) try activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
+            if (self.vim_find_pending and self.overlay == .find) {
+                self.vim_find_pending = false;
+                self.overlay = .none;
+                self.editor_focus_request +%= 1;
+            }
             e.preventDefault();
             e.stopPropagation();
             cx.notify();
@@ -716,6 +728,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         return;
     }
     if (self.key_bindings.resolve(e.data)) |which| {
+        if (which == .delete_line) return;
         execute(self, cx, which, e) catch |err| try self.reportError(err);
         e.preventDefault();
         e.stopPropagation();

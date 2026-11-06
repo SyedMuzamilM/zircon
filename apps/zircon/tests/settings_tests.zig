@@ -242,3 +242,27 @@ test "settings choice search filters independently and commits only with Enter" 
     const preferences = try app.read(owner, Check.settings, .{});
     try t.expect(try app.read(preferences, Check.menlo, .{}));
 }
+
+test "installed font identities and Vim bindings persist without borrowed settings bytes" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "settings.json", .data = "{\"vim_mode\":true,\"vim_bindings\":{\"H\":\"0\",\"L\":\"$\"},\"font_family\":\"Courier New\",\"ui_font_family\":\"Helvetica Neue\"}" });
+    const path = try tmp.dir.realPathFileAlloc(t.io, "settings.json", t.allocator);
+    defer t.allocator.free(path);
+    var store = try zircon.SettingsStore.init(t.allocator, t.io, path);
+    defer store.deinit();
+    var values = store.values();
+    try t.expect(values.vim_mode);
+    try t.expectEqual(@as(u8, '$'), values.vim_bindings.resolve('L'));
+    try t.expectEqualStrings("Courier New", values.editor_font_name.slice());
+    try store.update(.{ .vim_mode = false });
+    try store.update(.{ .editor_font_name = try ui.typography.FontName.init("Menlo") });
+    var reopened = try zircon.SettingsStore.init(t.allocator, t.io, path);
+    defer reopened.deinit();
+    values = reopened.values();
+    try t.expect(!values.vim_mode);
+    try t.expectEqualStrings("Menlo", values.editor_font_name.slice());
+    try t.expectEqualStrings("Helvetica Neue", values.interface_font_name.slice());
+    try store.update(.{ .font_family = .lilex });
+    try t.expectEqual(@as(u16, 0), store.values().editor_font_name.len);
+}

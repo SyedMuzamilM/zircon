@@ -8,8 +8,8 @@ pub fn titlebar(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     var items: std.ArrayList(ui.Element) = .empty;
     try items.append(b.allocator(), try b.div(.{ .width = .{ .px = 70 }, .flex_shrink = 0 }, &.{}));
-    try items.append(b.allocator(), try b.button(.{ .label = "Open", .children = &.{ try v.text(b, std.fs.path.basename(self.workspace.root_path), c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.open_project, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 6, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = 3, .hover_background = c.hover, .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .viewport_width = 40 }, .overflow = .hidden } }));
-    if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.button(.{ .label = "Git changes", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, status.branch, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.git_branches, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = 3, .hover_background = c.hover, .flex_shrink = 1, .overflow = .hidden } }));
+    try items.append(b.allocator(), try b.button(.{ .label = "Open", .children = &.{ try v.text(b, std.fs.path.basename(self.workspace.root_path), c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.open_project, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 6, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .viewport_width = 40 }, .overflow = .hidden } }));
+    if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.button(.{ .label = "Git changes", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, status.branch, c.muted, 12) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.git_branches, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 1, .overflow = .hidden } }));
     try items.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
     try items.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .quick_open, "Go to file", .search, false), try v.iconButton(b, c, .workspace_menu, "Workspace menu", .more, self.menu_open) });
     const row = try b.dragRegion(try b.key(.{ .string = "toolbar" }, try b.row(.{ .height = .{ .px = v.metrics.titlebar - 1 }, .flex_shrink = 0, .align_items = .center, .gap = 6, .padding = .{ .left = 8, .right = 8 }, .background = c.chrome }, items.items)));
@@ -32,7 +32,7 @@ pub fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const background = if (selected) c.document else c.tab_bar;
         const accessible = try std.fmt.allocPrint(b.allocator(), "{s}{s}", .{ record.title(), if (record.dirty()) " •" else "" });
         const title = try b.listen(try b.button(.{ .label = accessible, .children = &.{ try v.icon(b, v.fileIcon(record.path orelse ""), v.fileColor(c, record.path orelse ""), 14), try v.text(b, record.title(), if (selected) c.text else c.muted, 13) }, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onTab), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 7, .align_items = .center, .padding = .{ .left = 11, .right = 6 }, .hover_background = if (selected) c.document else c.hover, .overflow = .hidden } }), .{ .on_input = try b.onInputWith(tab.document, Shell.onTabDrag) });
-        const close = try b.key(.{ .string = "close" }, try b.button(.{ .label = "Close tab", .children = &.{if (record.dirty()) try b.div(.{ .width = .{ .px = 5 }, .height = .{ .px = 5 }, .radius = 3, .background = c.muted }, &.{}) else try v.icon(b, .close, c.muted, 12)}, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onCloseTab), .style = .{ .width = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }));
+        const close = try b.key(.{ .string = "close" }, try b.button(.{ .label = "Close tab", .children = &.{if (record.dirty()) try b.div(.{ .width = .{ .px = 5 }, .height = .{ .px = 5 }, .radius = v.metrics.control_radius, .background = c.muted }, &.{}) else try v.icon(b, .close, c.muted, 12)}, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onCloseTab), .style = .{ .width = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }));
         const measured = @min(@as(f32, 174), @max(@as(f32, 110), @as(f32, @floatFromInt(record.title().len)) * 7.2 + 57));
         try items.append(b.allocator(), try b.key(.{ .number = @import("../panes.zig").key(tab.document) }, try b.column(.{ .width = .{ .px = measured }, .min_width = .{ .px = 90 }, .flex_shrink = 1, .background = background }, &.{ try b.row(.{ .flex_grow = 1 }, &.{ try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{}), title, close, try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{}) }), try b.div(.{ .height = .{ .px = 1 }, .background = if (selected) c.document else c.line, .flex_shrink = 0 }, &.{}) })));
     }
@@ -108,6 +108,7 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
         const point = try snapshot.pointAt(@min(state.primary().head, snapshot.byteLen()));
         const location = try std.fmt.allocPrint(b.allocator(), "{d}:{d}", .{ point.line + 1, point.byte_column + 1 });
         try items.append(b.allocator(), try v.text(b, location, c.muted, 11));
+        if (state.vim.enabled) try items.append(b.allocator(), try v.text(b, state.vim.label(), c.accent, 11));
         try items.append(b.allocator(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "Spaces: {d}", .{state.tab_width}), c.muted, 11));
         const language = switch (state.language) {
             .plain => "Plain text",
@@ -128,8 +129,9 @@ pub fn menu(self: *const Shell, b: *ui.Ui) !ui.Element {
     inline for (.{ .{ @import("../commands.zig").Command.open_project, "Open project…", "⇧⌘O" }, .{ @import("../commands.zig").Command.open_path, "Open file…", "⌘O" }, .{ @import("../commands.zig").Command.palette, "Command palette", "⇧⌘P" }, .{ @import("../commands.zig").Command.extensions, "Extensions", "" }, .{ @import("../commands.zig").Command.settings, "Settings", "⌘," } }) |entry| {
         try items.append(b.allocator(), try v.menuRow(b, c, entry[0], entry[1], try self.key_bindings.shortcut(b.allocator(), entry[0]), false));
     }
-    const popup = try b.column(.{ .width = .{ .px = 260 }, .height = .{ .px = 170 }, .padding = ui.Insets.all(5), .background = c.panel, .radius = 5, .overflow = .hidden }, items.items);
-    return b.modal(try b.listen(try b.stack(.{ .align_items = .end, .padding = .{ .top = v.metrics.titlebar + 3, .right = 7 } }, &.{popup}), .{ .on_input = b.onInput(Shell.onMenuInput) }));
+    const placement = v.popoverBounds(b.viewport(), self.menu_anchor, .{ .width = 260, .height = 170 });
+    const popup = try b.key(.{ .string = "workspace-menu" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .padding = ui.Insets.all(5), .background = c.panel, .radius = v.metrics.popover_radius, .overflow = .hidden }, items.items));
+    return b.modal(try b.listen(try b.stack(.{ .align_items = .start, .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}), .{ .on_input = b.onInput(Shell.onMenuInput) }));
 }
 
 pub fn splitMenu(self: *const Shell, b: *ui.Ui) !ui.Element {
@@ -139,6 +141,7 @@ pub fn splitMenu(self: *const Shell, b: *ui.Ui) !ui.Element {
         const item = catalogue.entry(action);
         try rows.append(b.allocator(), try v.menuRow(b, self.colors, action, item.label, try self.key_bindings.shortcut(b.allocator(), action), false));
     }
-    const popup = try b.key(.{ .string = "split-menu" }, try b.column(.{ .width = .{ .px = 260 }, .height = .{ .px = 160 }, .padding = ui.Insets.all(5), .background = self.colors.panel, .radius = 5, .overflow = .hidden }, rows.items));
-    return b.modal(try b.listen(try b.stack(.{ .align_items = .end, .padding = .{ .top = v.metrics.titlebar + v.metrics.tabs, .right = 7 } }, &.{popup}), .{ .on_input = b.onInput(Shell.onMenuInput) }));
+    const placement = v.popoverBounds(b.viewport(), self.split_anchor, .{ .width = 260, .height = 160 });
+    const popup = try b.key(.{ .string = "split-menu" }, try b.column(.{ .width = .{ .px = placement.width }, .height = .{ .px = placement.height }, .padding = ui.Insets.all(5), .background = self.colors.panel, .radius = v.metrics.popover_radius, .overflow = .hidden }, rows.items));
+    return b.modal(try b.listen(try b.stack(.{ .align_items = .start, .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}), .{ .on_input = b.onInput(Shell.onMenuInput) }));
 }

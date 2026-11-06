@@ -25,6 +25,9 @@ pub const Shell = struct {
     sidebar_visible: bool = true,
     sidebar_width: f32 = 250,
     git_sidebar_width: f32 = 320,
+    menu_anchor: ui.Rect = .{},
+    split_anchor: ui.Rect = .{},
+    git_anchor: ui.Rect = .{},
     menu_open: bool = false,
     split_menu_open: bool = false,
     inline_blame_enabled: bool = true,
@@ -42,6 +45,7 @@ pub const Shell = struct {
     file_index: std.ArrayList(IndexedFile) = .empty,
     indexing: bool = false,
     overlay_index: usize = 0,
+    vim_find_pending: bool = false,
     tree_scroll: ui.controls.Scroll = .{},
     overlay: Overlay = .none,
     pending: ?CloseTarget = null,
@@ -55,7 +59,7 @@ pub const Shell = struct {
     settings: ?ui.Entity(@import("settings/model.zig").Settings) = null,
     settings_window: ?ui.WindowHandle = null,
     colors: @import("theme.zig").Palette = .{},
-    editor_options: struct { font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
+    editor_options: struct { vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: @import("services/git.zig").Model = .{},
     search: @import("services/search.zig").Model = .{},
     language: @import("services/language.zig").Model = .{},
@@ -159,7 +163,7 @@ pub const Shell = struct {
         for (self.tabs.items) |tab| _ = try self.workspace.getConst(tab.document);
         if (self.secondary) |pane| _ = try self.workspace.getConst(pane.document);
         try cx.app.setReducedMotion(values.reduced_motion);
-        try cx.app.setTypography(.{ .code_font = values.font_family, .ui_font = values.ui_font_family, .ui_size = values.ui_font_size, .ligatures = values.font_ligatures });
+        try cx.app.setTypography(.{ .code_family = values.editor_font_name, .ui_family = values.interface_font_name, .code_font = values.font_family, .ui_font = values.ui_font_family, .ui_size = values.ui_font_size, .ligatures = values.font_ligatures });
         const follows_system = std.mem.eql(u8, values.theme, "zircon.system");
         if (follows_system and !self.follows_system) if (self.window) |handle| if ((try cx.app.window(handle)).surface) |surface| {
             self.system_dark = surface.systemDark();
@@ -168,6 +172,8 @@ pub const Shell = struct {
         const light = @import("theme.zig").isLight(values.theme, self.system_dark);
         self.colors = if (light) @import("theme.zig").Palette.light else .{};
         for (self.tabs.items) |*tab| {
+            tab.editor.setVim(values.vim_mode);
+            tab.editor.vim.bindings = values.vim_bindings;
             tab.editor.font_size = values.font_size;
             tab.editor.line_height = values.font_size * values.line_height;
             tab.editor.tab_width = values.tab_width;
@@ -176,6 +182,8 @@ pub const Shell = struct {
             tab.editor.show_git_gutters = values.git_gutters;
         }
         if (self.secondary) |*pane| {
+            pane.editor.setVim(values.vim_mode);
+            pane.editor.vim.bindings = values.vim_bindings;
             pane.editor.font_size = values.font_size;
             pane.editor.line_height = values.font_size * values.line_height;
             pane.editor.tab_width = values.tab_width;
@@ -211,7 +219,7 @@ pub const Shell = struct {
             defer snapshot.deinit();
             pane.editor.synchronize(snapshot);
         }
-        self.editor_options = .{ .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        self.editor_options = .{ .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
         try self.styleInputs(cx);
         cx.notify();
     }
@@ -224,6 +232,8 @@ pub const Shell = struct {
     }
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
         const options = self.editor_options;
+        state.setVim(options.vim_mode);
+        state.vim.bindings = options.vim_bindings;
         state.font_size = options.font_size;
         state.line_height = options.font_size * options.line_height;
         state.tab_width = options.tab_width;
@@ -243,6 +253,12 @@ pub const Shell = struct {
     }
     pub fn onCommand(self: *Shell, e: *ui.Event(ui.Click), cx: *ui.Context(Shell), which: Command) !void {
         self.rememberPanel();
+        switch (which) {
+            .workspace_menu => self.menu_anchor = e.bounds,
+            .split_menu => self.split_anchor = e.bounds,
+            .git_network_menu, .git_changes_menu, .git_branches, .git_stashes => self.git_anchor = e.bounds,
+            else => {},
+        }
         self.git.menu = .none;
         self.menu_open = false;
         if (which != .split_menu) self.split_menu_open = false;

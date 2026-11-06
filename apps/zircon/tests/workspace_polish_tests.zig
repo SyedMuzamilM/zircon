@@ -145,3 +145,58 @@ test "settings reject unsafe unknown and ambiguous shortcut configuration" {
         try t.expectError(item[1], zircon.SettingsStore.init(t.allocator, t.io, file));
     }
 }
+
+test "split popover anchors to the clicked pane control and clamps inside a narrow window" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.command, .{.split_down});
+    _ = try app.step(0);
+    var anchor: ui.Rect = .{};
+    const frame = &(try app.window(h)).frames.committed;
+    for (frame.nodes.items, 0..) |node, i| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Split editor") and frame.bounds[i].y > anchor.y) {
+        anchor = frame.bounds[i];
+    };
+    try t.expect(anchor.y > 200);
+    const point: ui.Point = .{ .x = anchor.x + anchor.width / 2, .y = anchor.y + anchor.height / 2 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
+    _ = try app.step(0);
+    var popup = try bounds(&app, h, "split-menu");
+    try t.expectApproxEqAbs(anchor.y + anchor.height + 4, popup.y, 0.1);
+    try t.expect(popup.x >= 6 and popup.x + popup.width <= 994);
+    try app.dispatch(h, .{ .resize = .{ .width = 480, .height = 340 } });
+    _ = try app.step(0);
+    popup = try bounds(&app, h, "split-menu");
+    try t.expect(popup.x >= 6 and popup.x + popup.width <= 474);
+    try t.expect(popup.y >= 6 and popup.y + popup.height <= 334);
+}
+
+test "Vim slash search uses the focused find field and returns to Normal" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "settings.json", .data = "{\"vim_mode\":true}" });
+    const path = try tmp.dir.realPathFileAlloc(t.io, "settings.json", t.allocator);
+    defer t.allocator.free(path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, path);
+    // Type a source buffer through Insert mode.
+    try app.dispatch(h, .{ .text = "i" });
+    try app.dispatch(h, .{ .text = "one two one" });
+    try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
+    try app.dispatch(h, .{ .text = "0" });
+    try app.dispatch(h, .{ .text = "/" });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "two" });
+    try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+    _ = try app.step(0);
+    const Read = struct {
+        fn matched(self: *const zircon.Shell) bool {
+            return self.overlay == .none and self.tabs.items[0].editor.vim.mode == .normal and self.tabs.items[0].editor.primary().head == 4;
+        }
+    };
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try t.expect(try app.read(owner, Read.matched, .{}));
+}

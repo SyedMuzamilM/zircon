@@ -14,7 +14,7 @@ Gutter markers compare current unsaved text with the index. Consecutive changed 
 
 The current line shows its author and commit date after a short delay. Hover the author/time label to open commit details. The label is vertically centered within its source line; the floating card does not move source rows. The card remains open as the pointer moves into it, scrolls long messages, and offers Copy SHA. Click the label or use `Cmd+Option+B` to pin details. Escape, the close icon or clicking source dismisses the card. Uncommitted lines show an explicit working-tree state without a SHA. Blame uses unsaved text and rejects obsolete document revisions. Inline Git blame in settings controls automatic annotations; explicit blame remains available.
 
-Opening Changes shows all staged, unstaged and untracked changes in one scrollable HEAD-to-worktree comparison with file headers. Selecting a file navigates within that combined review. Worktree/Staged commands still open individual comparisons. The combined view keeps staged changes visible until they are committed.
+Opening Changes shows all staged, unstaged and untracked changes in one scrollable HEAD-to-worktree comparison with file headers. Selecting a file reveals its loaded patch immediately without starting another Git job. Worktree/Staged commands still open individual comparisons. The combined view keeps staged changes visible until they are committed.
 
 The branch button opens a searchable local/remote branch picker. Type a new name to create a branch; select a remote branch to track it. Arrow keys and Enter select entries, and lists scroll. The remote-action menu provides Fetch, Fetch from, Pull, Pull with rebase, Push, Push to, Publish branch, and Force push with lease. Pull uses fast-forward only unless rebase is explicitly chosen. Publish sets the upstream on the default remote, preferring origin. Missing remotes/upstreams and detached HEAD disable unavailable menu actions. Real Git errors remain visible in the panel.
 
@@ -35,11 +35,38 @@ The native app stores extensions under `~/Library/Application Support/Zircon/ext
 
 Open an image path to view its decoded first frame through ImageIO. It remains separate from text documents. Editor returns to the previous text, and `Cmd+W` closes image viewing.
 
-Open Markdown and choose Preview in its file heading, or Open Markdown preview in the palette. Editing source refreshes the adjacent preview. Click rendered text to reveal its source. Local links resolve relative to the Markdown file, and external HTTP/HTTPS/mail links use the OS opener. Local images use Zircon UI; remote images are not fetched.
+Open Markdown and choose Preview in its file heading, or Open Markdown preview in the palette. Editing source refreshes the adjacent preview. Click rendered text to reveal its source. Local links resolve relative to the Markdown file, and external HTTP/HTTPS/mail links use the OS opener. Local images use Zircon UI; remote images are not fetched. Scrolling and link hit testing reuse the prepared layout. Width, font generation, source revision and colors invalidate it. Offscreen primitives are skipped during painting, and source edits retain decoded images whose file identity and timestamps are unchanged. Source parsing and a newly invalidated layout still run synchronously; this is not full Markdown block virtualization.
 
 `Cmd+,`, the status-bar gear, or Settings in the workspace menu opens settings in a separate window above the workspace. Search filters individual setting rows across categories. Scroll the content to reach lower rows; theme, icon and font choices open searchable dropdowns. Option search is independent of settings search. Arrow keys select a choice, Enter commits it and Escape dismisses it without changing the setting. Edit in settings.json opens the persisted file in the workspace. Theme, icon theme, font size, tab width, line numbers, gutters and reduced motion affect shared editor state. The native app validates and writes preferences atomically before publishing them. Invalid files show an error and use in-memory defaults for that session. Closing settings leaves the workspace open. Changes made directly in JSON load on the next launch.
 
 Choose System in Color theme to follow macOS appearance changes in the editor, popups, settings, input fields and native window chrome. One Light, One Dark and installed themes keep their selected colors. `"theme": "zircon.system"` also selects System mode in settings.json.
+
+The font pickers include the bundled faces and installed macOS font families. Search and use arrows/Enter to choose one. Editor and interface families are independent. The list creates rows only for visible choices. Family names persist in `font_family` and `ui_font_family`; bundled preset names such as `lilex` and `plex` remain valid. Core Text supplies its platform fallback if a configured family is unavailable.
+
+## Editing and Vim
+
+On macOS, `Cmd+Delete` deletes back to the logical line beginning. `Cmd+Fn+Delete` deletes to its end. At a line boundary these commands consume the adjacent newline, including CRLF. Option with backward/forward Delete deletes by word. `Cmd+Shift+K` deletes the current line. Ctrl+A/E, B/F and P/N move to the line boundaries, previous/next character and previous/next row; Ctrl+H/D, W, U and K delete backward/forward, backward by word, to the beginning and to the end. These editor commands keep document undo and split-view mapping. Search/settings text inputs support Command/Option deletion too.
+
+Enable **Vim mode** in Settings > Editor, or set `"vim_mode": true` in settings.json and restart. Normal mode uses a steady block cursor. Insert mode retains the native caret, IME input and ordinary macOS editing keys. Escape, Ctrl+[ or Ctrl+C returns to Normal. The status bar names the active mode. Native text insertion is disabled in Normal and Visual modes; unsupported command text is consumed without changing the document. Search, command and settings fields retain ordinary typing.
+
+| Task | Keys |
+| --- | --- |
+| Move | `h j k l`, arrows, `w b e`, `W B E`, `0 ^ $`, `gg G`, counts such as `12j` and `2d3w` |
+| Other motions | `%` for matching brackets, `{ }` for paragraphs, `H M L` for visible rows, `+ -` for indented line starts |
+| Scroll | Ctrl+U/D for half pages, Ctrl+B/F for pages, `zz zt zb` for cursor placement |
+| Enter Insert | `i a I A`, `o O` with the current indentation |
+| Select | `v` for inclusive character selection, `V` for whole lines, Ctrl+V for a rectangle; motions extend, Escape cancels |
+| Operate | `d c y > <` followed by a motion; `dd cc yy >> <<` operate on lines; `iw` and `aw` select a word for an operator or in Visual mode |
+| Edit | `x X s D C S`, `r` plus an ASCII replacement character, `J` to join |
+| Find within a line | `f F t T` followed by an ASCII character |
+| Search | `/ ?` open the find field; Enter searches and returns to the editor; `n N` repeat; `* #` search the current word literally |
+| Register | `p P` paste the unnamed register, including linewise and rectangular contents; yanks/deletes also write the system clipboard |
+| Block insertion | In Visual Block, `I A` insert before/after every selected row; `c` changes every selected range |
+| History | `u`, Ctrl+R and `.` for undo, redo and repeat of the last supported edit |
+
+Changes and the following Insert text share one undo group. Dot-repeat resolves the recorded command against the current cursor and applies its replacement as one document transaction. Visual changes and edits that leave the recorded insertion span are not dot-recorded. Vim state and registers belong to each pane. The two panes continue sharing document history.
+
+This is the initial Vim command set, not full Vim compatibility. Macros, named registers, marks/jump lists, Ex commands, regex search, arbitrary text objects, Unicode arguments to find/replace commands and full grapheme-cluster motion remain work. Motions currently step UTF-8 code points. Block selection uses shaped positions and expanded tabs; padding entirely new pasted rows uses source columns.
 
 ## Keyboard configuration
 
@@ -49,6 +76,8 @@ Add `key_bindings` to settings.json, then restart. Chords use `cmd`, `ctrl`, `al
 {
   "theme": "zircon.system",
   "git_inline_blame": true,
+  "vim_mode": true,
+  "vim_bindings": { "H": "0", "L": "$" },
   "key_bindings": {
     "cmd-ctrl-r": "split_down",
     "cmd-alt-down": null
@@ -56,7 +85,7 @@ Add `key_bindings` to settings.json, then restart. Chords use `cmd`, `ctrl`, `al
 }
 ```
 
-This adds a Split down shortcut and removes its default binding. Chords require Command or Control, accept at most 32 overrides, and reject unknown keys, internal-only actions and duplicate chords. This is a single-stroke workspace keymap. Context expressions, multi-stroke sequences and a graphical keymap editor remain future work.
+This adds a Split down shortcut and removes its default binding. `vim_bindings` independently remaps up to 64 single printable ASCII command characters in Normal and Visual modes. The example maps H/L to the line beginning/end. These mappings do not rewrite Insert text or focused input fields. Chords require Command or Control, accept at most 32 overrides, and reject unknown keys, internal-only actions and duplicate chords. This is a single-stroke workspace keymap. Context expressions, multi-stroke sequences and a graphical keymap editor remain future work.
 
 ## Package ownership
 
