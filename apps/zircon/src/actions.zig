@@ -853,7 +853,10 @@ fn historyBoundary(self: *Shell, id: ws.DocumentId) void {
 }
 
 pub fn prepareEditor(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, snapshot: text.Snapshot, key: []const u8) !void {
-    if (state.soft_wrap == .none) return;
+    if (state.soft_wrap == .none) {
+        state.reveal(snapshot);
+        return;
+    }
     const handle = self.window orelse return;
     const window = try cx.app.window(handle);
     var viewport = state.last_viewport;

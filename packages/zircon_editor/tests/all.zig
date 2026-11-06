@@ -806,3 +806,24 @@ test "wrapped edits reshape changed lines and retain UTF8 mappings in the suffix
     try fresh.ensure(deleted, 80, 14, 4, fixed.measurer());
     try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
 }
+
+test "wrapped Git deletion blocks map to the changed source and unwrap clamps scroll" {
+    var doc = try text.Document.init(t.allocator, "alpha beta gamma delta epsilon\nnext source line\n");
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.soft_wrap = .editor_width;
+    var metrics: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try state.prepareView(snapshot, .{ .width = 160, .height = 44 }, metrics.measurer());
+    const changes = [_]editor.annotations.GitChange{.{ .kind = .modified, .start = 1, .end = 2, .old_count = 2, .expanded = true }};
+    const bottom = state.wrap_cache.y(1, 22, &changes);
+    try t.expectEqual(state.wrap_cache.starts.items[1], state.wrap_cache.visualAt(bottom - 30, 22, &changes));
+    try state.setSelection(snapshot, .{ .start = snapshot.byteLen(), .end = snapshot.byteLen() });
+    state.reveal(snapshot);
+    try t.expect(state.scroll.offset > 0);
+    state.soft_wrap = .none;
+    try state.prepareView(snapshot, .{ .width = 160, .height = 200 }, metrics.measurer());
+    try t.expectEqual(@as(f32, 0), state.scroll.offset);
+}

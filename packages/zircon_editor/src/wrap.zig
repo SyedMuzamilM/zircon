@@ -134,6 +134,11 @@ pub const Cache = struct {
         return @as(f32, @floatFromInt(index + annotations.insertedRows(changes, line))) * height;
     }
     pub fn visualAt(self: *const Cache, y_position: f32, height: f32, changes: []const annotations.GitChange) usize {
+        for (changes) |change| if (change.expanded and change.old_count > 0 and change.start + 1 < self.starts.items.len) {
+            const bottom = self.y(change.start, height, changes);
+            const top = bottom - @as(f32, @floatFromInt(change.old_count)) * height;
+            if (y_position >= top and y_position < bottom) return self.starts.items[change.start];
+        };
         var lo: usize = 0;
         var hi = self.rows.items.len;
         while (lo < hi) {
