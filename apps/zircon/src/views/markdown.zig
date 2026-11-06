@@ -57,6 +57,7 @@ pub const Preview = struct {
     io: std.Io,
     generation: *Generation,
     scroll: ui.controls.Scroll = .{},
+    follow_end: bool = false,
     colors: Colors = .{},
     pub fn init(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.Snapshot) !Preview {
         return .{ .allocator = a, .io = io, .generation = try prepare(a, io, path, snapshot, null) };
@@ -83,7 +84,7 @@ pub const Preview = struct {
         return self.generation.revision;
     }
     pub fn render(self: *const Preview, builder: *ui.Ui) !ui.Element {
-        const value: Canvas = .{ .generation = self.generation.retain(), .scroll = self.scroll.offset, .colors = self.colors };
+        const value: Canvas = .{ .generation = self.generation.retain(), .scroll = self.scroll.offset, .follow_end = self.follow_end, .colors = self.colors };
         errdefer value.generation.release();
         return builder.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = self.colors.background });
     }
@@ -93,6 +94,8 @@ pub const Preview = struct {
         switch (event.data) {
             .scroll => |wheel| {
                 const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors)).prepared;
+                if (self.follow_end) self.scroll.offset = @max(0, prepared.height - event.bounds.height);
+                self.follow_end = false;
                 self.scroll.wheel(wheel.y, prepared.height, event.bounds.height);
                 event.preventDefault();
                 return .{ .handled = true };
@@ -452,6 +455,7 @@ const Canvas = struct {
     retained_layout: ?*Layout = null,
     generation: *Generation,
     scroll: f32,
+    follow_end: bool,
     colors: Colors,
     pub const LayoutState = ui.layout.Measurer;
     pub const PrepaintState = Prepared;
@@ -463,6 +467,7 @@ const Canvas = struct {
         const cached = (try cachedLayout(self.generation, metrics.*, bounds.width, self.colors)).retain();
         if (self.retained_layout) |old| old.release();
         self.retained_layout = cached;
+        self.scroll = if (self.follow_end) @max(0, cached.prepared.height - bounds.height) else std.math.clamp(self.scroll, 0, @max(0, cached.prepared.height - bounds.height));
         return cached.prepared;
     }
     pub fn paint(self: *Canvas, cx: *ui.PaintCx, bounds: ui.Rect, _: *LayoutState, prepared: *Prepared) !void {

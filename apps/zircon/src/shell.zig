@@ -13,7 +13,7 @@ pub const TreeRow = struct { name: []u8, path: []u8, directory: bool, depth: u16
 pub const IndexedFile = struct { path: []u8, label: []u8 };
 pub const Overlay = enum { none, open_project, palette, quick_open, open_path, save_as, extension_path, project_search, find, replace, dirty };
 pub const CloseTarget = union(enum) { tab: usize, window };
-pub const Fields = struct { extension_query: ui.Entity(ui.controls.TextInput), query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
+pub const Fields = struct { agent_query: ui.Entity(ui.controls.TextInput), extension_query: ui.Entity(ui.controls.TextInput), query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     workspace: workspace.Workspace,
@@ -65,6 +65,9 @@ pub const Shell = struct {
     catalog: @import("services/catalog.zig").Model = .{},
     extension_host_path: ?[]const u8 = null,
     language: @import("services/language.zig").Model = .{},
+    agents: @import("services/agents.zig").Model = .{},
+    agent_mode: bool = false,
+    agent_editor: bool = true,
     left_panel: enum { project, git_changes, git_history } = .project,
     panel: enum { editor, git_diff, extensions, search, image, markdown } = .editor,
     image: ?@import("views/image.zig").Asset = null,
@@ -99,6 +102,7 @@ pub const Shell = struct {
         self.git.deinit();
         self.search.deinit();
         self.catalog.deinit();
+        self.agents.deinit(self.allocator);
         self.language.deinit(self.allocator);
         if (self.image) |*asset| asset.deinit(self.allocator);
         if (self.preview) |*preview| preview.view.deinit();
@@ -108,6 +112,7 @@ pub const Shell = struct {
         self.icons.deinit(self.allocator);
         self.workspace.deinit();
     }
+    pub const configureAgents = @import("services/agents.zig").configure;
     pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         return @import("view.zig").render(self, b);
     }
@@ -233,8 +238,10 @@ pub const Shell = struct {
         cx.notify();
     }
     pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
+        if (self.agents.composer) |*compose| compose.editor.theme = self.editor_options.theme;
+        for (self.agents.sessions.items) |session| session.preview.colors = self.previewColors();
         const appearance = @import("views/components.zig").inputAppearance(self.colors);
-        if (self.fields) |fields| inline for (.{ "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
+        if (self.fields) |fields| inline for (.{ "agent_query", "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
     }
     pub fn panelWidth(self: *const Shell) f32 {
         return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;
@@ -275,7 +282,9 @@ pub const Shell = struct {
         if (self.overlay == .palette) self.overlay = .none;
         actions.execute(self, cx, which, null) catch |err| try self.reportError(err);
         self.rememberPanel();
-        if (self.overlay == .none) self.editor_focus_request +%= 1;
+        if (self.overlay == .none) {
+            if (self.agent_mode) self.agents.focus +%= 1 else self.editor_focus_request +%= 1;
+        }
         e.preventDefault();
         cx.notify();
     }
@@ -466,6 +475,7 @@ pub const Shell = struct {
             error.WindowNotFound => return,
             else => return err,
         };
+        try @import("services/agents.zig").poll(self, cx);
         try @import("services/language.zig").poll(self, cx);
         try @import("services/git.zig").pollBlame(self, cx);
         if (self.git.repository) {

@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-06",
+  "method": "Native hidden AppKit windows. Conversation/picker/permission captures use a deterministic subprocess test agent. Proxy capture uses the installed OpenCode ACP and configured authenticated proxy, without a model prompt.",
+  "files": [
+    {
+      "file": "dark-conversation.png",
+      "sha256": "bdd44a3cd49a994f5e0904a000b8d7f5627f357ceb8c7e2d5ec72d88afdda4e1",
+      "bytes": 68421
+    },
+    {
+      "file": "light-conversation.png",
+      "sha256": "8c21d64e45649e82f9e53f425b1ea342932927a0cb254b753fb7b4cab5998280",
+      "bytes": 71515
+    },
+    {
+      "file": "model-picker.png",
+      "sha256": "fd723471a7eba69d36251896f6964f2d91a16711370af2cf56b4054613bb73e7",
+      "bytes": 68510
+    },
+    {
+      "file": "narrow-conversation.png",
+      "sha256": "71e6bef0dccd27cc78d3db1ea38f62c1e5d828d722b757cc5acfbf7cd3bfa733",
+      "bytes": 51347
+    },
+    {
+      "file": "permission.png",
+      "sha256": "cff7e59785ceaef9a6db81863d4a1003ba6b7e1dff1fc970efdbd9c9eda6ea38",
+      "bytes": 73337
+    },
+    {
+      "file": "proxy-connected.png",
+      "sha256": "2114ee24b5da8f9e957ef3fc9d2e461f86d0371603921187afceae2b4f26fa2e",
+      "bytes": 62304
+    }
+  ]
+}

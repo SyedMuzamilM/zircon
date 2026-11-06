@@ -24,6 +24,7 @@ pub fn open(self: *Shell, cx: *ui.Context(Shell), requested: []const u8, kind: K
     };
     errdefer cx.app.closeWindow(window) catch {};
     const owner = try cx.app.windowEntity(Shell, window);
+    if (self.agents.home) |home| try cx.app.update(owner, Shell.configureAgents, .{ home, self.agents.environment });
     if (self.extensions) |extensions| try cx.app.update(owner, Shell.loadExtensions, .{extensions.home});
     try cx.app.update(owner, Shell.bootstrap, .{window});
     self.overlay = .none;

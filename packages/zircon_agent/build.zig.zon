@@ -1,0 +1,1 @@
+.{ .name = .zircon_agent, .fingerprint = 0xc650bb8eb16ca39f, .version = "0.1.0", .minimum_zig_version = "0.17.1", .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "README.md" } }

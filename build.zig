@@ -14,6 +14,11 @@ pub fn build(b: *std.Build) void {
     const git_module = b.dependency("zircon_git", .{ .target = target, .optimize = optimize }).module("zircon_git");
     const extension_module = b.dependency("zircon_extensions", .{ .target = target, .optimize = optimize }).module("zircon_extensions");
     const search_module = b.dependency("zircon_search", .{ .target = target, .optimize = optimize }).module("zircon_search");
+    const agent_module = b.dependency("zircon_agent", .{ .target = target, .optimize = optimize }).module("zircon_agent");
+    const agent_verify = b.addExecutable(.{ .name = "zircon-agent-verify", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_agents.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "zircon_agent", .module = agent_module }} }) });
+    const agent_verify_run = b.addRunArtifact(agent_verify);
+
+    b.step("verify-agent-connections", "Initialize installed Codex/OpenCode without model prompts").dependOn(&agent_verify_run.step);
     const language_module = b.dependency("zircon_language", .{ .target = target, .optimize = optimize }).module("zircon_language");
     const markdown_module = b.dependency("zircon_markdown", .{ .target = target, .optimize = optimize }).module("zircon_markdown");
     var feature_tests: std.ArrayList(*std.Build.Step.Compile) = .empty;
@@ -23,6 +28,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zircon_extensions", .module = extension_module },
         .{ .name = "zircon_search", .module = search_module },
         .{ .name = "zircon_language", .module = language_module },
+        .{ .name = "zircon_agent", .module = agent_module },
         .{ .name = "zircon_markdown", .module = markdown_module },
     }) |feature| {
         const test_module = b.createModule(.{ .root_source_file = b.path(b.fmt("packages/{s}/tests/all.zig", .{feature.name})), .target = target, .optimize = optimize });
@@ -46,7 +52,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("apps/zircon/src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module } },
+        .imports = &.{ .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
     });
     const app_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("apps/zircon/tests/all.zig"),
@@ -54,6 +60,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{ .{ .name = "zircon", .module = app_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module } },
     }) });
+    app_tests.root_module.addAnonymousImport("agent_fixture", .{ .root_source_file = b.path("packages/zircon_agent/tests/fixture.py") });
     app_tests.root_module.addAnonymousImport("language_fixture", .{ .root_source_file = b.path("packages/zircon_language/tests/fixture.py") });
     app_tests.root_module.addAnonymousImport("image_fixture", .{ .root_source_file = b.path("packages/zircon_extensions/tests/fixtures/pixel.png") });
     const app_run = b.addRunArtifact(app_tests);
@@ -116,8 +123,12 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("apps/zircon/src/root.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module } },
+            .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
         });
+        const agent_journey = b.addExecutable(.{ .name = "zircon-agent-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_agent_workspace.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
+        const agent_journey_run = b.addRunArtifact(agent_journey);
+        agent_journey_run.addArgs(&.{ b.option([]const u8, "agent-config", "Read-only installed provider configuration") orelse "/tmp/zircon-agents.json", b.option([]const u8, "agent-output", "Disposable native provider workspace") orelse "/tmp/zircon-agent-native" });
+        b.step("verify-agent-workspace", "Verify native CLI proxy profile without a model turn").dependOn(&agent_journey_run.step);
         const zed_journey = b.addExecutable(.{ .name = "zircon-zed-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_zed_extensions.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_extensions", .module = extension_module } } }) });
         const zed_journey_run = b.addRunArtifact(zed_journey);
         zed_journey_run.step.dependOn(&extension_host_build.step);
@@ -139,6 +150,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } },
         }) });
+        app_native_tests.root_module.addAnonymousImport("agent_fixture", .{ .root_source_file = b.path("packages/zircon_agent/tests/fixture.py") });
         app_native_tests.root_module.addAnonymousImport("language_fixture", .{ .root_source_file = b.path("packages/zircon_language/tests/fixture.py") });
         app_native_tests.root_module.addAnonymousImport("image_fixture", .{ .root_source_file = b.path("packages/zircon_extensions/tests/fixtures/pixel.png") });
         const app_native_run = b.addRunArtifact(app_native_tests);
@@ -158,6 +170,11 @@ pub fn build(b: *std.Build) void {
             .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } },
         }) });
         b.installArtifact(zircon);
+        const package_run = b.addSystemCommand(&.{ "python3", "tools/package_macos.py", "--input" });
+        package_run.addDirectoryArg(.{ .relative = .{ .base = .install_prefix, .sub_path = "" } });
+        package_run.addArgs(&.{ "--output", "artifacts" });
+        package_run.step.dependOn(b.getInstallStep());
+        b.step("package", "Build a signed local-test macOS app bundle and ZIP").dependOn(&package_run.step);
         b.installFile("assets/icons/LICENSES", "share/zircon/icons-LICENSES");
         b.installFile("assets/icons/SOURCE.md", "share/zircon/icons-SOURCE.md");
         const zircon_run = b.addRunArtifact(zircon);

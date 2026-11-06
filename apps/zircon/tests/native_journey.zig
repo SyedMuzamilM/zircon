@@ -6,6 +6,7 @@ const t = std.testing;
 const native = ui.testing.native;
 const objc = native.objc;
 test {
+    _ = @import("agent_tests.zig");
     _ = @import("workspace_polish_tests.zig");
     _ = @import("experience_tests.zig");
 }

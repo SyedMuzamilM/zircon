@@ -293,6 +293,8 @@ test "narrow command palette gives long commands room and stays within the windo
     try app.dispatch(h, .{ .resize = .{ .width = 700, .height = 650 } });
     try app.update(owner, Ops.command, .{.palette});
     _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "Extensions: install language support" });
+    _ = try app.step(0);
     const dialog = try bounds(&app, h, "dialog");
     try t.expect(dialog.x >= 24 and dialog.x + dialog.width <= 676);
     var found = false;

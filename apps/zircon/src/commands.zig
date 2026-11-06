@@ -1,8 +1,19 @@
 //! One command catalogue drives shortcuts, toolbar controls and the palette.
 const ui = @import("zircon_ui");
-pub const Command = enum { restart_language_servers, extension_search, install_language_support, toggle_soft_wrap, delete_line, open_project, browse_project, submit_project, workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_network_menu, git_changes_menu, git_branches, git_stashes, git_fetch, git_fetch_from, git_pull, git_pull_rebase, git_push, git_push_to, git_force_push, git_publish, git_stash_all, git_stash_tracked, git_stash_pop, git_stash_apply, git_stash_show, git_create_branch, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, split_menu, split_left, split_right, split_up, split_down, close_split, git_blame, git_next_change, git_previous_change, git_toggle_hunk, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
+pub const Command = enum { agent_transcript, agent_mode, agent_new, agent_connect, agent_send, agent_cancel, agent_config, agent_reload, agent_context, agent_toggle_editor, toggle_comment, restart_language_servers, extension_search, install_language_support, toggle_soft_wrap, delete_line, open_project, browse_project, submit_project, workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_network_menu, git_changes_menu, git_branches, git_stashes, git_fetch, git_fetch_from, git_pull, git_pull_rebase, git_push, git_push_to, git_force_push, git_publish, git_stash_all, git_stash_tracked, git_stash_pop, git_stash_apply, git_stash_show, git_create_branch, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, split_menu, split_left, split_right, split_up, split_down, close_split, git_blame, git_next_change, git_previous_change, git_toggle_hunk, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
+    .{ .command = .agent_mode, .label = "Agent: toggle workspace", .shortcut = "⇧⌘J" },
+    .{ .command = .agent_new, .label = "Agent: new conversation", .shortcut = "⌥⌘N" },
+    .{ .command = .agent_send, .label = "Agent: send prompt", .shortcut = "⌘Enter" },
+    .{ .command = .agent_toggle_editor, .label = "Agent: toggle editor and changes" },
+    .{ .command = .agent_transcript, .label = "Agent: open saved conversation transcript" },
+    .{ .command = .agent_connect, .label = "Agent: connect or resume" },
+    .{ .command = .agent_config, .label = "Agent: configure providers" },
+    .{ .command = .agent_reload, .label = "Agent: reload provider configuration" },
+    .{ .command = .agent_context, .label = "Agent: attach editor selection or file" },
+    .{ .command = .agent_cancel, .label = "Agent: stop current turn" },
+    .{ .command = .toggle_comment, .label = "Editor: toggle line comments", .shortcut = "⌘/" },
     .{ .command = .restart_language_servers, .label = "Language: restart servers" },
     .{ .command = .install_language_support, .label = "Extensions: install language support for this file" },
     .{ .command = .toggle_soft_wrap, .label = "Editor: toggle word wrap", .shortcut = "⌥Z" },
@@ -58,6 +69,10 @@ pub const commands = [_]Entry{
     .{ .command = .zoom_out, .label = "Decrease font size" },
 };
 pub const bindings = [_]ui.Keymap(Command).Binding{
+    .{ .chord = .{ .key = .n, .modifiers = .{ .command = true, .alt = true } }, .action = .agent_new },
+    .{ .chord = .{ .key = .enter, .modifiers = .{ .command = true } }, .action = .agent_send },
+    .{ .chord = .{ .key = .j, .modifiers = .{ .command = true, .shift = true } }, .action = .agent_mode },
+    .{ .chord = .{ .key = .slash, .modifiers = .{ .command = true } }, .action = .toggle_comment },
     .{ .chord = .{ .key = .z, .modifiers = .{ .alt = true } }, .action = .toggle_soft_wrap },
     .{ .chord = .{ .key = .k, .modifiers = .{ .command = true, .shift = true } }, .action = .delete_line },
     .{ .chord = .{ .key = .left, .modifiers = .{ .command = true, .alt = true } }, .action = .split_left },

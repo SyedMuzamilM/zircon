@@ -20,12 +20,12 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const sidebar_width = if (sidebar_visible) @min(self.panelWidth(), @max(140, viewport.width * 0.4)) else 0;
     const editor_width = @max(100, viewport.width - sidebar_width - if (sidebar_visible) @as(f32, 5) else 0);
     var body_children: std.ArrayList(ui.Element) = .empty;
-    if (sidebar_visible) {
+    if (!self.agent_mode and sidebar_visible) {
         try body_children.append(b.allocator(), try sidebar(self, b, sidebar_width, viewport.height));
         try body_children.append(b.allocator(), try divider(b, colors, 0, false));
     }
-    try body_children.append(b.allocator(), try editorArea(self, b, editor_width));
-    const main = try b.key(.{ .string = "main" }, try b.row(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, body_children.items));
+    if (!self.agent_mode) try body_children.append(b.allocator(), try editorArea(self, b, editor_width));
+    const main = if (self.agent_mode) try @import("views/agents.zig").render(self, b) else try b.key(.{ .string = "main" }, try b.row(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, body_children.items));
     const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
@@ -61,7 +61,7 @@ fn sidebar(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Element {
     return @import("views/project.zig").render(self, b, width, height);
 }
 
-fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
+pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     const colors = self.colors;
     if (self.panel != .editor and self.panel != .markdown) {
         const panel = switch (self.panel) {
@@ -90,7 +90,7 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         var primary = try tab.editor.render(&primary_record.doc, b);
         primary = try b.styled(primary, .{ .width = .{ .px = primary_width }, .flex_grow = 1, .min_height = .{ .px = 0 }, .min_width = .{ .px = 0 }, .overflow = .hidden });
         primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 0), Shell.onEditor) });
-        primary = try b.requestFocus(try b.autofocus(primary), if (self.active_pane == .primary) self.editor_focus_request else 0);
+        primary = try b.requestFocus(if (self.agent_mode) primary else try b.autofocus(primary), if (!self.agent_mode and self.active_pane == .primary) self.editor_focus_request else 0);
         try panes.append(b.allocator(), try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, primary_record, tab.document, &tab.editor), primary })));
         if (preview_visible) {
             try panes.append(b.allocator(), try divider(b, colors, 1, false));
@@ -102,7 +102,7 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             var secondary_canvas = try secondary.editor.render(&record.doc, b);
             secondary_canvas = try b.styled(secondary_canvas, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
             secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 1), Shell.onEditor) });
-            secondary_canvas = try b.requestFocus(secondary_canvas, if (self.active_pane == .secondary) self.editor_focus_request else 0);
+            secondary_canvas = try b.requestFocus(secondary_canvas, if (!self.agent_mode and self.active_pane == .secondary) self.editor_focus_request else 0);
             try panes.append(b.allocator(), try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, record, secondary.document, &secondary.editor), secondary_canvas })));
         }
         if (self.secondary != null and self.split_reverse and !preview_visible) std.mem.swap(ui.Element, &panes.items[0], &panes.items[2]);

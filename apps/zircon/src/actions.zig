@@ -15,6 +15,11 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
     _ = try cx.observe(self.settings.?, Shell.onSettings);
     try self.onSettings(cx, self.settings.?);
     if (self.fields == null) {
+        var agent_input = try ui.controls.TextInput.init(self.allocator, "");
+        agent_input.leading_icon = .search;
+        agent_input.placeholder = "Search providers or models…";
+        agent_input.show_focus_border = false;
+        const agent_query = try cx.createChild(ui.controls.TextInput, agent_input);
         const query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         var project_input = try ui.controls.TextInput.init(self.allocator, "");
         project_input.leading_icon = .search;
@@ -33,7 +38,7 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
             commit_input.deinit(self.allocator);
             return err;
         };
-        self.fields = .{ .extension_query = extension_query, .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
+        self.fields = .{ .agent_query = agent_query, .extension_query = extension_query, .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
     }
     _ = try cx.observe(self.fields.?.path, Shell.onGitPickerQuery);
     try self.styleInputs(cx);
@@ -281,8 +286,9 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
     if (try @import("editor_git.zig").handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
-    var outcome = if (self.key_bindings.resolve(e.data) == .delete_line) try selected.editor.execute(&record.doc, .delete_line) else try selected.editor.handle(&record.doc, e);
-    if (outcome.handled and self.key_bindings.resolve(e.data) == .delete_line) e.preventDefault();
+    const shortcut = self.key_bindings.resolve(e.data);
+    var outcome = if (shortcut == .delete_line or shortcut == .toggle_comment) try selected.editor.execute(&record.doc, if (shortcut == .delete_line) .delete_line else .toggle_comment) else try selected.editor.handle(&record.doc, e);
+    if (outcome.handled and (shortcut == .delete_line or shortcut == .toggle_comment)) e.preventDefault();
     if (outcome.request_find) {
         self.vim_find_pending = true;
         try show(self, cx, .find);
@@ -311,6 +317,28 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     if (which != .complete) self.language.clearCompletion();
     switch (which) {
+        .agent_mode => {
+            try @import("services/agents.zig").ensure(self);
+            self.agent_mode = !self.agent_mode;
+            self.agents.focus +%= 1;
+        },
+        .agent_transcript => {
+            self.agent_mode = false;
+            if (self.agents.current()) |session| if (session.path) |path| try self.openPath(path);
+        },
+        .agent_new => {
+            try @import("services/agents.zig").newSession(self);
+            self.agent_mode = true;
+        },
+        .agent_connect => try @import("services/agents.zig").connect(self),
+        .agent_send => try @import("services/agents.zig").send(self, cx),
+        .agent_cancel => {
+            if (self.agents.current()) |session| try session.conversation.cancel();
+        },
+        .agent_config => try @import("services/agents.zig").editConfig(self),
+        .agent_reload => try @import("services/agents.zig").reload(self),
+        .agent_context => try @import("views/agents.zig").attach(self, cx),
+        .agent_toggle_editor => self.agent_editor = !self.agent_editor,
         .open_project => {
             self.overlay = .open_project;
             self.open_kind = .local_folder;
@@ -449,7 +477,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.panel = .editor;
         },
         .back_to_editor => self.panel = .editor,
-        .extensions => self.panel = .extensions,
+        .extensions => {
+            self.agent_mode = false;
+            self.panel = .extensions;
+        },
         .install_extension => try show(self, cx, .extension_path),
         .install_bundled_extension => try @import("services/extensions.zig").installBundled(self, cx),
         .project_search => {
@@ -661,11 +692,12 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 if (!found) try self.setStatus(try self.allocator.dupe(u8, "No matches"));
             }
         },
-        .delete_line, .undo, .redo, .select_all => {
+        .toggle_comment, .delete_line, .undo, .redo, .select_all => {
             const current = try active(self);
             const record = try self.workspace.get(current.id);
             var result = try current.editor.execute(&record.doc, switch (which) {
                 .delete_line => .delete_line,
+                .toggle_comment => .toggle_comment,
                 .undo => .undo,
                 .redo => .redo,
                 else => .select_all,
@@ -776,7 +808,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         return;
     }
     if (self.key_bindings.resolve(e.data)) |which| {
-        if (which == .delete_line) return;
+        if (which == .delete_line or which == .toggle_comment) return;
         execute(self, cx, which, e) catch |err| try self.reportError(err);
         e.preventDefault();
         e.stopPropagation();
