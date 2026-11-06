@@ -14,6 +14,7 @@ pub const Colors = struct {
     accent: ui.Color = ui.Color.rgb(0x87afd6),
     code: ui.Color = ui.Color.rgb(0x1c222b),
     border: ui.Color = ui.Color.rgb(0x3c4350),
+    tokens: [7]ui.Color = (@import("zircon_editor").Theme{}).tokens,
 };
 const Asset = struct { stamp: ?std.Io.File.Stat = null, target: []const u8, path: ?[]u8 = null, image: ?Image = null, failure: ?anyerror = null };
 const Generation = struct {
@@ -270,7 +271,16 @@ const Flow = struct {
         while (start < value.len) {
             if (value[start] == '\r' or value[start] == '\n' or value[start] == ' ' or value[start] == '\t') {
                 if (value[start] == '\r' and start + 1 < value.len and value[start + 1] == '\n') start += 1;
-                if (!wrap and (value[start] == '\r' or value[start] == '\n')) self.newline() else if (self.x > self.left) self.x += (try self.metrics.text(self.metrics.context, " ", style)).width;
+                const code_space = style.mono and !background;
+                if ((!wrap or code_space) and (value[start] == '\r' or value[start] == '\n')) self.newline() else if (code_space) {
+                    const advance = @max(1, (try self.metrics.text(self.metrics.context, " ", style)).width);
+                    const column: usize = @intFromFloat(@round(@max(0, self.x - self.left) / advance));
+                    const count: usize = if (value[start] == '\t') 4 - column % 4 else 1;
+                    for (0..count) |_| {
+                        if (wrap and self.x + advance > self.right and self.x > self.left) self.newline();
+                        self.x += advance;
+                    }
+                } else if (self.x > self.left) self.x += (try self.metrics.text(self.metrics.context, " ", style)).width;
                 start += 1;
                 continue;
             }
@@ -284,6 +294,10 @@ const Flow = struct {
                 const available = @max(1, self.right - self.x);
                 if (wrap and size.width > available) {
                     take = self.metrics.index(word, style, available);
+                    while (take > 0 and self.metrics.caret(word, style, take) > available) {
+                        take -= 1;
+                        while (take > 0 and word[take] & 0xc0 == 0x80) take -= 1;
+                    }
                     if (take == 0) {
                         take = 1;
                         while (take < word.len and word[take] & 0xc0 == 0x80) : (take += 1) {}
@@ -388,12 +402,12 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
                     lexical = lexed.state;
                     var at: usize = 0;
                     for (lexed.spans) |span| {
-                        if (span.start > at) try flow.textRun(line[at..span.start], .{ .size = 14, .mono = true, .color = colors.text }, block.source.start, null, false, false);
+                        if (span.start > at) try flow.textRun(line[at..span.start], .{ .size = 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
                         const color = tokenColor(span.kind, colors);
-                        try flow.textRun(line[span.start..span.end], .{ .size = 14, .mono = true, .color = color }, block.source.start, null, false, false);
+                        try flow.textRun(line[span.start..span.end], .{ .size = 14, .mono = true, .color = color }, block.source.start, null, false, true);
                         at = span.end;
                     }
-                    if (at < line.len) try flow.textRun(line[at..], .{ .size = 14, .mono = true, .color = colors.text }, block.source.start, null, false, false);
+                    if (at < line.len) try flow.textRun(line[at..], .{ .size = 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
                     flow.newline();
                 }
                 flow.y += 8;
@@ -432,14 +446,7 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
     return .{ .texts = flow.texts.items, .fills = flow.fills.items, .images = flow.images.items, .hits = flow.hits.items, .height = flow.y + 20 };
 }
 fn tokenColor(kind: syntax.Kind, colors: Colors) ui.Color {
-    return switch (kind) {
-        .keyword => ui.Color.rgb(0xc49bec),
-        .string => ui.Color.rgb(0xa8c990),
-        .number => ui.Color.rgb(0xdfad7c),
-        .comment => colors.muted,
-        .builtin => colors.accent,
-        else => colors.text,
-    };
+    return colors.tokens[@backingInt(kind)];
 }
 const Canvas = struct {
     retained_layout: ?*Layout = null,

@@ -59,7 +59,9 @@ const Ops = struct {
     }
     fn accepted(self: *const Shell) bool {
         const record = self.workspace.getConst(self.tabs.items[self.active].document) catch return false;
-        return record.doc.revision() > 0;
+        var source = record.doc.snapshot();
+        defer source.deinit();
+        return (source.find(".AutoHashMap", 0, .forward, true) catch return false) != null;
     }
     fn catalogReady(self: *const Shell) bool {
         return !self.catalog.busy and self.catalog.parsed != null and self.catalog.parsed.?.value.total > 1000 and self.catalog.parsed.?.value.entries.len > 0;
@@ -173,7 +175,8 @@ pub fn main(init: std.process.Init) !void {
     const at = (std.mem.indexOf(u8, source, "    std.\n") orelse return error.FixtureCursorMissing) + 8;
     try app.update(owner, Ops.cursor, .{at});
     try step(&app, io);
-    try app.update(owner, Ops.complete, .{});
+    try app.dispatch(h, .{ .key_down = .{ .key = .backspace } });
+    try app.dispatch(h, .{ .text = "." });
     try wait(&app, owner, io, Ops.completion);
     const completed = try std.fs.path.join(a, &.{ args[2], "official-zls-completion.png" });
     defer a.free(completed);

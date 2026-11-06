@@ -130,5 +130,14 @@ pub fn main(init: std.process.Init) !void {
         try escape(&app, settings);
         try click(&app, settings, if (std.mem.eql(u8, theme, "light")) "One Light" else "One Dark");
         try snapshot(&app, settings, a, args[2], theme, "theme-picker");
+        const narrow_shell = try Shell.init(a, init.io, args[1], "src/main.zig");
+        const narrow = try app.openWindow(Shell, .{ .title = "EditorReview narrow", .chrome = .integrated, .visible = false, .width = 700, .height = 650 }, narrow_shell);
+        const narrow_owner = try app.windowEntity(Shell, narrow);
+        try app.update(narrow_owner, Shell.loadSettings, .{@as(?[]const u8, settings_path)});
+        try app.update(narrow_owner, Shell.bootstrap, .{narrow});
+        try settle(&app, init.io);
+        try snapshot(&app, narrow, a, args[2], theme, "narrow-editor");
+        try app.update(narrow_owner, Ops.command, .{.palette});
+        try snapshot(&app, narrow, a, args[2], theme, "narrow-commands");
     }
 }

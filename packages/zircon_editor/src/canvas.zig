@@ -146,7 +146,7 @@ const Canvas = struct {
         const style: ui.TextStyle = .{ .size = self.font_size, .mono = true, .color = self.theme.foreground };
         const primary_row = if (self.selections.len > 0) (try self.snapshot.pointAt(if (self.block_cursor) self.cursor else self.selections[0].head)).line else 0;
         for (prepared.lines) |line| {
-            if (line.row == primary_row and (line.segment == null or (self.cursor >= line.segment.?.start and (self.cursor < line.segment.?.end or self.cursor == line.range.end)))) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
+            if (cx.focused and line.row == primary_row and (line.segment == null or (self.cursor >= line.segment.?.start and (self.cursor < line.segment.?.end or self.cursor == line.range.end)))) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
             for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end) {
                 var fill = self.theme.git_added;
                 fill.a = 0.15;
@@ -231,13 +231,13 @@ const Canvas = struct {
                 }
             };
             cx.painter.popClip();
-            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (line.row == primary_row) self.theme.active_line else self.theme.background });
+            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (cx.focused and line.row == primary_row) self.theme.active_line else self.theme.background });
 
             if (self.show_line_numbers and (line.segment == null or line.segment.?.first)) {
                 const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{line.row + 1});
                 const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true };
                 const number_width = metrics.text(metrics.context, number, number_style) catch ui.Size{ .width = 20, .height = 16 };
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 18 - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (line.row == primary_row) self.theme.active_number else self.theme.line_number } });
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 18 - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (cx.focused and line.row == primary_row) self.theme.active_number else self.theme.line_number } });
             }
         }
         for (self.git_changes) |change| {

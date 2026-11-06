@@ -131,7 +131,7 @@ fn installed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
 pub fn recommend(self: *Shell, cx: *ui.Context(Shell)) !void {
     const current = try @import("../actions.zig").active(self);
     const record = try self.workspace.getConst(current.id);
-    const suffix = std.mem.trimStart(u8, std.fs.path.extension(record.path orelse record.title()), ".");
+    const suffix = @import("../language_suggestions.zig").query(record.path orelse record.title());
     const Set = struct {
         fn call(field: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), value: []const u8) !void {
             try field.bytes.ensureTotalCapacity(field.allocator, value.len);

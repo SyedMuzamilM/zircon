@@ -815,3 +815,39 @@ test "Git controls create branches stash changes and reload clean open documents
     };
     try t.expect(try app.read(owner, Error.refused, .{}));
 }
+
+test "light Markdown code keeps theme colors indentation and long tokens inside a narrow preview" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "note.md", .data = "```zig\n    const long_identifier_that_needs_to_wrap_in_a_narrow_preview_without_clipping = \"A long string with 日 and 🙂 that also wraps inside the code background\";\n```\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "note.md");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Theme = struct {
+        fn light(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .theme = "zircon.light" }});
+        }
+        fn keyword(self: *const zircon.Shell) ui.Color {
+            return self.editor_options.theme.tokens[1];
+        }
+    };
+    try app.update(owner, Theme.light, .{});
+    try send(&app, h, .markdown_preview);
+    _ = try app.step(0);
+    const bounds = try elementBounds(&app, h, "markdown-preview");
+    const keyword = try app.read(owner, Theme.keyword, .{});
+    var found = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and item.rect.x >= bounds.x and item.rect.y >= bounds.y and item.rect.y < bounds.y + bounds.height) {
+        if (std.mem.eql(u8, item.text, "const")) {
+            found = true;
+            try t.expect(std.meta.eql(item.color, keyword));
+            try t.expect(item.rect.x >= bounds.x + 60);
+        }
+        try t.expect(item.rect.x + item.rect.width <= bounds.x + bounds.width - 20 + 0.1);
+    };
+    try t.expect(found);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-markdown-code-wrap-light.png");
+}

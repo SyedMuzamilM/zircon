@@ -2,7 +2,7 @@
 
 Zircon now searches the official [zed-industries/extensions registry](https://github.com/zed-industries/extensions). The catalog reads every registry ID, including those beyond the API's 1,000-result cap. The API enriches names, descriptions and capability metadata. The native verification on 2026-11-06 saw 1,585 official entries; this count can change.
 
-Open Extensions, select **All Zed extensions**, search, and choose Install. Installed packages can be enabled, disabled, removed or updated. Theme/icon variants are selectable in Settings. A language label in the status bar opens the catalog using the current file suffix. Files without installed support offer an installation hint. Downloads and server setup run in worker jobs, and failures remain visible instead of pretending installation succeeded.
+Open Extensions, select **All Zed extensions**, search, and choose Install. Installed packages can be enabled, disabled, removed or updated. Theme/icon variants are selectable in Settings. A language label in the status bar opens a catalog search for the current file. Known suffixes and special filenames translate to language names, including `.ex` → Elixir, `.tf` → Terraform, `.cs` → C#, and Dockerfile. Files without installed support offer an installation hint. Downloads and server setup run in worker jobs, and failures remain visible instead of pretending installation succeeded.
 
 The manager also lists 13 common language providers because Zed includes these in its core rather than publishing them all as registry extensions: Python, JavaScript/JSX, TypeScript, TSX, Rust, Go, C, C++, CSS, HTML, JSON, YAML and Bash. Their Tree-sitter parsers and highlight queries come from pinned upstream crates. Node.js/npm are required for Pyright, TypeScript, web, YAML and Bash servers. Go is required to install gopls; C/C++ uses clangd on PATH. Rust uses rust-analyzer on PATH or an upstream release. Official Zig support uses the official extension's own ZLS installation hook.
 
@@ -31,11 +31,13 @@ This is working interoperability, not universal Zed extension parity. Catalog vi
 - WASM imports not implemented by the host return an explicit error. HTTP response streaming, extension label customization, and all historical/current API combinations have not been certified.
 - Query injections and per-language editor behaviors beyond the imported association/comment rules are not implemented. Tree-sitter highlights map into Zircon's seven token categories; semantic tokens remain absent.
 - Theme-specific font styles and the full Zed color-token vocabulary are not represented. Expanded/collapsed folder variants and chevron mappings are not fully represented by the current icon model.
-- LSP hover, definition/reference navigation, rename, formatting and code actions remain outside the current protocol UI. Completion is requested with Control-Space; snippet completions remain unsupported.
+- LSP hover, definition/reference navigation, rename, formatting and code actions remain outside the current protocol UI. Completion opens after typing a member-access dot, or can be requested with Control-Space; snippet completions remain unsupported.
 - npm install scripts are disabled. Extensions requiring those scripts may need a user-installed binary. Native subprocess hooks require a matching manifest `process:exec` capability; no shell command is synthesized by Zircon.
 - Grammar execution and response parsing run off the UI thread. Work is coalesced after 80 ms of editing inactivity, with one request per visible document in flight. It currently starts a worker process and reparses the document, up to 8 MiB, rather than maintaining an incremental parse tree. No latency benchmark is claimed.
 - Wrapping reuses unchanged maps and reshapes changed lines. It still copies the visual-row index after edits and scans document lines on initial layout or width/font changes. This is not Zed's background sum-tree wrap map. Full grapheme/bidi behavior remains incomplete. Lines over 64 KiB retain the existing oversized-line display policy.
 - Remote catalog search needs network access. Download/update requests are explicit user actions. Package compatibility was exercised with Zig, Catppuccin and Catppuccin Icons; not every registry package was downloaded or executed.
+
+Markdown fenced code also wraps long words within the preview, preserves indentation and follows the current editor token colors. This removes the previously reviewed clipping and light-theme token-color defects.
 
 ## Configure a server
 
@@ -77,7 +79,7 @@ The opt-in `verify-zed-extensions` target uses disposable files/preferences and 
   -Dzed-output=/tmp/zircon-zed-native-new
 ```
 
-The journey verifies actual grammar spans, ZLS and Pyright initialization/completions, ZLS completion acceptance and undo, highlight refresh after edits, theme/icon application, wrapped rendering, disabling Zig, official catalog results, and an Install button downloading another theme. It uses hidden native windows, not a browser mockup. Screenshots are under [extensions evidence](reviews/extensions/evidence/). Unit tests also exercise every bundled grammar query, archive traversal rejection, upgrade rollback, PNG deduplication and incremental wrap mappings. These establish behavior, not universal package compatibility or foreground IME/VoiceOver acceptance.
+The journey verifies actual grammar spans, ZLS and Pyright initialization/completions, automatic ZLS completion on typing a dot, completion acceptance and undo, highlight refresh after edits, theme/icon application, wrapped rendering, disabling Zig, official catalog results, and an Install button downloading another theme. It uses hidden native windows, not a browser mockup. Screenshots are under [extensions evidence](reviews/extensions/evidence/). Unit tests also exercise every bundled grammar query, archive traversal rejection, upgrade rollback, PNG deduplication and incremental wrap mappings. These establish behavior, not universal package compatibility or foreground IME/VoiceOver acceptance.
 
 ## Sources inspected
 

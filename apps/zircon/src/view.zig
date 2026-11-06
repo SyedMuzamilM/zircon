@@ -150,7 +150,7 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.overlay == .open_project) return @import("views/open_project.zig").render(self, b);
     const colors = self.colors;
     const fields = self.fields.?;
-    const width = if (self.overlay == .palette or self.overlay == .quick_open) @min(@as(f32, 560), @max(@as(f32, 300), b.viewport().width * 0.4)) else @min(@as(f32, 580), @max(@as(f32, 260), b.viewport().width - 48));
+    const width = @min(if (self.overlay == .palette or self.overlay == .quick_open) @as(f32, 560) else 580, @max(0, b.viewport().width - 48));
     var children: std.ArrayList(ui.Element) = .empty;
     const title: []const u8 = switch (self.overlay) {
         .open_project => unreachable,

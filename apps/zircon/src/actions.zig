@@ -293,7 +293,18 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         self.status_is_error = false;
         if (self.git.repository) try @import("services/git.zig").start(self, cx, .refresh);
     }
+    const changed = outcome.change != null;
     try applyOutcome(self, cx, selected.id, pane, &outcome);
+    if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
+    const typed: []const u8 = switch (e.data) {
+        .text => |bytes| bytes,
+        .edit => |edit| if (edit.composing) "" else edit.text,
+        else => "",
+    };
+    if (changed and typed.len == 1 and typed[0] == '.') @import("services/language.zig").request(self, cx) catch |err| switch (err) {
+        error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
+        else => try self.reportError(err),
+    };
     if (outcome.handled) cx.notify();
     return outcome.handled;
 }

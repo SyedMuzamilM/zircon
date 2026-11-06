@@ -257,3 +257,78 @@ test "breadcrumb returns focus to the pane that supplied its document" {
     try app.update(owner, Call.primary, .{});
     try t.expect(try app.read(owner, Call.focused, .{}));
 }
+
+test "language install suggestions translate suffixes and exact filenames into catalog terms" {
+    try t.expectEqualStrings("elixir", zircon.languageSuggestion("src/router.ex"));
+    try t.expectEqualStrings("terraform", zircon.languageSuggestion("infra/main.tf"));
+    try t.expectEqualStrings("csharp", zircon.languageSuggestion("src/App.CS"));
+    try t.expectEqualStrings("dockerfile", zircon.languageSuggestion("project/Dockerfile"));
+    try t.expectEqualStrings("ruby", zircon.languageSuggestion("project/Gemfile"));
+    try t.expectEqualStrings("zig", zircon.languageSuggestion("build.zig.zon"));
+    try t.expectEqualStrings("yaml", zircon.languageSuggestion(".github/workflows/build.yml"));
+    try t.expectEqualStrings("unknownlanguage", zircon.languageSuggestion("file.unknownlanguage"));
+    try t.expectEqualStrings("customfilename", zircon.languageSuggestion("customfilename"));
+}
+
+test "small windows keep editor canvases above the status bar" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.command, .{.new_file});
+    for ([_]ui.Size{ .{ .width = 700, .height = 650 }, .{ .width = 700, .height = 400 } }) |size| {
+        try app.dispatch(h, .{ .resize = size });
+        _ = try app.step(0);
+        const status = try bounds(&app, h, "status");
+        const primary = try bounds(&app, h, "primary-editor");
+        try t.expect(primary.y + primary.height <= status.y + 0.1);
+    }
+}
+
+test "narrow command palette gives long commands room and stays within the window" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.dispatch(h, .{ .resize = .{ .width = 700, .height = 650 } });
+    try app.update(owner, Ops.command, .{.palette});
+    _ = try app.step(0);
+    const dialog = try bounds(&app, h, "dialog");
+    try t.expect(dialog.x >= 24 and dialog.x + dialog.width <= 676);
+    var found = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.startsWith(u8, item.text, "Extensions: install language support")) {
+        found = true;
+        try t.expect(item.rect.x + item.rect.width < dialog.x + dialog.width - 10);
+    };
+    try t.expect(found);
+}
+
+test "only the focused split paints the active line and focus moves with a click" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.command, .{.new_file});
+    try app.update(owner, Ops.command, .{.split_right});
+    _ = try app.step(0);
+    const Read = struct {
+        fn activeLine(self: *const zircon.Shell) ui.Color {
+            return self.editor_options.theme.active_line;
+        }
+    };
+    const color = try app.read(owner, Read.activeLine, .{});
+    const primary = try bounds(&app, h, "primary-editor");
+    const secondary = try bounds(&app, h, "secondary-editor");
+    for ([_]ui.Rect{ secondary, primary }) |focused| {
+        const p: ui.Point = .{ .x = focused.x + focused.width / 2, .y = focused.y + 10 };
+        try app.dispatch(h, .{ .pointer_down = .{ .position = p } });
+        try app.dispatch(h, .{ .pointer_up = .{ .position = p } });
+        _ = try app.step(0);
+        var found = false;
+        for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.x >= primary.x and item.rect.y >= primary.y and item.rect.width > 100 and item.rect.height < 30 and std.meta.eql(item.color, color)) {
+            found = true;
+            try t.expect(item.rect.x >= focused.x and item.rect.x + item.rect.width <= focused.x + focused.width + 0.1);
+        };
+        try t.expect(found);
+    }
+}

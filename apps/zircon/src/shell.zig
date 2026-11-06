@@ -253,7 +253,7 @@ pub const Shell = struct {
         @import("services/extensions.zig").applyLanguage(self, state, path);
     }
     pub fn previewColors(self: *const Shell) @import("views/markdown.zig").Colors {
-        return .{ .background = self.colors.document, .text = self.colors.text, .muted = self.colors.muted, .accent = self.colors.accent, .code = self.colors.sidebar, .border = self.colors.line };
+        return .{ .background = self.colors.document, .text = self.colors.text, .muted = self.colors.muted, .accent = self.colors.accent, .code = self.colors.sidebar, .border = self.colors.line, .tokens = self.editor_options.theme.tokens };
     }
     pub fn openPath(self: *Shell, path: []const u8) !void {
         try actions.openPath(self, path);

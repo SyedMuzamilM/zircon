@@ -11,3 +11,5 @@ pub const SettingsPatch = @import("settings/store.zig").Patch;
 pub const SettingsView = @import("settings/view.zig").View;
 
 pub const refreshExtensions = @import("services/extensions.zig").refresh;
+
+pub const languageSuggestion = @import("language_suggestions.zig").query;
