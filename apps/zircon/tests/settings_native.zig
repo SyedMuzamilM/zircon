@@ -85,6 +85,14 @@ test "settings opens across a synchronous native workspace blur notification" {
     const clicked_child = try app.read(owner, Ops.child, .{});
     _ = try app.window(clicked_child);
     try t.expect(!std.meta.eql(clicked_child, child));
+    const entered = objc.send(objc.Id, objc.class("NSEvent"), "enterExitEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:trackingNumber:userData:", .{ @as(usize, 8), native_point, @as(usize, 0), native.now(), number, @as(objc.Id, null), @as(isize, 0), @as(isize, 0), @as(?*anyopaque, null) });
+    objc.send(void, view, "mouseEntered:", .{entered});
+    _ = try app.step(3.1);
+    try t.expect((try app.window(main)).frames.committed.hovered_node != null);
+    objc.send(void, view, "mouseExited:", .{@as(objc.Id, null)});
+    try native.pump(0);
+    _ = try app.step(3.2);
+    try t.expect((try app.window(main)).frames.committed.hovered_node == null);
     try app.closeWindow(clicked_child);
     _ = try app.step(4);
     objc.send(void, view, "windowDidBecomeKey:", .{@as(objc.Id, null)});

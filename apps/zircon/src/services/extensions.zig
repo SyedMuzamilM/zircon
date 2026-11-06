@@ -29,6 +29,10 @@ pub fn applyTheme(self: *Shell, id: []const u8) void {
     inline for (.{ "document", "chrome", "sidebar", "panel", "line", "text", "muted", "accent", "selected", "warning", "primary" }) |name| @field(self.colors, name) = color(@field(contribution.colors, name));
     self.colors.tab_bar = self.colors.sidebar;
     self.colors.hover = self.colors.selected;
+    self.colors.element = self.colors.chrome;
+    self.colors.border_subtle = self.colors.line;
+    self.colors.primary_hover = self.colors.selected;
+    self.colors.on_primary = self.colors.text;
     const palette: editor.Theme = .{ .background = color(contribution.colors.document), .foreground = color(contribution.colors.text), .active_line = color(contribution.colors.chrome), .selection = color(contribution.colors.selected), .inactive_selection = color(contribution.colors.panel), .caret = color(contribution.colors.accent), .line_number = color(contribution.colors.muted), .active_number = color(contribution.colors.text), .scrollbar = color(contribution.colors.line), .tokens = .{ color(contribution.syntax.plain), color(contribution.syntax.keyword), color(contribution.syntax.string), color(contribution.syntax.number), color(contribution.syntax.comment), color(contribution.syntax.punctuation), color(contribution.syntax.builtin) } };
     self.editor_options.theme = palette;
     for (self.tabs.items) |*tab| tab.editor.theme = palette;

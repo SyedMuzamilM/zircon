@@ -24,6 +24,7 @@ pub const Shell = struct {
     active_pane: enum { primary, secondary } = .primary,
     sidebar_visible: bool = true,
     sidebar_width: f32 = 250,
+    git_sidebar_width: f32 = 320,
     menu_open: bool = false,
     split_ratio: f32 = 0.5,
     tree: std.ArrayList(TreeRow) = .empty,
@@ -182,7 +183,15 @@ pub const Shell = struct {
             pane.editor.synchronize(snapshot);
         }
         self.editor_options = .{ .font_size = values.font_size, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        try self.styleInputs(cx);
         cx.notify();
+    }
+    pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
+        const appearance = @import("views/components.zig").inputAppearance(self.colors);
+        if (self.fields) |fields| inline for (.{ "query", "project_query", "replacement", "path", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
+    }
+    pub fn panelWidth(self: *const Shell) f32 {
+        return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;
     }
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
         const options = self.editor_options;
@@ -294,17 +303,10 @@ pub const Shell = struct {
         @import("services/git.zig").start(self, cx, .{ .history = oid }) catch |err| try self.reportError(err);
         cx.notify();
     }
-    pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), which: u8) void {
+    pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
-        const git_view = @import("views/git.zig");
-        if (which == 0) {
-            const count = if (self.left_panel == .git_history) self.git.commits.len else if (self.git.status) |status| status.entries.len else 0;
-            const row_height = if (self.left_panel == .git_history) git_view.history_row_height else git_view.change_row_height;
-            self.git.sidebar_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(count)) * row_height, e.bounds.height);
-        } else {
-            const count = if (self.git.diff) |diff| git_view.diffRowCount(diff) else 0;
-            self.git.diff_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(count)) * git_view.diff_row_height, e.bounds.height);
-        }
+        const height = if (self.git.diff) |diff| @import("views/git_diff.zig").contentHeight(diff, self.editor_options.font_size + 8) else 0;
+        self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
         cx.notify();
     }

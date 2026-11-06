@@ -326,36 +326,66 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
     defer t.allocator.free(root);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 1;\n" });
+    try tmp.dir.createDir(t.io, "src", .default_dir);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "src/helper.zig", .data = "pub const enabled = false;\n" });
     try command(root, &.{ "init", "-b", "main" });
     try command(root, &.{ "config", "user.email", "fixture@zircon.invalid" });
     try command(root, &.{ "config", "user.name", "Zircon fixture" });
-    try command(root, &.{ "add", "main.zig" });
+    try command(root, &.{ "add", "main.zig", "src/helper.zig" });
     try command(root, &.{ "commit", "-m", "Initial" });
     try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 2;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "src/helper.zig", .data = "pub const enabled = true;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "src/notes.md", .data = "# Work in progress\n" });
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
     const h = try open(&app, root, "main.zig");
     const owner = try app.windowEntity(zircon.Shell, h);
     try send(&app, h, .git_changes);
     try settle(&app);
+    try click(&app, h, "View diff");
+    try settle(&app);
+    const AllChanges = struct {
+        fn visible(self: *const zircon.Shell) bool {
+            return self.git.selected_path.len == 0 and self.git.diff != null and self.git.diff.?.hunks.len == 3;
+        }
+    };
+    try t.expect(try app.read(owner, AllChanges.visible, .{}));
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-all.png");
     try app.update(owner, Ops.gitFile, .{});
     try settle(&app);
     var numbered = false;
     var addition = false;
     for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .text) {
         if (std.mem.eql(u8, node.kind.text, "1")) numbered = true;
-        if (std.mem.eql(u8, node.kind.text, "const value = 2;")) addition = true;
+
         try t.expect(!std.mem.eql(u8, node.kind.text, "+const value = 2;"));
     };
+    for ((try app.window(h)).frames.committed.scene.items) |item| {
+        if (item.kind == .text and std.mem.eql(u8, item.text, "2")) addition = true;
+    }
     try t.expect(numbered and addition);
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-changes.png");
-    try click(&app, h, "Stage file");
+    try click(&app, h, "src");
+    _ = try app.step(0);
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button) try t.expect(!std.mem.eql(u8, node.kind.button.label, "src/helper.zig"));
+    try click(&app, h, "src");
+    _ = try app.step(0);
+    try click(&app, h, "Stage main.zig");
     try settle(&app);
     try t.expect(try app.read(owner, Ops.staged, .{}));
     const diff = try git(root, &.{ "diff", "--cached" });
     defer t.allocator.free(diff);
     try t.expect(std.mem.indexOf(u8, diff, "+const value = 2;") != null);
-    try click(&app, h, "Unstage file");
+    const Updated = struct {
+        fn empty(self: *const zircon.Shell) bool {
+            return if (self.git.diff) |value| value.text.len == 0 else false;
+        }
+    };
+    try t.expect(try app.read(owner, Updated.empty, .{}));
+    try click(&app, h, "Staged");
+    try settle(&app);
+    try t.expect(!try app.read(owner, Updated.empty, .{}));
+    try click(&app, h, "Unstage main.zig");
     try settle(&app);
     try t.expect(!try app.read(owner, Ops.staged, .{}));
     try click(&app, h, "Stage file");

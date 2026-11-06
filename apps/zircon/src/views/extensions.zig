@@ -35,13 +35,13 @@ fn label(b: *ui.Ui, bytes: []const u8, color: ui.Color, size: f32) !ui.Element {
     return b.styled(try b.text(bytes), .{ .text = .{ .size = size, .color = color } });
 }
 fn command(b: *ui.Ui, value: @import("../commands.zig").Command, text: []const u8, c: @import("../theme.zig").Palette) !ui.Element {
-    return b.button(.{ .label = text, .on_click = try b.onClickWith(value, Shell.onCommand), .style = buttonStyle(c) });
+    return @import("components.zig").actionButton(b, c, value, text, false);
 }
 fn action(b: *ui.Ui, value: Payload, text: []const u8, c: @import("../theme.zig").Palette) !ui.Element {
     return b.button(.{ .label = text, .on_click = try b.onClickWith(value, perform), .style = buttonStyle(c) });
 }
 fn buttonStyle(c: @import("../theme.zig").Palette) ui.Style {
-    return .{ .height = .{ .px = 30 }, .padding = .{ .left = 12, .right = 12, .top = 7 }, .radius = 4, .background = c.selected, .text = .{ .size = 12, .color = c.text } };
+    return @import("components.zig").buttonStyle(c, false);
 }
 fn perform(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), value: Payload) !void {
     if (self.extension_snapshot == null or self.extensions == null) return;

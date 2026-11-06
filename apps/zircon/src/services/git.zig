@@ -7,7 +7,7 @@ const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
 const Shell = @import("../shell.zig").Shell;
 const a = std.heap.page_allocator;
-pub const Operation = union(enum) { refresh, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: usize };
+pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: usize };
 pub const Model = struct {
     active_document: ?workspace.DocumentId = null,
     status: ?git.Status = null,
@@ -18,11 +18,15 @@ pub const Model = struct {
     busy: bool = false,
     repository: bool = false,
     generation: u64 = 0,
+    status_generation: u64 = 0,
     needs_refresh: bool = false,
     diff_scroll: ui.controls.Scroll = .{},
     sidebar_scroll: ui.controls.Scroll = .{},
+    tree: @import("../models/git_tree.zig").Tree = .{},
+    staged_diff: bool = false,
     error_text: []u8 = &.{},
     pub fn deinit(self: *Model) void {
+        self.tree.deinit(a);
         if (self.status) |*value| value.deinit();
         git.deinitHistory(a, self.commits);
         if (self.diff) |*value| value.deinit();
@@ -64,6 +68,7 @@ const Job = struct {
     snapshot: ?text.Snapshot = null,
     document: ?workspace.DocumentId = null,
     path: ?[]u8 = null,
+    comparison: ?struct { path: ?[]u8, staged: bool } = null,
     pub fn run(self: *Job, cancel: *ui.tasks.Cancellation) !*Box {
         try cancel.check();
         var result: Result = .{ .generation = self.generation, .document = self.document, .revision = if (self.snapshot) |s| s.revision() else 0 };
@@ -81,6 +86,7 @@ const Job = struct {
     fn perform(self: *Job, repo: *git.Repository, result: *Result) !void {
         switch (self.operation) {
             .refresh => {},
+            .all_diff => result.diff = try repo.diff(a, null, false),
             .diff => |request| result.diff = try repo.diff(a, request.path, request.staged),
             .history => |oid| result.diff = try repo.commitDiff(a, oid, null),
             .stage => |path| try repo.stage(&.{path}),
@@ -104,6 +110,7 @@ const Job = struct {
                 result.blame = try repo.blame(a, path, line, bytes);
             },
         }
+        if (self.comparison) |comparison| result.diff = try repo.diff(a, comparison.path, comparison.staged);
         result.status = try repo.status(a);
         result.commits = try repo.history(a, 100);
         result.commits_ready = true;
@@ -123,6 +130,7 @@ const Job = struct {
     }
     pub fn deinit(self: *Job, _: std.mem.Allocator) void {
         a.free(self.root);
+        if (self.comparison) |comparison| if (comparison.path) |path| a.free(path);
         if (self.path) |path| a.free(path);
         if (self.snapshot) |*snapshot| snapshot.deinit();
         switch (self.operation) {
@@ -158,8 +166,15 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
         job.document = id;
         if (record.path) |path| job.path = try a.dupe(u8, path);
     }
+    const mutation = switch (operation) {
+        .stage, .unstage, .stage_all, .unstage_all, .commit => true,
+        else => false,
+    };
+    if (mutation and self.panel == .git_diff and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff };
     _ = try cx.spawn(Job, job, complete);
     self.git.busy = true;
+    if (operation == .diff) self.git.staged_diff = operation.diff.staged;
+    if (operation == .all_diff) self.git.staged_diff = false;
     self.git.generation = job.generation;
     self.git.active_document = job.document;
     cx.notify();
@@ -178,6 +193,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     if (value.status) |status| {
         if (self.git.status) |*old| old.deinit();
         self.git.status = status;
+        self.git.status_generation = value.generation;
         value.status = null;
     }
     if (value.commits_ready) {

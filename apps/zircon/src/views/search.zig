@@ -21,7 +21,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                 var path = group.path() orelse group.title;
                 if (std.mem.startsWith(u8, path, self.workspace.root_path)) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
                 const header = try std.fmt.allocPrint(b.allocator(), "{s}    {d} matches{s}", .{ path, group.matches.len, if (group.source == .buffer) " · open buffer" else "" });
-                try rows.append(b.allocator(), try b.key(.{ .number = @intCast(group_index) }, try b.button(.{ .label = header, .on_click = try b.onClickWith(Target{ .group = @intCast(group_index), .match = 0 }, Shell.onSearchResult), .style = .{ .height = .{ .px = 42 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 12 }, .background = c.panel, .text = .{ .size = 13, .color = c.text } } })));
+                try rows.append(b.allocator(), try b.key(.{ .number = @intCast(group_index) }, try b.button(.{ .label = header, .on_click = try b.onClickWith(Target{ .group = @intCast(group_index), .match = 0 }, Shell.onSearchResult), .style = .{ .height = .{ .px = 42 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 12 }, .background = c.panel, .hover_background = c.hover, .text = .{ .size = 13, .color = c.text } } })));
             }
             top += 42;
             for (group.excerpts) |excerpt| {
@@ -39,7 +39,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                             break;
                         };
                         const text = try std.fmt.allocPrint(b.allocator(), "{d: >5}   {s}", .{ row + 1, std.mem.trimEnd(u8, line, "\r") });
-                        try rows.append(b.allocator(), try b.button(.{ .label = text, .on_click = try b.onClickWith(Target{ .group = @intCast(group_index), .match = @intCast(match_index) }, Shell.onSearchResult), .style = .{ .height = .{ .px = height }, .flex_shrink = 0, .padding = .{ .left = 8, .top = 3 }, .background = if (matched) c.selected else c.document, .text = .{ .size = 13, .mono = true, .color = if (matched) c.text else c.muted }, .overflow = .hidden } }));
+                        try rows.append(b.allocator(), try b.button(.{ .label = text, .on_click = try b.onClickWith(Target{ .group = @intCast(group_index), .match = @intCast(match_index) }, Shell.onSearchResult), .style = .{ .height = .{ .px = height }, .flex_shrink = 0, .padding = .{ .left = 8, .top = 3 }, .background = if (matched) c.selected else c.document, .hover_background = c.hover, .text = .{ .size = 13, .mono = true, .color = if (matched) c.text else c.muted }, .overflow = .hidden } }));
                     }
                     top += height;
                     offset += line.len + 1;
@@ -55,5 +55,5 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     return b.column(.{ .flex_grow = 1, .background = c.document, .overflow = .hidden }, content.items);
 }
 fn command(b: *ui.Ui, value: @import("../commands.zig").Command, label: []const u8, c: @import("../theme.zig").Palette) !ui.Element {
-    return b.button(.{ .label = label, .on_click = try b.onClickWith(value, Shell.onCommand), .style = .{ .height = .{ .px = 28 }, .padding = .{ .left = 10, .right = 10, .top = 6 }, .radius = 4, .background = c.selected, .text = .{ .size = 12, .color = c.text } } });
+    return @import("components.zig").actionButton(b, c, value, label, false);
 }

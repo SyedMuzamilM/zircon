@@ -1,6 +1,6 @@
 //! One command catalogue drives shortcuts, toolbar controls and the palette.
 const ui = @import("zircon_ui");
-pub const Command = enum { workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
+pub const Command = enum { workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
     .{ .command = .project_files, .label = "Show project files" },
@@ -9,6 +9,7 @@ pub const commands = [_]Entry{
     .{ .command = .git_changes, .label = "Git: show changes" },
     .{ .command = .git_history, .label = "Git: show history" },
     .{ .command = .git_refresh, .label = "Git: refresh" },
+    .{ .command = .git_diff_all, .label = "Git: view all changes" },
     .{ .command = .extensions, .label = "Open extensions" },
     .{ .command = .project_search, .label = "Search project buffers", .shortcut = "⇧⌘F" },
     .{ .command = .settings, .label = "Open settings", .shortcut = "⌘," },

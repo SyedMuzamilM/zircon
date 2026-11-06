@@ -43,6 +43,43 @@ test "workspace chrome leaves the canvas room and focuses the editor initially" 
     try t.expect(canvas and open_button);
 }
 
+test "chrome controls fit inside their bars without clipped hover targets" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try open(&app);
+    _ = try app.step(0);
+    const frame = &(try app.window(handle)).frames.committed;
+    for (frame.nodes.items, 0..) |node, i| if (node.kind == .button and inScope(frame, @intCast(i), "status")) {
+        const bounds = frame.bounds[i];
+        try t.expect(bounds.y >= 676 and bounds.y + bounds.height <= 700);
+    };
+}
+test "utility tabs keep their close and split controls visible in narrow windows" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try open(&app);
+    const owner = try app.windowEntity(zircon.Shell, handle);
+    try app.update(owner, Operations.command, .{.git_diff_all});
+    try app.dispatch(handle, .{ .resize = .{ .width = 600, .height = 500 } });
+    _ = try app.step(0);
+    const frame = &(try app.window(handle)).frames.committed;
+    for (frame.nodes.items, 0..) |node, i| if (node.kind == .button and inScope(frame, @intCast(i), "tabs")) {
+        const bounds = frame.bounds[i];
+        try t.expect(bounds.x + bounds.width <= 600);
+    };
+}
+test "long status messages leave settings and panel controls inside the window" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try open(&app);
+    const owner = try app.windowEntity(zircon.Shell, handle);
+    try app.update(owner, Operations.longStatus, .{});
+    try app.dispatch(handle, .{ .resize = .{ .width = 400, .height = 400 } });
+    _ = try app.step(0);
+    const frame = &(try app.window(handle)).frames.committed;
+    for (frame.nodes.items, 0..) |node, i| if (node.kind == .button and inScope(frame, @intCast(i), "status")) try t.expect(frame.bounds[i].x + frame.bounds[i].width <= 400);
+}
+
 test "palette uses an editable focused query and Escape restores canvas focus" {
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
@@ -81,6 +118,10 @@ test "compact workspace hides sidebar and still arranges an editable canvas" {
 }
 
 const Operations = struct {
+    fn longStatus(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        try self.setStatus(try self.allocator.dupe(u8, "A long repository or language server message should never hide the Settings button or any panel selector."));
+        cx.notify();
+    }
     fn command(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), which: zircon.Command) !void {
         var click: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onCommand(&click, cx, which);

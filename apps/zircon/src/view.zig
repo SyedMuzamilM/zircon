@@ -17,7 +17,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const colors = self.colors;
     const viewport = b.viewport();
     const sidebar_visible = self.sidebar_visible and viewport.width >= 600;
-    const sidebar_width = if (sidebar_visible) @min(self.sidebar_width, @max(140, viewport.width * 0.4)) else 0;
+    const sidebar_width = if (sidebar_visible) @min(self.panelWidth(), @max(140, viewport.width * 0.4)) else 0;
     const editor_width = @max(100, viewport.width - sidebar_width - if (sidebar_visible) @as(f32, 5) else 0);
     var body_children: std.ArrayList(ui.Element) = .empty;
     if (sidebar_visible) {
@@ -57,7 +57,7 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             .image => try @import("views/image.zig").render(self, b),
             .extensions => try @import("views/extensions.zig").render(self, b),
             .search => try @import("views/search.zig").render(self, b),
-            .git_diff => try @import("views/git.zig").diffPane(self, b),
+            .git_diff => try @import("views/git_diff.zig").render(self, b),
             else => unreachable,
         };
         return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, &.{ try tabs(self, b, width), panel }));
@@ -252,13 +252,13 @@ fn label(b: *ui.Ui, _: Palette, value: []const u8, color: ui.Color, size: f32) !
     return b.styled(try b.text(value), .{ .text = .{ .size = size, .color = color } });
 }
 pub fn commandButton(b: *ui.Ui, colors: Palette, action: Command, text: []const u8, primary: bool) !ui.Element {
-    return b.button(.{ .label = text, .on_click = try b.onClickWith(action, Shell.onCommand), .style = .{ .height = .{ .px = 28 }, .padding = .{ .left = 10, .right = 10, .top = 6 }, .radius = 4, .background = if (primary) colors.primary else colors.chrome, .text = .{ .size = 12, .color = if (primary) colors.text else colors.muted }, .flex_shrink = 0 } });
+    return @import("views/components.zig").actionButton(b, colors, action, text, primary);
 }
 fn paletteCommand(b: *ui.Ui, colors: Palette, action: Command, text: []const u8, selected: bool) !ui.Element {
     return b.key(.{ .number = @backingInt(action) }, try b.button(.{ .label = text, .on_click = try b.onClickWith(action, Shell.onCommand), .style = resultStyle(colors, selected) }));
 }
 fn resultStyle(colors: Palette, selected: bool) ui.Style {
-    return .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 10, .right = 10, .top = 7 }, .radius = 4, .background = if (selected) colors.selected else colors.panel, .text = .{ .size = 12, .color = colors.text }, .overflow = .hidden };
+    return .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 10, .right = 10, .top = 7 }, .radius = 4, .background = if (selected) colors.selected else colors.panel, .hover_background = colors.hover, .text = .{ .size = 12, .color = colors.text }, .overflow = .hidden };
 }
 fn footer(b: *ui.Ui, children: []const ui.Element) !ui.Element {
     return b.row(.{ .height = .{ .px = 30 }, .gap = 8, .justify_content = .end }, children);

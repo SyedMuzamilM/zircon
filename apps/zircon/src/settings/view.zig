@@ -28,11 +28,25 @@ pub const View = struct {
         self.window = window;
         var input = try ui.controls.TextInput.init(self.allocator, "");
         input.placeholder = "Search settings…";
+        input.leading_icon = .search;
         self.query = cx.createChild(ui.controls.TextInput, input) catch |err| {
             input.deinit(input.allocator);
             return err;
         };
         _ = try cx.observe(self.query.?, onQuery);
+        _ = try cx.observe(self.settings, onSettings);
+        try self.onSettings(cx, self.settings);
+        cx.notify();
+    }
+    fn onSettings(self: *View, cx: *ui.Context(View), settings: ui.Entity(model.Settings)) !void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        var values: model.Values = undefined;
+        try cx.read(settings, model.Settings.copy, .{ arena.allocator(), &values });
+        var snapshot: ?ext.Snapshot = null;
+        if (self.workspace) |workspace| try cx.read(workspace, Shell.copyExtensions, .{&snapshot});
+        defer if (snapshot) |*value| value.deinit();
+        if (self.query) |query| try cx.update(query, ui.controls.TextInput.setAppearance, .{v.inputAppearance(palette(values, snapshot))});
         cx.notify();
     }
     fn onQuery(self: *View, cx: *ui.Context(View), _: ui.Entity(ui.controls.TextInput)) void {
@@ -46,11 +60,7 @@ pub const View = struct {
         var generation: ?ext.Snapshot = null;
         if (self.workspace) |handle| try b.watch(handle, Shell.copyExtensions, .{&generation});
         defer if (generation) |*value| value.deinit();
-        var c: v.Palette = if (std.mem.eql(u8, values.theme, "zircon.light")) v.Palette.light else .{};
-        if (generation) |snapshot| if (snapshot.resolveTheme(values.theme)) |theme| {
-            inline for (.{ "document", "chrome", "sidebar", "panel", "line", "text", "muted", "accent", "selected", "warning", "primary" }) |name| @field(c, name) = @import("../services/extensions.zig").color(@field(theme.colors, name));
-            c.hover = c.selected;
-        };
+        const c = palette(values, generation);
         var query: []u8 = &.{};
         if (self.query) |handle| try b.watch(handle, ui.controls.TextInput.copy, .{ b.allocator(), &query });
         var path: ?[]u8 = null;
@@ -58,8 +68,8 @@ pub const View = struct {
         var nav: std.ArrayList(ui.Element) = .empty;
         try nav.append(b.allocator(), try b.dragRegion(try b.div(.{ .height = .{ .px = 36 }, .flex_shrink = 0 }, &.{})));
         if (self.query) |handle| {
-            const search = try b.styled(try b.key(.{ .string = "settings-search" }, try b.view(handle)), .{ .flex_grow = 1, .height = .{ .px = 30 }, .min_width = .{ .px = 0 } });
-            try nav.append(b.allocator(), try b.row(.{ .height = .{ .px = 34 }, .flex_shrink = 0, .align_items = .center, .gap = 4, .padding = .{ .left = 8, .right = 4 }, .radius = 4, .background = c.document }, &.{ try v.icon(b, .search, c.muted, 15), try b.autofocus(search) }));
+            const search = try b.styled(try b.key(.{ .string = "settings-search" }, try b.view(handle)), .{ .height = .{ .px = 30 }, .flex_shrink = 0, .min_width = .{ .px = 0 } });
+            try nav.append(b.allocator(), try b.autofocus(search));
         }
         try nav.append(b.allocator(), try b.div(.{ .height = .{ .px = 7 }, .flex_shrink = 0 }, &.{}));
         inline for (std.meta.tags(Category)) |category| try nav.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ try v.icon(b, if (self.category == category) .chevron_down else .chevron_right, c.muted, 14), try v.text(b, categoryName(category), c.text, 13) }, .on_click = try b.onClickWith(category, select), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 9, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .radius = 3, .background = if (self.category == category) c.hover else null, .hover_background = c.hover } }));
@@ -219,7 +229,9 @@ fn rowSearch(row: Row) []const u8 {
     };
 }
 fn choiceStyle(c: v.Palette) ui.Style {
-    return .{ .height = .{ .px = 28 }, .min_width = .{ .px = 32 }, .padding = .{ .left = 10, .right = 10, .top = 5 }, .radius = 3, .background = c.sidebar, .hover_background = c.hover, .text = .{ .size = 13, .color = c.text }, .flex_shrink = 0 };
+    var style = v.buttonStyle(c, false);
+    style.min_width = .{ .px = 32 };
+    return style;
 }
 fn changeButton(b: *ui.Ui, c: v.Palette, change: Change, label: []const u8) !ui.Element {
     return b.button(.{ .label = label, .on_click = try b.onClickWith(change, View.change), .style = choiceStyle(c) });
@@ -318,3 +330,15 @@ const Switch = struct {
         try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + (if (self.enabled) @as(f32, 15) else 3), .y = bounds.y + 3, .width = 12, .height = 12 }, .radius = 6, .color = if (self.enabled) self.colors.text else self.colors.muted });
     }
 };
+
+fn palette(values: model.Values, generation: ?ext.Snapshot) v.Palette {
+    var c: v.Palette = if (std.mem.eql(u8, values.theme, "zircon.light")) v.Palette.light else .{};
+    if (generation) |snapshot| if (snapshot.resolveTheme(values.theme)) |theme| {
+        inline for (.{ "document", "chrome", "sidebar", "panel", "line", "text", "muted", "accent", "selected", "warning", "primary" }) |name| @field(c, name) = @import("../services/extensions.zig").color(@field(theme.colors, name));
+        c.hover = c.selected;
+        c.element = c.chrome;
+        c.primary_hover = c.selected;
+        c.on_primary = c.text;
+    };
+    return c;
+}

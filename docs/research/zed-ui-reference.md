@@ -16,3 +16,15 @@ The implementation uses original small outline icons drawn through Zircon UI. No
 ## Settings opening regression
 
 `zig build test-settings-native` reproduced `BorrowConflict` when AppKit's synchronous `windowDidResignKey` callback arrived while the workspace action held an entity update. The platform callback previously attempted a second dispatch into that entity. Native focus notifications now drain at the next application step, after the borrow ends, preserving a blur before a subsequent focus. Child windows center above their actual parent. The native regression also opens settings by mouse and physical `Cmd+,`, closes it, and reopens it.
+
+## Git panel and control polish
+
+The same pinned revision's [Git panel](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/git_ui/src/git_panel.rs) separates Changes/History tabs, section headers, directory entries, file staging checkboxes, branch context and the commit editor. `render_list_header`, `render_status_entry`, `render_directory_entry` and `render_commit_history` supplied the structure for Zircon's follow-up pass. The user's Git screenshots remain the visual reference.
+
+Zircon now separates `models/git_tree.zig`, `views/git_sidebar.zig` and `views/git_diff.zig`. The model groups and sorts real status entries, retains collapsed directory identities, and leaves Git mutations to the service. Button payloads carry the installed status generation and row identity, so a retired frame cannot stage a different path after a status replacement. Diff code and icons borrow only frame-owned bytes during painting.
+
+Shared controls use 28 px action buttons, 22 px icon targets inside the 24 px status bar, centered labels, theme-aware text fields and reusable outline icon geometry. The One Dark semantic created/deleted/modified colors are `#a1c181`, `#d07277` and `#dec184`, with hover `#363c46`. Light themes resolve their own contrasting colors. These are reference theme roles, without importing Zed implementation code or artwork.
+
+Native hover tracking now handles entry and exit. AppKit tracking events supply location/modifiers but reject click-count queries, so they use a separate conversion from button events. The native regression constructs a real mouse-entry event and sends mouse exit through the view. Portable regressions reproduce the previous overflowing status targets, hidden settings control under long messages, and trailing tab controls outside a narrow window.
+
+The Git package uses bounded `git diff --no-index` queries for untracked files, treating exit 1 as a successful comparison. A real repository test covers an untracked Unicode/newline filename. UI journeys verify folder collapse, checkbox staging, comparison refresh, multi-file patches and actual commits. Full Zed Git parity, hunk staging and multiline diff lexical context remain outside this pass.

@@ -12,6 +12,10 @@ pub const metrics = struct {
     pub const file_header: f32 = 32;
     pub const tree_row: f32 = 24;
     pub const divider: f32 = 5;
+    pub const control: f32 = 28;
+    pub const icon_control: f32 = 22;
+    pub const small_gap: f32 = 4;
+    pub const inset: f32 = 12;
 };
 pub fn text(b: *ui.Ui, bytes: []const u8, color: ui.Color, size: f32) !ui.Element {
     return b.styled(try b.text(bytes), .{ .text = .{ .size = size, .color = color }, .overflow = .hidden, .flex_shrink = 0 });
@@ -20,7 +24,37 @@ pub fn icon(b: *ui.Ui, name: Icon, color: ui.Color, size: f32) !ui.Element {
     return ui.controls.icons.element(b, name, color, size);
 }
 pub fn iconButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, name: Icon, selected: bool) !ui.Element {
-    return b.button(.{ .label = label, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(action, Shell.onCommand), .style = .{ .width = .{ .px = 28 }, .height = .{ .px = 26 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = 3, .background = if (selected) c.selected else null, .hover_background = if (selected) c.selected else c.hover } });
+    return b.button(.{ .label = label, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(action, Shell.onCommand), .style = iconButtonStyle(c, selected) });
+}
+pub fn iconButtonStyle(c: Palette, selected: bool) ui.Style {
+    return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = 3, .background = if (selected) c.selected else null, .hover_background = c.hover };
+}
+pub fn buttonStyle(c: Palette, primary: bool) ui.Style {
+    return .{ .direction = .row, .height = .{ .px = metrics.control }, .gap = 6, .align_items = .center, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = 3, .background = if (primary) c.primary else c.element, .hover_background = if (primary) c.primary_hover else c.hover, .text = .{ .size = 12, .color = if (primary) c.on_primary else c.text }, .flex_shrink = 0 };
+}
+pub fn inputAppearance(c: Palette) ui.controls.TextInput.Appearance {
+    return .{ .background = c.document, .foreground = c.text, .placeholder = c.muted, .selection = c.selected, .caret = c.accent, .focus_border = c.accent };
+}
+pub fn actionButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, primary: bool) !ui.Element {
+    const glyph: ?Icon = switch (action) {
+        .open_path => .folder_open,
+        .new_file, .install_bundled_extension => .plus,
+        .find, .run_project_search, .project_search => .search,
+        .find_next => .arrow_down,
+        .find_previous => .arrow_up,
+        .settings => .settings,
+        .palette => .commands,
+        .extensions, .install_extension => .extension,
+        .split => .split,
+        .dismiss => .close,
+        .back_to_editor => .chevron_left,
+        else => null,
+    };
+    var children: std.ArrayList(ui.Element) = .empty;
+    const color = if (primary) c.on_primary else c.text;
+    if (glyph) |name| try children.append(b.allocator(), try icon(b, name, color, 14));
+    try children.append(b.allocator(), try text(b, label, color, 12));
+    return b.button(.{ .label = label, .children = children.items, .on_click = try b.onClickWith(action, Shell.onCommand), .style = buttonStyle(c, primary) });
 }
 pub fn rule(b: *ui.Ui, c: Palette) !ui.Element {
     return b.div(.{ .height = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{});

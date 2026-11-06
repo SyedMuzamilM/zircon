@@ -26,6 +26,7 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
         };
         self.fields = .{ .query = query, .project_query = project_query, .replacement = replacement, .path = path, .commit = commit };
     }
+    try self.styleInputs(cx);
     try @import("project_index.zig").start(self, cx);
     try @import("services/git.zig").start(self, cx, .refresh);
     try cx.app.watchExternal(cx.owner, Shell.pollLanguage);
@@ -295,6 +296,14 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try @import("services/git.zig").start(self, cx, .refresh);
         },
         .git_refresh => try @import("services/git.zig").start(self, cx, .refresh),
+        .git_diff_all => {
+            std.heap.page_allocator.free(self.git.selected_path);
+            std.heap.page_allocator.free(self.git.selected_commit);
+            self.git.selected_path = &.{};
+            self.git.selected_commit = &.{};
+            self.panel = .git_diff;
+            try @import("services/git.zig").start(self, cx, .all_diff);
+        },
         .git_stage => try @import("services/git.zig").start(self, cx, .{ .stage = self.git.selected_path }),
         .git_unstage => try @import("services/git.zig").start(self, cx, .{ .unstage = self.git.selected_path }),
         .git_stage_all => try @import("services/git.zig").start(self, cx, .stage_all),
@@ -595,8 +604,11 @@ pub fn drag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: 
         .pointer_move => |pointer| {
             if (self.dragging == .none) return;
             const size = try e.windowSize();
-            if (self.dragging == .sidebar) self.sidebar_width = std.math.clamp(pointer.position.x, 140, @min(420, @max(140, size.width - 200))) else {
-                const start = if (self.sidebar_visible) self.sidebar_width + 5 else 0;
+            if (self.dragging == .sidebar) {
+                const width = std.math.clamp(pointer.position.x, 180, @min(480, @max(180, size.width * 0.4)));
+                if (self.left_panel == .project) self.sidebar_width = width else self.git_sidebar_width = width;
+            } else {
+                const start = if (self.sidebar_visible) @min(self.panelWidth(), @max(140, size.width * 0.4)) + 5 else 0;
                 self.split_ratio = std.math.clamp((pointer.position.x - start) / @max(1, size.width - start), 0.2, 0.8);
             }
         },

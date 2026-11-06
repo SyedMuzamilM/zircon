@@ -6,7 +6,7 @@ const Shell = @import("../shell.zig").Shell;
 const v = @import("components.zig");
 pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui.Element {
     const c = self.colors;
-    if (self.left_panel != .project) return @import("git.zig").sidebar(self, b, width, window_height - v.metrics.titlebar - v.metrics.status);
+    if (self.left_panel != .project) return @import("git_sidebar.zig").render(self, b, width, window_height - v.metrics.titlebar - v.metrics.status);
     const header = try b.row(.{ .height = .{ .px = 32 }, .flex_shrink = 0, .align_items = .center, .gap = 7, .padding = .{ .left = 10, .right = 5 } }, &.{ try v.icon(b, .folder_open, c.muted, 16), try b.styled(try v.text(b, std.fs.path.basename(self.workspace.root_path), c.folder, 13), .{ .flex_grow = 1, .text = .{ .size = 13, .color = c.folder }, .overflow = .hidden }), try v.iconButton(b, c, .new_file, "New file", .plus, false) });
     const available = @max(0, window_height - v.metrics.titlebar - v.metrics.status - 32);
     const visible = try ui.controls.visibleRows(self.tree.items.len, v.metrics.tree_row, self.tree_scroll.offset, available, 0);
@@ -39,6 +39,6 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui
         try rows.append(b.allocator(), try b.listen(try b.key(.{ .string = entry.path }, row), .{ .on_input = try b.onInputWith(@as(u32, @intCast(index)), Shell.onTreeDrag) }));
     }
     if (rows.items.len == 0) try rows.append(b.allocator(), try b.styled(try v.text(b, "This folder is empty.", c.muted, 12), .{ .padding = ui.Insets.all(12), .text = .{ .size = 12, .color = c.muted } }));
-    const list = try b.listen(try b.key(.{ .string = "project-files" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = @mod(self.tree_scroll.offset, v.metrics.tree_row), .overflow = .hidden }, rows.items)), .{ .on_input = b.onInput(Shell.onTreeInput) });
+    const list = try b.listen(try b.key(.{ .string = "project-files" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = @max(0, -visible.top), .overflow = .hidden }, rows.items)), .{ .on_input = b.onInput(Shell.onTreeInput) });
     return b.key(.{ .string = "sidebar" }, try b.column(.{ .width = .{ .px = width }, .flex_shrink = 0, .background = c.sidebar, .overflow = .hidden }, &.{ header, list }));
 }
