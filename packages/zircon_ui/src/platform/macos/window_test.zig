@@ -150,7 +150,7 @@ test "native text snapshots convert UTF16 replacements and queue composition unt
     try t.expectEqual(platform.TextRange{ .start = 1, .end = 5 }, log.edit.?.range);
     try t.expectEqualStrings("é", log.edit.?.text);
     try t.expect(!log.edit.?.composing);
-    const unspecified: NativeRange = .{ .location = std.math.maxInt(usize), .length = 0 };
+    const unspecified: NativeRange = .{ .location = @as(usize, std.math.maxInt(isize)), .length = 0 };
     objc.send(void, view, "setMarkedText:selectedRange:replacementRange:", .{ objc.string("に"), NativeRange{ .location = 1, .length = 0 }, unspecified });
     try t.expectEqual(@as(usize, 1), log.count);
     surface.setTextInput(.{ .text = "aé日", .revision = 8, .selection = .{ .start = 3, .end = 3 }, .caret = caret });
@@ -185,7 +185,7 @@ test "native text snapshots convert UTF16 replacements and queue composition unt
     try t.expectEqual(before + 1, log.count);
     try t.expectEqual(@as(u64, 11), log.edit.?.revision);
     surface.setTextInput(null);
-    try t.expectEqual(std.math.maxInt(usize), objc.send(NativeRange, view, "selectedRange", .{}).location);
+    try t.expectEqual(@as(usize, std.math.maxInt(isize)), objc.send(NativeRange, view, "selectedRange", .{}).location);
 }
 
 test "native replacement rejects a UTF16 range splitting an emoji surrogate pair" {
@@ -234,7 +234,7 @@ test "native surrounding text bases preserve global UTF16 and absolute byte coor
     try t.expectEqual(NativeRange{ .location = 101, .length = 2 }, actual);
     const unavailable = objc.send(objc.Id, view, "attributedSubstringForProposedRange:actualRange:", .{ NativeRange{ .location = 99, .length = 2 }, &actual });
     try t.expect(unavailable == null);
-    try t.expectEqual(std.math.maxInt(usize), actual.location);
+    try t.expectEqual(@as(usize, std.math.maxInt(isize)), actual.location);
     _ = objc.send(objc.CGRect, view, "firstRectForCharacterRange:actualRange:", .{ NativeRange{ .location = 103, .length = 0 }, &actual });
     try t.expectEqual(NativeRange{ .location = 103, .length = 0 }, actual);
     objc.send(void, view, "insertText:replacementRange:", .{ objc.string("日"), NativeRange{ .location = 101, .length = 2 } });

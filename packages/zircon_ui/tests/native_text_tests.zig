@@ -3,6 +3,43 @@ const std = @import("std");
 const text = @import("native").text;
 const objc = @import("native").objc;
 const t = std.testing;
+extern "c" fn CTFontCopyPostScriptName(text.CTFontRef) text.CFStringRef;
+test "bundled regular faces resolve without a system fallback" {
+    var autorelease = pool();
+    defer autorelease.deinit();
+    var system = text.TextSystem.init(t.allocator);
+    defer system.deinit();
+    inline for (.{ true, false }) |mono| {
+        const name = CTFontCopyPostScriptName(try system.font(14, mono));
+        defer text.CFRelease(name);
+        const actual = @import("native").objc.fromString(@constCast(name));
+        try t.expectEqualStrings(if (mono) "Lilex-Regular" else "IBMPlexSans", actual);
+    }
+}
+test "ligature preferences change native glyph substitution and invalidate cached lines" {
+    var autorelease = pool();
+    defer autorelease.deinit();
+    var system = text.TextSystem.init(t.allocator);
+    defer system.deinit();
+    const source = "ffi -> => != ===";
+    const before = fingerprint(try system.layout(source, 14, true));
+    system.setTypography(.{ .ligatures = true });
+    const after = fingerprint(try system.layout(source, 14, true));
+    try t.expect(before != after);
+}
+fn fingerprint(layout: *text.Layout) u64 {
+    var value: u64 = 0;
+    const runs = text.CTLineGetGlyphRuns(layout.line);
+    for (0..@intCast(text.CFArrayGetCount(runs))) |index| {
+        const run = text.CFArrayGetValueAtIndex(runs, @intCast(index));
+        for (0..@intCast(text.CTRunGetGlyphCount(run))) |at| {
+            var glyph: u16 = 0;
+            text.CTRunGetGlyphs(run, .{ .location = @intCast(at), .length = 1 }, @ptrCast(&glyph));
+            value = value *% 31 +% glyph;
+        }
+    }
+    return value;
+}
 
 fn pool() objc.Pool {
     return objc.Pool.init();

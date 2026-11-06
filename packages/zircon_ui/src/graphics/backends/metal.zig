@@ -25,6 +25,11 @@ extern "c" fn CGBitmapContextCreate(?*anyopaque, usize, usize, usize, usize, ?CF
 extern "c" fn CGContextRelease(*anyopaque) void;
 extern "c" fn CGContextSetGrayFillColor(*anyopaque, f64, f64) void;
 extern "c" fn CGContextSetShouldAntialias(*anyopaque, bool) void;
+extern "c" fn CGContextSetShouldSmoothFonts(*anyopaque, bool) void;
+extern "c" fn CGContextSetAllowsFontSubpixelPositioning(*anyopaque, bool) void;
+extern "c" fn CGContextSetShouldSubpixelPositionFonts(*anyopaque, bool) void;
+extern "c" fn CGContextSetAllowsFontSubpixelQuantization(*anyopaque, bool) void;
+extern "c" fn CGContextSetShouldSubpixelQuantizeFonts(*anyopaque, bool) void;
 extern "c" fn CGContextTranslateCTM(*anyopaque, f64, f64) void;
 
 const Origin = extern struct { x: usize = 0, y: usize = 0, z: usize = 0 };
@@ -44,15 +49,15 @@ comptime {
     std.debug.assert(@sizeOf(Instance) == 80);
 }
 
-const GlyphKey = struct { font: CFRef, scale: u32, glyph: u16 };
+const GlyphKey = struct { font: CFRef, scale: u32, glyph: u16, phase_x: u8, phase_y: u8 };
 const Glyph = struct { bounds: Rect, uv: Rect };
 const GlyphContext = struct {
     pub fn hash(_: GlyphContext, key: GlyphKey) u64 {
-        const parts = [3]u64{ CFHash(key.font), key.scale, key.glyph };
+        const parts = [4]u64{ CFHash(key.font), key.scale, key.glyph, @as(u64, key.phase_x) * 4 + key.phase_y };
         return std.hash.Wyhash.hash(0, std.mem.asBytes(&parts));
     }
     pub fn eql(_: GlyphContext, a: GlyphKey, b: GlyphKey) bool {
-        return a.scale == b.scale and a.glyph == b.glyph and CFEqual(a.font, b.font) != 0;
+        return a.scale == b.scale and a.glyph == b.glyph and a.phase_x == b.phase_x and a.phase_y == b.phase_y and CFEqual(a.font, b.font) != 0;
     }
 };
 const BufferSlot = struct { buffer: Id = null, command: Id = null, capacity: usize = 0 };
@@ -174,16 +179,16 @@ pub const Renderer = struct {
         r.atlas_row = 0;
     }
 
-    fn glyph(r: *Renderer, font: CFRef, glyph_id: u16, scale: f32) !Glyph {
-        const key: GlyphKey = .{ .font = font, .scale = @bitCast(scale), .glyph = glyph_id };
+    fn glyph(r: *Renderer, font: CFRef, glyph_id: u16, scale: f32, phase_x: u8, phase_y: u8) !Glyph {
+        const key: GlyphKey = .{ .font = font, .scale = @bitCast(scale), .glyph = glyph_id, .phase_x = phase_x, .phase_y = phase_y };
         if (r.glyphs.get(key)) |cached| return cached;
         const pixel_font = CTFontCreateCopyWithAttributes(font, text_mod.CTFontGetSize(font) * scale, null, null) orelse return error.NativeFontUnavailable;
         defer text_mod.CFRelease(pixel_font);
         const native_bounds = CTFontGetBoundingRectsForGlyphs(pixel_font, 0, @ptrCast(&glyph_id), null, 1);
         const min_x: f32 = @floatCast(@floor(native_bounds.origin.x));
         const min_y: f32 = @floatCast(@floor(native_bounds.origin.y));
-        const width_f: f32 = @floatCast(@ceil(native_bounds.origin.x + native_bounds.size.width - min_x) + 2);
-        const height_f: f32 = @floatCast(@ceil(native_bounds.origin.y + native_bounds.size.height - min_y) + 2);
+        const width_f: f32 = @floatCast(@ceil(native_bounds.origin.x + native_bounds.size.width - min_x) + 3);
+        const height_f: f32 = @floatCast(@ceil(native_bounds.origin.y + native_bounds.size.height - min_y) + 3);
         if (!std.math.isFinite(width_f) or !std.math.isFinite(height_f) or width_f < 0 or height_f < 0 or width_f > atlas_side - 2 or height_f > atlas_side - 2) return error.GlyphTooLarge;
         const width: usize = @intFromFloat(width_f);
         const height: usize = @intFromFloat(height_f);
@@ -200,8 +205,13 @@ pub const Renderer = struct {
         defer CGContextRelease(context);
         CGContextSetGrayFillColor(context, 1, 1);
         CGContextSetShouldAntialias(context, true);
+        CGContextSetShouldSmoothFonts(context, false);
+        CGContextSetAllowsFontSubpixelPositioning(context, true);
+        CGContextSetShouldSubpixelPositionFonts(context, true);
+        CGContextSetAllowsFontSubpixelQuantization(context, false);
+        CGContextSetShouldSubpixelQuantizeFonts(context, false);
         CGContextTranslateCTM(context, 1 - min_x, 1 - min_y);
-        const zero: objc.CGPoint = .{};
+        const zero: objc.CGPoint = .{ .x = @as(f64, @floatFromInt(phase_x)) / 4, .y = -@as(f64, @floatFromInt(phase_y)) / 4 };
         CTFontDrawGlyphs(pixel_font, @ptrCast(&glyph_id), @ptrCast(&zero), 1, context);
         objc.send(void, r.atlas, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", .{
             Region{ .origin = .{ .x = r.atlas_x, .y = r.atlas_y }, .size = .{ .width = width, .height = height } },
@@ -270,9 +280,15 @@ pub const Renderer = struct {
                             text_mod.CTRunGetPositions(run, range, @ptrCast(&position));
                             const at = item.rect.x + @as(f32, @floatCast(position.x));
                             if (at > item.clip.x + item.clip.width + item.font_size * 2 or at < item.clip.x - item.font_size * 3) continue;
-                            const cached = try r.glyph(font, glyph_id, scale);
+                            // Rasterize fractional origins into distinct masks, then place
+                            // those masks on device pixels instead of blurring them again.
+                            const pixel_x = @round(at * scale * 4) / 4;
+                            const pixel_y = @round((baseline - @as(f32, @floatCast(position.y))) * scale * 4) / 4;
+                            const base_x = @floor(pixel_x);
+                            const base_y = @floor(pixel_y);
+                            const cached = try r.glyph(font, glyph_id, scale, @intFromFloat((pixel_x - base_x) * 4), @intFromFloat((pixel_y - base_y) * 4));
                             const b = cached.bounds;
-                            try r.append(.{ .x = at + b.x, .y = baseline - @as(f32, @floatCast(position.y)) - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1);
+                            try r.append(.{ .x = base_x / scale + b.x, .y = base_y / scale - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1);
                         }
                     }
                 },
@@ -296,6 +312,11 @@ pub fn snapshot(r: *Renderer, frame: scene.Frame, size: Size, path: []const u8) 
 }
 pub fn stats(r: *Renderer) Stats {
     return rendererStats(r);
+}
+pub fn setTypography(r: *Renderer, value: @import("../../text/typography.zig").Typography) void {
+    if (std.meta.eql(r.text.typography, value)) return;
+    r.clearGlyphs();
+    r.text.setTypography(value);
 }
 
 fn createRenderer(allocator: Allocator) !*Renderer {

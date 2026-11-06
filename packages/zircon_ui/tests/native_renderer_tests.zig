@@ -4,6 +4,76 @@ const std = @import("std");
 const native = @import("native");
 const t = std.testing;
 const objc = native.objc;
+extern "c" fn CGBitmapContextCreate(?*anyopaque, usize, usize, usize, usize, ?native.text.CFRef, u32) ?*anyopaque;
+extern "c" fn CGContextRelease(*anyopaque) void;
+extern "c" fn CGContextTranslateCTM(*anyopaque, f64, f64) void;
+extern "c" fn CGContextSetGrayFillColor(*anyopaque, f64, f64) void;
+extern "c" fn CGContextSetShouldAntialias(*anyopaque, bool) void;
+extern "c" fn CGContextSetShouldSmoothFonts(*anyopaque, bool) void;
+extern "c" fn CGContextSetAllowsFontSubpixelPositioning(*anyopaque, bool) void;
+extern "c" fn CGContextSetShouldSubpixelPositionFonts(*anyopaque, bool) void;
+extern "c" fn CGContextSetAllowsFontSubpixelQuantization(*anyopaque, bool) void;
+extern "c" fn CGContextSetShouldSubpixelQuantizeFonts(*anyopaque, bool) void;
+extern "c" fn CTFontGetGlyphsForCharacters(native.text.CFRef, [*]const u16, [*]u16, isize) bool;
+extern "c" fn CTFontDrawGlyphs(native.text.CFRef, [*]const u16, [*]const objc.CGPoint, usize, *anyopaque) void;
+test "fractional Metal glyph coverage matches direct CoreText rasterization" {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const renderer = try native.metal.create(t.allocator);
+    defer native.metal.destroy(renderer);
+    var dir = t.tmpDir(.{});
+    defer dir.cleanup();
+    const parent = try dir.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(parent);
+    const path = try std.fs.path.join(t.allocator, &.{ parent, "fractional.png" });
+    defer t.allocator.free(path);
+    const bounds = native.ui.Rect{ .x = 10.25, .y = 12.5, .width = 40, .height = 20 };
+    try native.metal.snapshot(renderer, .{ .background = .black, .items = &.{.{ .kind = .text, .rect = bounds, .clip = .{ .width = 80, .height = 48 }, .color = .white, .font_size = 14, .mono = true, .text = "F" }} }, .{ .width = 80, .height = 48 }, path);
+    const bytes = try dir.dir.readFileAlloc(t.io, "fractional.png", t.allocator, .limited(1024 * 1024));
+    defer t.allocator.free(bytes);
+    const data = objc.send(objc.Id, objc.class("NSData"), "dataWithBytes:length:", .{ @as(*const anyopaque, @ptrCast(bytes.ptr)), bytes.len });
+    const bitmap = objc.send(objc.Id, objc.class("NSBitmapImageRep"), "imageRepWithData:", .{data});
+    var reference: [80 * 48]u8 = @splat(0);
+    const context = CGBitmapContextCreate(&reference, 80, 48, 8, 80, null, 7) orelse return error.ReferenceRasterFailed;
+    defer CGContextRelease(context);
+    CGContextSetGrayFillColor(context, 1, 1);
+    CGContextSetShouldAntialias(context, true);
+    CGContextSetShouldSmoothFonts(context, false);
+    CGContextSetAllowsFontSubpixelPositioning(context, true);
+    CGContextSetShouldSubpixelPositionFonts(context, true);
+    CGContextSetAllowsFontSubpixelQuantization(context, false);
+    CGContextSetShouldSubpixelQuantizeFonts(context, false);
+    const layout = try renderer.text.layout("F", 14, true);
+    var ascent: f64 = 0;
+    var descent: f64 = 0;
+    _ = native.text.CTLineGetTypographicBounds(layout.line, &ascent, &descent, null);
+    const baseline = bounds.y + @max(0, (bounds.height - ascent - descent) / 2) + ascent;
+    CGContextTranslateCTM(context, bounds.x, 48 - baseline);
+    const font = try renderer.text.font(14, true);
+    var glyph: u16 = 0;
+    try t.expect(CTFontGetGlyphsForCharacters(font, &.{@as(u16, 'F')}, @ptrCast(&glyph), 1));
+    CTFontDrawGlyphs(font, @ptrCast(&glyph), &.{objc.CGPoint{}}, 1, context);
+    var total: f64 = 0;
+    var error_sum: f64 = 0;
+    for (0..80) |x| {
+        var expected: f64 = 0;
+        var actual: f64 = 0;
+        for (0..48) |y| {
+            expected += @as(f64, @floatFromInt(reference[y * 80 + x])) / 255;
+            const color = objc.send(objc.Id, bitmap, "colorAtX:y:", .{ x, y });
+            var red: f64 = 0;
+            var green: f64 = 0;
+            var blue: f64 = 0;
+            var alpha: f64 = 0;
+            objc.send(void, color, "getRed:green:blue:alpha:", .{ &red, &green, &blue, &alpha });
+            actual += red;
+        }
+        total += expected;
+        error_sum += @abs(actual - expected);
+    }
+    try t.expect(total > 10);
+    try t.expect(error_sum / total < 0.03);
+}
 const shapes = [_]native.scene.Primitive{
     .{ .kind = .rect, .rect = .{ .x = 10, .y = 10, .width = 50, .height = 40 }, .clip = .{ .x = 20, .y = 20, .width = 20, .height = 20 }, .color = .{ .r = 1, .g = 0, .b = 0 } },
     .{ .kind = .rect, .rect = .{ .x = 25, .y = 25, .width = 20, .height = 20 }, .clip = .{ .width = 240, .height = 150 }, .color = .{ .r = 0, .g = 1, .b = 0 } },

@@ -27,6 +27,26 @@ pub extern "c" fn CFDictionaryGetValue(dictionary: CFRef, key: CFRef) ?CFRef;
 pub extern "c" fn CTFontCreateWithName(name: CFStringRef, size: f64, matrix: ?*const anyopaque) ?CTFontRef;
 pub extern "c" fn CTFontCreateUIFontForLanguage(ui_type: u32, size: f64, language: ?CFStringRef) ?CTFontRef;
 pub extern "c" fn CTFontGetSize(font_ref: CTFontRef) f64;
+extern "c" fn CFDataCreate(?CFRef, [*]const u8, CFIndex) ?CFRef;
+extern "c" fn CFDataCreateWithBytesNoCopy(?CFRef, [*]const u8, CFIndex, CFRef) ?CFRef;
+extern "c" const kCFAllocatorNull: CFRef;
+extern "c" fn CGDataProviderCreateWithCFData(CFRef) ?CFRef;
+extern "c" fn CGDataProviderRelease(CFRef) void;
+extern "c" fn CGFontCreateWithDataProvider(CFRef) ?CFRef;
+extern "c" fn CGFontRelease(CFRef) void;
+extern "c" fn CTFontCreateWithGraphicsFont(CFRef, f64, ?*const anyopaque, ?CFRef) ?CTFontRef;
+extern "c" fn CTFontCreateCopyWithAttributes(CTFontRef, f64, ?*const anyopaque, ?CFRef) ?CTFontRef;
+extern "c" fn CTFontDescriptorCreateWithAttributes(CFRef) ?CFRef;
+const DictionaryKeyCallbacks = extern struct { version: CFIndex, retain: ?*const anyopaque, release: ?*const anyopaque, description: ?*const anyopaque, equal: ?*const anyopaque, hash: ?*const anyopaque };
+const ValueCallbacks = extern struct { version: CFIndex, retain: ?*const anyopaque, release: ?*const anyopaque, description: ?*const anyopaque, equal: ?*const anyopaque };
+extern "c" const kCFTypeDictionaryKeyCallBacks: DictionaryKeyCallbacks;
+extern "c" const kCFTypeDictionaryValueCallBacks: ValueCallbacks;
+extern "c" const kCFTypeArrayCallBacks: ValueCallbacks;
+extern "c" const kCTFontFeatureSettingsAttribute: CFRef;
+extern "c" const kCTFontOpenTypeFeatureTag: CFRef;
+extern "c" const kCTFontOpenTypeFeatureValue: CFRef;
+extern "c" fn CFDictionaryCreate(?CFRef, [*]const CFRef, [*]const CFRef, CFIndex, *const DictionaryKeyCallbacks, *const ValueCallbacks) ?CFRef;
+extern "c" fn CFArrayCreate(?CFRef, [*]const CFRef, CFIndex, *const ValueCallbacks) ?CFRef;
 pub extern "c" fn CTLineCreateWithAttributedString(string: CFRef) ?CTLineRef;
 pub extern "c" fn CTLineGetTypographicBounds(line: CTLineRef, ascent: ?*f64, descent: ?*f64, leading: ?*f64) f64;
 pub extern "c" fn CTLineGetOffsetForStringIndex(line: CTLineRef, index_value: CFIndex, secondary_offset: ?*f64) f64;
@@ -53,42 +73,74 @@ pub const Layout = struct {
 const max_layouts = 512;
 const layout_budget = 4 * 1024 * 1024;
 const Font = struct { value: CTFontRef, size: f32, mono: bool };
+const CacheKey = struct { bytes: []const u8, hash: u64, size: f32, mono: bool };
+const CacheContext = struct {
+    pub fn hash(_: @This(), key: CacheKey) u64 {
+        return key.hash ^ (@as(u64, @as(u32, @bitCast(key.size))) << 1) ^ @as(u64, @intFromBool(key.mono));
+    }
+    pub fn eql(_: @This(), a: CacheKey, b: CacheKey) bool {
+        return a.hash == b.hash and a.size == b.size and a.mono == b.mono and std.mem.eql(u8, a.bytes, b.bytes);
+    }
+};
 
 pub const TextSystem = struct {
     allocator: std.mem.Allocator,
+    typography: @import("typography.zig").Typography = .{},
     layouts: [max_layouts]?*Layout = @splat(null),
     first_layout: usize = 0,
     layout_count: usize = 0,
     fonts: [64]?Font = @splat(null),
     font_count: usize = 0,
     next_font: usize = 0,
+    bundled_faces: [2]?CFRef = .{ null, null },
     /// An oversized line can be shaped without displacing the entire cache.
     /// It is released on the next layout request and is not cached memory.
     temporary: ?*Layout = null,
     layout_bytes: usize = 0,
     shape_hits: u64 = 0,
     shape_misses: u64 = 0,
+    lookup: std.HashMapUnmanaged(CacheKey, *Layout, CacheContext, std.hash_map.default_max_load_percentage) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) TextSystem {
         return .{ .allocator = allocator };
     }
 
     pub fn deinit(system: *TextSystem) void {
+        system.lookup.deinit(system.allocator);
         for (system.layouts) |entry| if (entry) |line| system.destroyLayout(line);
         if (system.temporary) |line| system.destroyLayout(line);
         for (system.fonts) |entry| if (entry) |face| CFRelease(face.value);
+        for (system.bundled_faces) |face| if (face) |value| CGFontRelease(value);
         system.* = .{ .allocator = system.allocator };
+    }
+    pub fn setTypography(system: *TextSystem, value: @import("typography.zig").Typography) void {
+        if (std.meta.eql(system.typography, value)) return;
+        system.deinit();
+        system.typography = value;
     }
 
     /// The font is borrowed. Retain it when keeping it beyond a shaping call,
     /// for example as a renderer's glyph-cache key.
     pub fn font(system: *TextSystem, requested_size: f32, mono: bool) !CTFontRef {
-        const size = normalizedSize(requested_size);
+        const size = normalizedSize(requested_size * if (mono) @as(f32, 1) else system.typography.ui_size / 13);
         for (system.fonts[0..system.font_count]) |entry| {
             const face = entry.?;
             if (face.size == size and face.mono == mono) return face.value;
         }
-        const value = if (mono) try namedFont("Menlo", size) else CTFontCreateUIFontForLanguage(2, size, null) orelse try namedFont("Helvetica", size);
+        var value = if (mono) switch (system.typography.code_font) {
+            .lilex => try bundledFont(system, 0, @embedFile("fonts/Lilex-Regular.ttf"), size),
+            .menlo => try namedFont("Menlo-Regular", size),
+            .monaco => try namedFont("Monaco", size),
+        } else switch (system.typography.ui_font) {
+            .plex => try bundledFont(system, 1, @embedFile("fonts/IBMPlexSans-Regular.ttf"), size),
+            .system => CTFontCreateUIFontForLanguage(2, size, null) orelse try namedFont("Helvetica", size),
+        };
+        errdefer CFRelease(value);
+        if (mono) {
+            const configured = try featureFont(value, size, system.typography.ligatures);
+            CFRelease(value);
+            value = configured;
+        }
         if (system.font_count < system.fonts.len) {
             system.fonts[system.font_count] = .{ .value = value, .size = size, .mono = mono };
             system.font_count += 1;
@@ -109,12 +161,10 @@ pub const TextSystem = struct {
         if (!std.unicode.utf8ValidateSlice(bytes)) return error.InvalidUtf8;
         const size = normalizedSize(requested_size);
         const hash = std.hash.Wyhash.hash(0, bytes);
-        for (0..system.layout_count) |i| {
-            const entry = system.layouts[(system.first_layout + i) % max_layouts].?;
-            if (entry.hash == hash and entry.size == size and entry.mono == mono and std.mem.eql(u8, entry.text, bytes)) {
-                system.shape_hits +%= 1;
-                return entry;
-            }
+        const key: CacheKey = .{ .bytes = bytes, .hash = hash, .size = size, .mono = mono };
+        if (system.lookup.get(key)) |entry| {
+            system.shape_hits +%= 1;
+            return entry;
         }
         system.shape_misses +%= 1;
         const face = try system.font(size, mono);
@@ -125,8 +175,8 @@ pub const TextSystem = struct {
         CFAttributedStringReplaceString(attributed, .{ .location = 0, .length = 0 }, string);
         const whole: CFRange = .{ .location = 0, .length = CFStringGetLength(string) };
         CFAttributedStringSetAttribute(attributed, whole, kCTFontAttributeName, face);
-        const zero: i32 = 0;
-        const ligature = CFNumberCreate(null, 3, &zero) orelse return error.OutOfMemory;
+        const enabled: i32 = if (mono and system.typography.ligatures) 1 else 0;
+        const ligature = CFNumberCreate(null, 3, &enabled) orelse return error.OutOfMemory;
         defer CFRelease(ligature);
         CFAttributedStringSetAttribute(attributed, whole, kCTLigatureAttributeName, ligature);
         const line = CTLineCreateWithAttributedString(attributed) orelse return error.OutOfMemory;
@@ -143,8 +193,14 @@ pub const TextSystem = struct {
             system.temporary = entry;
             return entry;
         }
+        // Reserve before evicting: allocation failure preserves existing hits.
+        system.lookup.ensureUnusedCapacity(system.allocator, 1) catch |err| {
+            system.allocator.destroy(entry);
+            return err;
+        };
         while (system.layout_count > 0 and (system.layout_count == max_layouts or system.layout_bytes + cost > layout_budget)) {
             const old = system.layouts[system.first_layout].?;
+            _ = system.lookup.remove(.{ .bytes = old.text, .hash = old.hash, .size = old.size, .mono = old.mono });
             system.layouts[system.first_layout] = null;
             system.first_layout = (system.first_layout + 1) % max_layouts;
             system.layout_count -= 1;
@@ -155,6 +211,7 @@ pub const TextSystem = struct {
         system.layouts[slot] = entry;
         system.layout_count += 1;
         system.layout_bytes += cost;
+        system.lookup.putAssumeCapacity(.{ .bytes = owned_bytes, .hash = hash, .size = size, .mono = mono }, entry);
         return entry;
     }
 
@@ -196,6 +253,41 @@ fn namedFont(name: []const u8, size: f32) !CTFontRef {
     const string = try createString(name);
     defer CFRelease(string);
     return CTFontCreateWithName(string, size, null) orelse return error.OutOfMemory;
+}
+fn bundledFont(system: *TextSystem, slot: usize, bytes: []const u8, size: f32) !CTFontRef {
+    if (system.bundled_faces[slot] == null) {
+        // Embedded bytes have process lifetime. One face per family shares them
+        // across point sizes instead of copying the font file for every size.
+        const data = CFDataCreateWithBytesNoCopy(null, bytes.ptr, @intCast(bytes.len), kCFAllocatorNull) orelse return error.OutOfMemory;
+        defer CFRelease(data);
+        const provider = CGDataProviderCreateWithCFData(data) orelse return error.NativeFontUnavailable;
+        defer CGDataProviderRelease(provider);
+        system.bundled_faces[slot] = CGFontCreateWithDataProvider(provider) orelse return error.NativeFontUnavailable;
+    }
+    return CTFontCreateWithGraphicsFont(system.bundled_faces[slot].?, size, null, null) orelse error.NativeFontUnavailable;
+}
+fn featureFont(font_value: CTFontRef, size: f32, enabled: bool) !CTFontRef {
+    // Programming ligatures in Lilex use contextual alternates, not `liga`.
+    // Set both features explicitly so the UI's off state actually disables them.
+    const value: i32 = @intFromBool(enabled);
+    const number = CFNumberCreate(null, 3, &value) orelse return error.OutOfMemory;
+    defer CFRelease(number);
+    var features: [2]CFRef = undefined;
+    var made: usize = 0;
+    defer for (features[0..made]) |feature| CFRelease(feature);
+    for ([_][]const u8{ "calt", "liga" }, 0..) |tag, index| {
+        const name = try createString(tag);
+        defer CFRelease(name);
+        features[index] = CFDictionaryCreate(null, &.{ kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue }, &.{ name, number }, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) orelse return error.OutOfMemory;
+        made += 1;
+    }
+    const array = CFArrayCreate(null, &features, 2, &kCFTypeArrayCallBacks) orelse return error.OutOfMemory;
+    defer CFRelease(array);
+    const attributes = CFDictionaryCreate(null, &.{kCTFontFeatureSettingsAttribute}, &.{array}, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks) orelse return error.OutOfMemory;
+    defer CFRelease(attributes);
+    const descriptor = CTFontDescriptorCreateWithAttributes(attributes) orelse return error.NativeFontUnavailable;
+    defer CFRelease(descriptor);
+    return CTFontCreateCopyWithAttributes(font_value, size, null, descriptor) orelse error.NativeFontUnavailable;
 }
 
 fn createString(bytes: []const u8) !CFStringRef {

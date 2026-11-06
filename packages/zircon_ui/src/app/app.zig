@@ -23,6 +23,7 @@ const State = struct {
     jobs: OwnedTasks,
     close_requests: std.ArrayList(windows.Handle) = .empty,
     external: std.ArrayList(External) = .empty,
+    typography: @import("../text/typography.zig").Typography = .{},
 };
 pub const Options = struct { allocator: std.mem.Allocator };
 pub const App = struct {
@@ -74,6 +75,7 @@ pub const App = struct {
         if (slot >= std.math.maxInt(u32)) return error.WindowCapacityExceeded;
         try app.state.windows.ensureUnusedCapacity(app.state.allocator, 1);
         const record = try windows.Window.create(app.*, app.state.allocator, T, options, value);
+        record.surface.?.setTypography(app.state.typography);
         errdefer record.deinit();
         app.state.windows.appendAssumeCapacity(record);
         return .{ .app_id = app.state.store.app_id, .slot = @intCast(slot) };
@@ -244,6 +246,16 @@ pub const App = struct {
         try app.check();
         for (app.state.windows.items) |entry| if (entry) |w| {
             w.animations.reduced_motion = reduced;
+            w.dirty = true;
+        };
+    }
+    pub fn setTypography(app: *App, value: @import("../text/typography.zig").Typography) !void {
+        try app.check();
+        try value.validate();
+        if (std.meta.eql(value, app.state.typography)) return;
+        app.state.typography = value;
+        for (app.state.windows.items) |entry| if (entry) |w| {
+            w.surface.?.setTypography(value);
             w.dirty = true;
         };
     }

@@ -78,6 +78,7 @@ pub const Input = union(enum) {
     unmark: u64,
     resize: g.Size,
     focus: bool,
+    appearance: bool, // true for the system dark appearance
     close,
 };
 pub const Sink = struct {
@@ -86,6 +87,7 @@ pub const Sink = struct {
     drag_region: ?*const fn (*anyopaque, g.Point) bool = null,
 };
 pub const Surface = struct {
+    pub const PathKind = enum { file, folder };
     context: *anyopaque,
     ops: *const Ops,
     pub const Ops = struct {
@@ -100,7 +102,17 @@ pub const Surface = struct {
         accept_close: ?*const fn (*anyopaque) void = null,
         set_parent: ?*const fn (*anyopaque, ?Surface) void = null,
         raise: ?*const fn (*anyopaque) void = null,
+        typography: ?*const fn (*anyopaque, @import("../text/typography.zig").Typography) void = null,
+        system_dark: ?*const fn (*anyopaque) bool = null,
+        set_appearance: ?*const fn (*anyopaque, ?bool) void = null,
+        choose_path: ?*const fn (*anyopaque, std.mem.Allocator, PathKind) anyerror!?[]u8 = null,
     };
+    pub fn systemDark(s: Surface) bool {
+        return if (s.ops.system_dark) |f| f(s.context) else true;
+    }
+    pub fn setAppearance(s: Surface, dark: ?bool) void {
+        if (s.ops.set_appearance) |f| f(s.context, dark);
+    }
     pub fn deinit(s: Surface) void {
         s.ops.deinit(s.context);
     }
@@ -112,6 +124,13 @@ pub const Surface = struct {
     }
     pub fn measurer(s: Surface) measure.Measurer {
         return s.ops.measurer(s.context);
+    }
+    pub fn setTypography(s: Surface, value: @import("../text/typography.zig").Typography) void {
+        if (s.ops.typography) |function| function(s.context, value);
+    }
+    pub fn choosePath(s: Surface, allocator: std.mem.Allocator, kind: PathKind) !?[]u8 {
+        const function = s.ops.choose_path orelse return error.NativeDialogUnavailable;
+        return function(s.context, allocator, kind);
     }
     pub fn snapshot(s: Surface, frame: scene.Frame, path: []const u8) !void {
         return s.ops.snapshot(s.context, frame, path);

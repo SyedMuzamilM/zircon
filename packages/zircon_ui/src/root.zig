@@ -1,6 +1,7 @@
 //! Verified framework foundations. This module has no native or GPU imports.
 pub const Subscription = @import("app/app.zig").Subscription;
 pub const App = @import("app/app.zig").App;
+pub const typography = @import("text/typography.zig");
 pub const WindowHandle = @import("app/window.zig").Handle;
 pub const WindowOptions = @import("app/window.zig").Options;
 pub const Input = @import("event/event.zig").Input;

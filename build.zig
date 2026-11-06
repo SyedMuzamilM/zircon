@@ -154,6 +154,8 @@ pub fn build(b: *std.Build) void {
         native.addOptions("zircon_options", native_options);
         for ([_][]const u8{ "AppKit", "Metal", "QuartzCore", "CoreText", "CoreGraphics", "ImageIO", "CoreFoundation", "Foundation" }) |framework| native.linkFramework(framework, .{});
         native.linkSystemLibrary("objc", .{});
+        const text_bench = b.addExecutable(.{ .name = "zircon-text-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_text.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "native", .module = native }} }) });
+        b.step("build-bench-text", "Build the native shaping-cache benchmark").dependOn(&b.addInstallArtifact(text_bench, .{}).step);
         const native_tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path("packages/zircon_ui/tests/native_all.zig"),
             .target = target,

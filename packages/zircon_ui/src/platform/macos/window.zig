@@ -13,7 +13,8 @@ const metal = @import("../../graphics/backends/metal.zig");
 const Id = objc.Id;
 const Sel = *opaque {};
 const Range = extern struct { location: usize, length: usize };
-const not_found = std.math.maxInt(usize);
+// Foundation defines NSNotFound as NSIntegerMax, even in NSRange.location.
+const not_found: usize = std.math.maxInt(isize);
 const TextRequest = struct {
     kind: enum { insert, mark, unmark },
     value: Id = null,
@@ -61,6 +62,7 @@ const State = struct {
     awaiting_snapshot: bool = false,
     text_requests: std.ArrayList(TextRequest) = .empty,
     closed: bool = false,
+    pending_appearance: ?bool = null,
     fn emit(s: *State, event: platform.Input) void {
         if (s.closed and event != .close) return;
         s.sink.event(s.sink.context, event) catch |err| {
@@ -91,6 +93,10 @@ pub fn pump(timeout_seconds: f64) !void {
     for (0..count) |i| {
         const native_window = objc.send(Id, windows, "objectAtIndex:", .{i});
         const view = objc.send(Id, native_window, "contentView", .{});
+        if (nativeState(view)) |s| if (s.pending_appearance) |dark| {
+            s.pending_appearance = null;
+            s.emit(.{ .appearance = dark });
+        };
         if (nativeState(view)) |s| if (!s.closed and !s.awaiting_snapshot and s.text_requests.items.len > 0) {
             const request = s.text_requests.orderedRemove(0);
             defer objc.release(request.value);
@@ -168,8 +174,6 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     objc.send(void, window, "setTitle:", .{objc.string(options.title)});
     objc.send(void, window, "setAcceptsMouseMovedEvents:", .{true});
     objc.send(void, window, "setContentMinSize:", .{objc.CGSize{ .width = 320, .height = 200 }});
-    const appearance = objc.send(Id, objc.class("NSAppearance"), "appearanceNamed:", .{objc.string("NSAppearanceNameDarkAqua")});
-    if (appearance != null) objc.send(void, window, "setAppearance:", .{appearance});
     _ = objc.send(bool, window, "makeFirstResponder:", .{view});
     objc.send(void, window, "center", .{});
     if (options.visible) {
@@ -181,6 +185,10 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
 }
 
 const ops: platform.Surface.Ops = .{
+    .system_dark = systemDark,
+    .set_appearance = setAppearance,
+    .choose_path = choosePath,
+    .typography = setTypography,
     .deinit = deinit,
     .size = size,
     .present = present,
@@ -193,6 +201,22 @@ const ops: platform.Surface.Ops = .{
     .raise = raise,
     .accept_close = acceptClose,
 };
+fn systemDark(_: *anyopaque) bool {
+    const app = objc.send(Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const appearance = objc.send(Id, app, "effectiveAppearance", .{});
+    const names = objc.send(Id, objc.class("NSArray"), "arrayWithObjects:count:", .{ &[_]Id{ objc.string("NSAppearanceNameAqua"), objc.string("NSAppearanceNameDarkAqua") }, @as(usize, 2) });
+    const match = objc.send(Id, appearance, "bestMatchFromAppearancesWithNames:", .{names});
+    return std.mem.eql(u8, objc.fromString(match), "NSAppearanceNameDarkAqua");
+}
+fn setAppearance(raw: *anyopaque, dark: ?bool) void {
+    const appearance: Id = if (dark) |value| objc.send(Id, objc.class("NSAppearance"), "appearanceNamed:", .{objc.string(if (value) "NSAppearanceNameDarkAqua" else "NSAppearanceNameAqua")}) else null;
+    objc.send(void, state(raw).window, "setAppearance:", .{appearance});
+}
+fn didChangeAppearance(object: Id, _: Sel) callconv(.c) void {
+    const s = nativeState(object) orelse return;
+    s.pending_appearance = systemDark(s);
+    wake();
+}
 fn state(raw: *anyopaque) *State {
     return @ptrCast(@alignCast(raw));
 }
@@ -264,6 +288,19 @@ fn present(raw: *anyopaque, frame: scene.Frame) !bool {
 }
 fn measurer(raw: *anyopaque) measurement.Measurer {
     return .{ .context = raw, .text = measureText, .caret_fn = caret, .index_fn = index };
+}
+fn setTypography(raw: *anyopaque, value: @import("../../text/typography.zig").Typography) void {
+    metal.setTypography(state(raw).renderer, value);
+}
+fn choosePath(_: *anyopaque, allocator: std.mem.Allocator, kind: platform.Surface.PathKind) !?[]u8 {
+    const panel = objc.send(Id, objc.class("NSOpenPanel"), "openPanel", .{}) orelse return error.NativeDialogUnavailable;
+    objc.send(void, panel, "setCanChooseDirectories:", .{kind == .folder});
+    objc.send(void, panel, "setCanChooseFiles:", .{kind == .file});
+    objc.send(void, panel, "setAllowsMultipleSelection:", .{false});
+    objc.send(void, panel, "setPrompt:", .{objc.string("Open")});
+    if (objc.send(isize, panel, "runModal", .{}) != 1) return null;
+    const url = objc.send(Id, panel, "URL", .{}) orelse return error.InvalidPath;
+    return try allocator.dupe(u8, objc.fromString(objc.send(Id, url, "path", .{})));
 }
 fn caret(raw: ?*anyopaque, bytes: []const u8, style: TextStyle, offset: usize) f32 {
     return state(raw.?).renderer.text.caret(bytes, style.size, style.mono, offset);
@@ -352,6 +389,7 @@ fn registerView() !void {
     try add(pointerMove, "rightMouseDragged:", "v@:@");
     try add(pointerMove, "otherMouseDragged:", "v@:@");
     try add(scroll, "scrollWheel:", "v@:@");
+    try add(didChangeAppearance, "viewDidChangeEffectiveAppearance", "v@:");
     try add(keyDown, "keyDown:", "v@:@");
     try add(insertText, "insertText:replacementRange:", "v@:@{_NSRange=QQ}");
     try add(insertSimpleText, "insertText:", "v@:@");
