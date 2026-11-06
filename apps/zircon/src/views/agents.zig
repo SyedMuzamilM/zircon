@@ -33,7 +33,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         if (current.conversation.modes.items.len > 0) try header.append(b.allocator(), try pickerButton(b, c, current.conversation.mode, .modes));
         if (current.conversation.efforts.items.len > 0) try header.append(b.allocator(), try pickerButton(b, c, current.conversation.effort, .efforts));
     }
-    if (session) |current| if (lastResponse(current).len > 0) try header.append(b.allocator(), try b.button(.{ .label = "Copy last response", .children = &.{try v.icon(b, .copy, c.muted, 16)}, .on_click = b.onClick(copyResponse), .style = v.iconButtonStyle(c, false) }));
+    if (session) |current| if (lastResponse(current).len > 0) try header.append(b.allocator(), try b.button(.{ .label = "Copy last response", .tooltip = "Copy last response", .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, .copy, c.muted, 16)}, .on_click = b.onClick(copyResponse), .style = v.iconButtonStyle(c, false) }));
     try header.appendSlice(b.allocator(), &.{ try b.div(.{ .flex_grow = 1 }, &.{}), try v.iconButton(b, c, .agent_transcript, "Open saved conversation", .file, false), try v.iconButton(b, c, .agent_toggle_editor, "Toggle editor and changes", .split, self.agent_editor) });
     try content.append(b.allocator(), try b.row(.{ .height = .{ .px = 42 }, .flex_shrink = 0, .align_items = .center, .padding = .{ .left = 12, .right = 12 }, .gap = 6, .overflow = .hidden }, header.items));
     try content.append(b.allocator(), try v.rule(b, c));

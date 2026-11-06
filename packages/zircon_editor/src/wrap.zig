@@ -14,13 +14,15 @@ pub const Cache = struct {
     width: f32 = 0,
     font_size: f32 = 0,
     tab_width: usize = 0,
+    folding: @import("folding.zig").State = .{},
     rows: std.ArrayList(Row) = .empty,
     starts: std.ArrayList(usize) = .empty,
     builds: usize = 0,
     shaped_lines: usize = 0,
     pending: ?struct { after: u64, first: usize, end_after: usize, delta: i64 } = null,
     pub fn noteChange(self: *Cache, change: *const text.Change) void {
-        if (self.revision != change.before or self.rows.items.len == 0 or change.mappings.len == 0) {
+        self.folding.noteChange(change);
+        if (self.folding.collapsed.items.len > 0 or self.revision != change.before or self.rows.items.len == 0 or change.mappings.len == 0) {
             self.pending = null;
             return;
         }
@@ -43,6 +45,7 @@ pub const Cache = struct {
         self.refs -= 1;
         if (self.refs == 0) {
             const a = self.allocator;
+            self.folding.deinit(a);
             self.rows.deinit(a);
             self.starts.deinit(a);
             a.destroy(self);
@@ -61,9 +64,15 @@ pub const Cache = struct {
         const new_last = if (pending) |change| (try s.pointAt(change.end_after)).line else 0;
         const delta_lines = @as(i64, @intCast(s.lineCount())) - @as(i64, @intCast(self.starts.items.len -| 1));
         const style: ui.TextStyle = .{ .size = font_size, .mono = true };
+        try self.folding.ensure(self.allocator, s, tabs);
+        var fold_index: usize = 0;
+        var hidden_end: ?usize = null;
         for (0..s.lineCount()) |line| {
             _ = arena.reset(.retain_capacity);
             try starts.append(self.allocator, rows.items.len);
+            const line_start = try s.lineStart(line);
+            while (fold_index < self.folding.collapsed.items.len and self.folding.collapsed.items[fold_index].start < line_start) : (fold_index += 1) hidden_end = @max(hidden_end orelse 0, self.folding.collapsed.items[fold_index].end);
+            if (hidden_end != null and line_start <= hidden_end.?) continue;
             if (pending) |change| {
                 if (line < change.first or line > new_last) {
                     const old_line: usize = if (line < change.first) line else @intCast(@as(i64, @intCast(line)) - delta_lines);

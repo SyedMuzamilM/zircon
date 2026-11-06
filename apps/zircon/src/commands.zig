@@ -61,6 +61,8 @@ pub const commands = [_]Entry{
     .{ .command = .toggle_sidebar, .label = "Toggle project sidebar", .shortcut = "⌘B" },
     .{ .command = .find, .label = "Find in document", .shortcut = "⌘F" },
     .{ .command = .replace, .label = "Find and replace", .shortcut = "⌥⌘F" },
+    .{ .command = .find_next, .label = "Find next match", .shortcut = "⌘G" },
+    .{ .command = .find_previous, .label = "Find previous match", .shortcut = "⇧⌘G" },
     .{ .command = .delete_line, .label = "Delete line", .shortcut = "⇧⌘K" },
     .{ .command = .undo, .label = "Undo", .shortcut = "⌘Z" },
     .{ .command = .redo, .label = "Redo", .shortcut = "⇧⌘Z" },
@@ -94,6 +96,8 @@ pub const bindings = [_]ui.Keymap(Command).Binding{
     .{ .chord = .{ .key = .w, .modifiers = .{ .command = true } }, .action = .close_tab },
     .{ .chord = .{ .key = .f, .modifiers = .{ .command = true } }, .action = .find },
     .{ .chord = .{ .key = .f, .modifiers = .{ .command = true, .alt = true } }, .action = .replace },
+    .{ .chord = .{ .key = .g, .modifiers = .{ .command = true } }, .action = .find_next },
+    .{ .chord = .{ .key = .g, .modifiers = .{ .command = true, .shift = true } }, .action = .find_previous },
     .{ .chord = .{ .key = .b, .modifiers = .{ .command = true } }, .action = .toggle_sidebar },
     .{ .chord = .{ .key = .q, .modifiers = .{ .command = true } }, .action = .quit },
 };

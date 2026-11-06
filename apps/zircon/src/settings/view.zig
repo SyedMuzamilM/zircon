@@ -6,10 +6,10 @@ const ext = @import("zircon_extensions");
 const model = @import("model.zig");
 const Shell = @import("../shell.zig").Shell;
 const v = @import("../views/components.zig");
-const Category = enum { general, appearance, editor, version_control };
-const Change = enum { wrap, vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
+const Category = enum { general, appearance, typography, editor, gutter, keymap, search, panels, project_panel, version_control, agent, languages, accessibility };
+const Change = enum { indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, width_down, width_up, spacing_down, spacing_up, tooltips, delay_down, delay_up, search_case_sensitive, search_whole_word, agent_editor, keymap_json, languages_manager, agent_settings, wrap, vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
 const Picker = enum { none, theme, icons, code_font, ui_font };
-const Row = enum { wrap, vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
+const Row = enum { wrap, vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion, indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, project_panel_width, project_entry_spacing, tooltips, tooltip_delay, search_case_sensitive, search_whole_word, agent_editor, keymap_json, languages_manager, agent_settings };
 const row_height: f32 = 88;
 pub const View = struct {
     allocator: std.mem.Allocator,
@@ -23,7 +23,9 @@ pub const View = struct {
     choice_query: ?ui.Entity(ui.controls.TextInput) = null,
     choice_index: usize = 0,
     category: Category = .general,
+    expanded: [std.meta.tags(Category).len]bool = @splat(true),
     scroll: ui.controls.Scroll = .{},
+    nav_scroll: ui.controls.Scroll = .{},
     picker: Picker = .none,
     picker_anchor: ui.Rect = .{},
     system_dark: bool = true,
@@ -103,6 +105,8 @@ pub const View = struct {
         if (self.workspace) |handle| try b.watch(handle, Shell.copyExtensions, .{&generation});
         defer if (generation) |*value| value.deinit();
         const c = palette(values, generation, self.system_dark);
+        b.frame.tooltips_enabled = values.tooltips;
+        b.frame.tooltip_delay = values.tooltip_delay / 1000;
         var query: []u8 = &.{};
         if (self.query) |handle| try b.watch(handle, ui.controls.TextInput.copy, .{ b.allocator(), &query });
         var path: ?[]u8 = null;
@@ -114,8 +118,16 @@ pub const View = struct {
             try nav.append(b.allocator(), try b.autofocus(search));
         }
         try nav.append(b.allocator(), try b.div(.{ .height = .{ .px = 7 }, .flex_shrink = 0 }, &.{}));
-        inline for (std.meta.tags(Category)) |category| try nav.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ try v.icon(b, if (self.category == category) .chevron_down else .chevron_right, c.muted, 14), try v.text(b, categoryName(category), c.text, 13) }, .on_click = try b.onClickWith(category, select), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 9, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .radius = v.metrics.control_radius, .background = if (self.category == category) c.hover else null, .hover_background = c.hover } }));
-        try nav.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
+        var sections: std.ArrayList(ui.Element) = .empty;
+        inline for (std.meta.tags(Category)) |category| {
+            const parent = parentCategory(category);
+            if (parent == null or self.expanded[@backingInt(parent.?)]) {
+                const has_children = category == .appearance or category == .editor or category == .panels;
+                try sections.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ if (has_children) try v.icon(b, if (self.expanded[@backingInt(category)]) .chevron_down else .chevron_right, c.muted, 14) else try b.div(.{ .width = .{ .px = 14 }, .flex_shrink = 0 }, &.{}), try v.text(b, categoryName(category), c.text, 13) }, .on_click = try b.onClickWith(category, select), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .gap = 6, .padding = .{ .left = if (parent != null) 22 else 6, .right = 6 }, .align_items = .center, .radius = v.metrics.control_radius, .background = if (self.category == category) c.selected else null, .hover_background = c.hover } }));
+            }
+        }
+        const nav_height = @as(f32, @floatFromInt(sections.items.len)) * 33;
+        try nav.append(b.allocator(), try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .gap = 3, .scroll_y = @min(self.nav_scroll.offset, @max(0, nav_height - @max(0, b.viewport().height - 140))), .overflow = .hidden }, sections.items), .{ .on_input = try b.onInputWith(nav_height, scrollNav) }));
         try nav.append(b.allocator(), try v.rule(b, c));
         try nav.append(b.allocator(), try v.text(b, "Zircon settings", c.muted, 11));
         const sidebar = try b.column(.{ .width = .{ .px = 238 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 12, .bottom = 14 }, .gap = 5, .background = c.sidebar }, nav.items);
@@ -145,9 +157,17 @@ pub const View = struct {
         return b.listen(try b.stack(.{ .background = c.document }, layers.items), .{ .on_capture = b.onInput(onGlobal) });
     }
     fn select(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), category: Category) void {
+        if (category == .appearance or category == .editor or category == .panels) self.expanded[@backingInt(category)] = !self.expanded[@backingInt(category)];
         self.category = category;
         self.scroll.offset = 0;
         self.picker = .none;
+        cx.notify();
+    }
+    fn scrollNav(self: *View, e: *ui.Event(ui.Input), cx: *ui.Context(View), total: f32) void {
+        if (e.data != .scroll) return;
+        self.nav_scroll.wheel(e.data.scroll.y, total, e.bounds.height);
+        e.preventDefault();
+        e.stopPropagation();
         cx.notify();
     }
     fn onScroll(self: *View, e: *ui.Event(ui.Input), cx: *ui.Context(View), total: f32) void {
@@ -249,11 +269,43 @@ pub const View = struct {
         cx.notify();
     }
     fn change(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), which: Change) !void {
+        if (which == .keymap_json) {
+            var e: ui.Event(ui.Click) = .{ .data = .{} };
+            return self.editJson(&e, cx);
+        }
+        if (which == .languages_manager or which == .agent_settings) {
+            const Open = struct {
+                fn call(shell: *Shell, context: *ui.Context(Shell), command: @import("../commands.zig").Command) !void {
+                    var e: ui.Event(ui.Click) = .{ .data = .{} };
+                    try shell.onCommand(&e, context, command);
+                    if (shell.window) |window| try context.app.raiseWindow(window);
+                }
+            };
+            if (self.workspace) |workspace| try cx.update(workspace, Open.call, .{if (which == .languages_manager) @import("../commands.zig").Command.extensions else .agent_config});
+            if (self.window) |window| try cx.app.requestCloseWindow(window);
+            return;
+        }
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         var values: model.Values = undefined;
         try cx.read(self.settings, model.Settings.copy, .{ arena.allocator(), &values });
         try self.apply(cx, switch (which) {
+            .indent_guides => .{ .indent_guides = !values.indent_guides },
+            .active_line => .{ .active_line = !values.active_line },
+            .fold_controls => .{ .fold_controls = !values.fold_controls },
+            .project_file_icons => .{ .project_file_icons = !values.project_file_icons },
+            .project_folder_icons => .{ .project_folder_icons = !values.project_folder_icons },
+            .width_down => .{ .project_panel_width = @max(120, values.project_panel_width - 20) },
+            .width_up => .{ .project_panel_width = @min(700, values.project_panel_width + 20) },
+            .spacing_down => .{ .project_entry_spacing = @max(20, values.project_entry_spacing - 2) },
+            .spacing_up => .{ .project_entry_spacing = @min(36, values.project_entry_spacing + 2) },
+            .tooltips => .{ .tooltips = !values.tooltips },
+            .delay_down => .{ .tooltip_delay = @max(0, values.tooltip_delay - 100) },
+            .delay_up => .{ .tooltip_delay = @min(2000, values.tooltip_delay + 100) },
+            .search_case_sensitive => .{ .search_case_sensitive = !values.search_case_sensitive },
+            .search_whole_word => .{ .search_whole_word = !values.search_whole_word },
+            .agent_editor => .{ .agent_editor = !values.agent_editor },
+            .keymap_json, .languages_manager, .agent_settings => unreachable,
             .wrap => .{ .soft_wrap = if (values.soft_wrap == .none) .editor_width else .none },
             .vim => .{ .vim_mode = !values.vim_mode },
             .lilex => .{ .font_family = .lilex },
@@ -287,14 +339,40 @@ fn categoryName(category: Category) []const u8 {
         .general => "General",
         .appearance => "Appearance",
         .editor => "Editor",
-        .version_control => "Version control",
+        .version_control => "Git panel",
+        .typography => "Typography",
+        .gutter => "Gutter and folding",
+        .keymap => "Keymap",
+        .search => "Search and files",
+        .panels => "Panels",
+        .project_panel => "Project panel",
+        .languages => "Languages and tools",
+        .agent => "Agent workspace",
+        .accessibility => "Accessibility",
+    };
+}
+fn parentCategory(category: Category) ?Category {
+    return switch (category) {
+        .typography => .appearance,
+        .gutter => .editor,
+        .project_panel, .version_control, .agent => .panels,
+        else => null,
     };
 }
 fn contains(category: Category, row: Row) bool {
-    return category == .general or switch (row) {
-        .theme, .icons, .ui_font_family, .ui_font_size, .motion => category == .appearance,
-        .wrap, .vim, .font_family, .font, .line_height, .ligatures, .tabs, .numbers => category == .editor,
-        .gutters, .blame => category == .version_control,
+    if (category == .general) return true;
+    return switch (row) {
+        .theme, .icons => category == .appearance,
+        .font_family, .font, .ui_font_family, .ui_font_size, .line_height, .ligatures => category == .appearance or category == .typography or category == .editor,
+        .wrap, .tabs => category == .editor,
+        .vim, .keymap_json => category == .keymap or category == .editor,
+        .numbers, .indent_guides, .active_line, .fold_controls => category == .editor or category == .gutter,
+        .gutters, .blame => category == .version_control or category == .gutter or category == .panels,
+        .motion, .tooltips, .tooltip_delay => category == .accessibility,
+        .project_file_icons, .project_folder_icons, .project_panel_width, .project_entry_spacing => category == .project_panel or category == .panels,
+        .search_case_sensitive, .search_whole_word => category == .search,
+        .languages_manager => category == .languages,
+        .agent_editor, .agent_settings => category == .agent or category == .panels,
     };
 }
 fn rowSearch(row: Row) []const u8 {
@@ -314,6 +392,21 @@ fn rowSearch(row: Row) []const u8 {
         .gutters => "Git change markers gutters version control",
         .blame => "Git inline blame author version control",
         .motion => "Reduced motion animations accessibility general",
+        .indent_guides => "Indent guides editor gutter",
+        .active_line => "Highlight active line editor gutter",
+        .fold_controls => "Code folding controls gutter collapse",
+        .project_file_icons => "File icons project panel",
+        .project_folder_icons => "Folder icons project panel",
+        .project_panel_width => "Project panel default width sidebar",
+        .project_entry_spacing => "Project entry spacing density sidebar",
+        .tooltips => "Icon hover tooltips accessibility",
+        .tooltip_delay => "Tooltip delay hover accessibility",
+        .search_case_sensitive => "Default match case search",
+        .search_whole_word => "Default whole word search",
+        .agent_editor => "Agent editor review pane",
+        .keymap_json => "Keyboard shortcuts keymap settings JSON",
+        .languages_manager => "Language servers extensions tools",
+        .agent_settings => "Agent providers ACP Codex OpenCode Gemini proxy",
     };
 }
 fn choiceStyle(c: v.Palette) ui.Style {
@@ -342,6 +435,21 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         .gutters => "Git change markers",
         .blame => "Inline Git blame",
         .motion => "Reduced motion",
+        .indent_guides => "Indent guides",
+        .active_line => "Highlight active line",
+        .fold_controls => "Folding controls",
+        .project_file_icons => "File icons",
+        .project_folder_icons => "Folder icons",
+        .project_panel_width => "Project panel default width",
+        .project_entry_spacing => "Entry spacing",
+        .tooltips => "Icon tooltips",
+        .tooltip_delay => "Tooltip delay",
+        .search_case_sensitive => "Default match case",
+        .search_whole_word => "Default whole word",
+        .agent_editor => "Show editor beside conversations",
+        .keymap_json => "Keyboard shortcuts",
+        .languages_manager => "Language support",
+        .agent_settings => "Agent providers",
     };
     const help: []const u8 = switch (row) {
         .wrap => "Wrap long lines at the editor width without changing the file.",
@@ -359,9 +467,51 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         .gutters => "Mark added, changed and deleted lines beside the source.",
         .blame => "Show the author of the current line after a short delay.",
         .motion => "Reduce decorative animations across the workspace.",
+        .indent_guides => "Show vertical guides at indentation stops.",
+        .active_line => "Tint the focused editor's current line.",
+        .fold_controls => "Show disclosure arrows beside line numbers on hover.",
+        .project_file_icons => "Use the selected icon theme for project files.",
+        .project_folder_icons => "Show folder icons beside disclosure arrows.",
+        .project_panel_width => "Default width of the project sidebar in pixels.",
+        .project_entry_spacing => "Height of file and folder rows in pixels.",
+        .tooltips => "Explain icon actions when the pointer pauses over them.",
+        .tooltip_delay => "Delay before a tooltip appears, in milliseconds.",
+        .search_case_sensitive => "Start buffer searches with case-sensitive matching.",
+        .search_whole_word => "Start buffer searches by matching complete words.",
+        .agent_editor => "Show the editor and change review in wide agent windows.",
+        .keymap_json => "Configure command shortcuts and Vim mappings in settings.json.",
+        .languages_manager => "Install language grammars and servers from Extensions.",
+        .agent_settings => "Configure ACP and Codex providers, paths and proxy profiles.",
     };
     var controls: std.ArrayList(ui.Element) = .empty;
     switch (row) {
+        .project_panel_width, .project_entry_spacing, .tooltip_delay => {
+            const n = switch (row) {
+                .project_panel_width => values.project_panel_width,
+                .project_entry_spacing => values.project_entry_spacing,
+                else => values.tooltip_delay,
+            };
+            const down: Change = switch (row) {
+                .project_panel_width => .width_down,
+                .project_entry_spacing => .spacing_down,
+                else => .delay_down,
+            };
+            const up: Change = switch (row) {
+                .project_panel_width => .width_up,
+                .project_entry_spacing => .spacing_up,
+                else => .delay_up,
+            };
+            try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, down, "−"), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{n}), c.text, 13), try changeButton(b, c, up, "+") });
+        },
+        .keymap_json, .languages_manager, .agent_settings => try controls.append(b.allocator(), try changeButton(b, c, switch (row) {
+            .keymap_json => .keymap_json,
+            .languages_manager => .languages_manager,
+            else => .agent_settings,
+        }, switch (row) {
+            .keymap_json => "Edit shortcuts…",
+            .languages_manager => "Open extensions",
+            else => "Configure providers…",
+        })),
         .theme, .icons => {
             var name: []const u8 = if (row == .theme) (if (std.mem.eql(u8, values.theme, "zircon.system")) "System" else if (std.mem.eql(u8, values.theme, "zircon.light")) "One Light" else "One Dark") else "Zircon icons";
             if (snapshot) |generation| {
@@ -397,8 +547,17 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 try controls.append(b.allocator(), try b.button(.{ .label = choice[1], .on_click = try b.onClickWith(choice[0], View.change), .style = style }));
             }
         },
-        .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures => {
+        .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor => {
             const enabled = switch (row) {
+                .indent_guides => values.indent_guides,
+                .active_line => values.active_line,
+                .fold_controls => values.fold_controls,
+                .project_file_icons => values.project_file_icons,
+                .project_folder_icons => values.project_folder_icons,
+                .tooltips => values.tooltips,
+                .search_case_sensitive => values.search_case_sensitive,
+                .search_whole_word => values.search_whole_word,
+                .agent_editor => values.agent_editor,
                 .vim => values.vim_mode,
                 .ligatures => values.font_ligatures,
                 .wrap => values.soft_wrap != .none,
@@ -408,6 +567,15 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 else => values.reduced_motion,
             };
             const change: Change = switch (row) {
+                .indent_guides => .indent_guides,
+                .active_line => .active_line,
+                .fold_controls => .fold_controls,
+                .project_file_icons => .project_file_icons,
+                .project_folder_icons => .project_folder_icons,
+                .tooltips => .tooltips,
+                .search_case_sensitive => .search_case_sensitive,
+                .search_whole_word => .search_whole_word,
+                .agent_editor => .agent_editor,
                 .wrap => .wrap,
                 .vim => .vim,
                 .ligatures => .ligatures,
@@ -451,11 +619,15 @@ fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, q
     };
     if (generation) |snapshot| for (snapshot.installed()) |entry| {
         if (!entry.enabled) continue;
-        if (picker == .theme) for (entry.themes) |theme| {
-            if (@import("../view.zig").matches(query, theme.name)) try choices.append(a, .{ .name = theme.name, .patch = .{ .theme = theme.id } });
-        } else if (picker == .icons) for (entry.icon_themes) |icons| {
-            if (@import("../view.zig").matches(query, icons.name)) try choices.append(a, .{ .name = icons.name, .patch = .{ .icon_theme = icons.id } });
-        };
+        if (picker == .theme) {
+            for (entry.themes) |theme| {
+                if (@import("../view.zig").matches(query, theme.name)) try choices.append(a, .{ .name = theme.name, .patch = .{ .theme = theme.id } });
+            }
+        } else if (picker == .icons) {
+            for (entry.icon_themes) |icons| {
+                if (@import("../view.zig").matches(query, icons.name)) try choices.append(a, .{ .name = icons.name, .patch = .{ .icon_theme = icons.id } });
+            }
+        }
     };
     return choices.toOwnedSlice(a);
 }

@@ -40,7 +40,7 @@ pub fn vertical(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
         const point = try snapshot.pointAt(item.head);
         const current_range = try snapshot.lineRange(point.line);
         const amount: usize = if (key == .page_up or key == .page_down) @max(1, @as(usize, @intFromFloat(e.bounds.height / self.line_height))) else 1;
-        const wrapped = self.soft_wrap != .none and self.wrap_cache.valid(snapshot.revision());
+        const wrapped = self.projected() and self.wrap_cache.valid(snapshot.revision());
         const current_visual = if (wrapped) self.wrap_cache.atOffset(item.head) else 0;
         const target_visual = if (key == .up or key == .page_up) current_visual -| amount else @min(self.wrap_cache.rows.items.len -| 1, current_visual +| amount);
         const row = if (wrapped) self.wrap_cache.rows.items[target_visual].line else if (key == .up or key == .page_up) point.line -| amount else @min(snapshot.lineCount() - 1, point.line +| amount);
@@ -63,7 +63,7 @@ pub fn vertical(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
 pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), point: ui.Point) !usize {
     const metrics = try e.textMetrics();
     const relative = @max(0, point.y - e.bounds.y + self.scroll.offset);
-    const wrapped = self.soft_wrap != .none and self.wrap_cache.valid(snapshot.revision());
+    const wrapped = self.projected() and self.wrap_cache.valid(snapshot.revision());
     const part = if (wrapped) self.wrap_cache.rows.items[self.wrap_cache.visualAt(relative, self.line_height, self.visibleChanges(snapshot.revision()))] else null;
     const row = @min(snapshot.lineCount() - 1, self.rowAt(relative, snapshot.revision()));
     const range = try snapshot.lineRange(row);

@@ -108,9 +108,9 @@ fn treeRow(self: *const Shell, b: *ui.Ui, entries: []const git.Entry, row: tree.
             const selected = std.mem.eql(u8, self.git.selected_path, entry.path);
             var style = v.iconButtonStyle(c, false);
             const name = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (entry.staged and !entry.unstaged) "Unstage" else "Stage", entry.path });
-            const staging = try b.button(.{ .label = name, .children = &.{try v.icon(b, if (entry.staged and entry.unstaged) .square_mixed else if (entry.staged) .square_checked else .square, if (entry.staged) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(Target{ .index = file.index, .generation = self.git.status_generation }, stage), .style = style });
+            const staging = try b.button(.{ .label = name, .tooltip = name, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, if (entry.staged and entry.unstaged) .square_mixed else if (entry.staged) .square_checked else .square, if (entry.staged) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(Target{ .index = file.index, .generation = self.git.status_generation }, stage), .style = style });
             style = .{ .direction = .row, .height = .{ .px = row_height }, .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 6, .align_items = .center, .padding = .{ .left = 26 + @as(f32, @floatFromInt(file.depth)) * 14 }, .overflow = .hidden };
-            const target = try b.button(.{ .label = entry.path, .children = &.{ try v.icon(b, v.fileIcon(entry.path), tint, 15), try b.styled(try v.text(b, std.fs.path.basename(entry.path), c.text, 12), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.text }, .overflow = .hidden }), try v.text(b, switch (change) {
+            const target = try b.button(.{ .label = entry.path, .children = &.{ try v.fileGlyph(self, b, entry.path, false, false, 15), try b.styled(try v.text(b, std.fs.path.basename(entry.path), c.text, 12), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.text }, .overflow = .hidden }), try v.text(b, switch (change) {
                 .added => "A",
                 .deleted => "D",
                 .modified => "M",

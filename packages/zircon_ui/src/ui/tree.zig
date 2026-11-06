@@ -12,6 +12,8 @@ pub const Node = struct {
     key: ?elements.Key = null,
     on_input: ?@import("adapter.zig").InputHandler = null,
     on_capture: ?@import("adapter.zig").InputHandler = null,
+    tooltip: ?[]const u8 = null,
+    tooltip_colors: ?[3]@import("../layout/geometry.zig").Color = null,
     focusable: bool = false,
     autofocus: bool = false,
     focus_request: u64 = 0,
@@ -42,6 +44,9 @@ pub const Frame = struct {
     text_input: ?@import("../platform/interface.zig").TextSnapshot = null,
     focused_node: ?u32 = null,
     hovered_node: ?u32 = null,
+    hover_started: f64 = 0,
+    tooltip_delay: f64 = 0.4,
+    tooltips_enabled: bool = true,
     pub fn init(a: std.mem.Allocator) !Frame {
         return .{ .arena = .init(a), .epoch = try epoch() };
     }
@@ -68,6 +73,9 @@ pub const Frame = struct {
         frame.text_input = null;
         frame.focused_node = null;
         frame.hovered_node = null;
+        frame.hover_started = 0;
+        frame.tooltip_delay = 0.4;
+        frame.tooltips_enabled = true;
         frame.next_deadline = null;
     }
     pub fn discard(frame: *Frame) void {

@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-06",
+  "method": "Actual AppKit/Metal snapshots from buffer_controls_tests.zig, settings_tests.zig and experience_tests.zig. Hidden native windows use the dimensions requested at creation.",
+  "captures": [
+    {
+      "file": "zircon-buffer-find.png",
+      "width": 1200,
+      "height": 760,
+      "sha256": "f7d7e956222ec8e96cc798a2829cffef3de810ab9b329da9a2a25f736f31c679"
+    },
+    {
+      "file": "zircon-buffer-find-light-narrow.png",
+      "width": 760,
+      "height": 500,
+      "sha256": "8ffa278aadd8e633022844d8f968f009774f174b58a2f79599b57ba1601bb2aa"
+    },
+    {
+      "file": "zircon-gutter-hover.png",
+      "width": 1200,
+      "height": 760,
+      "sha256": "dad63b352079ac77d8a6859ec54b63c37bf74ee2a57278527ee37179f9e52993"
+    },
+    {
+      "file": "zircon-gutter-folded.png",
+      "width": 1200,
+      "height": 760,
+      "sha256": "1143b8f0093a505188e5377cc6d9b4fb953615de20f2e61d2739d32f60538b56"
+    },
+    {
+      "file": "zircon-inline-hunk.png",
+      "width": 1200,
+      "height": 760,
+      "sha256": "d089ebcfabf46aec480e11428459b1932aa5a24faa63092349b925037b01e351"
+    },
+    {
+      "file": "zircon-icon-theme-switched.png",
+      "width": 1200,
+      "height": 760,
+      "sha256": "6c8b5d601fc332eba52cc3728a4d77f2bd928940b88db1aa45f129a80db82461"
+    },
+    {
+      "file": "zircon-icon-tooltip.png",
+      "width": 1200,
+      "height": 760,
+      "sha256": "aa235509c29a9808ba134f64f00ceec0512a7bdbb76eb0b9f2b7b26db868adf5"
+    },
+    {
+      "file": "zircon-settings-gutter-dark.png",
+      "width": 1000,
+      "height": 700,
+      "sha256": "4e5ae141eccd23e8b6dfd75a6ce4386a21bc051845e1c0bcdcddf332afd5e2a6"
+    },
+    {
+      "file": "zircon-settings-gutter-light.png",
+      "width": 1000,
+      "height": 700,
+      "sha256": "93001e610d31a6f3223599d40bdbacbed053348d5ab3087f3987eedeabd1119c"
+    }
+  ]
+}

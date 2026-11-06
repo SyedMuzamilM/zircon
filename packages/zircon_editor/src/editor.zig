@@ -29,6 +29,10 @@ pub const Editor = struct {
     show_git_gutters: bool = true,
     inline_blame: ?@import("annotations.zig").Blame = null,
     show_line_numbers: bool = true,
+    gutter_hovered: bool = false,
+    show_indent_guides: bool = true,
+    highlight_active_line: bool = true,
+    show_fold_controls: bool = true,
     font_size: f32 = 14,
     line_height: f32 = 22,
     tab_width: usize = 4,
@@ -45,6 +49,9 @@ pub const Editor = struct {
     marked: ?text.Range = null,
     dragging: bool = false,
     last_viewport: ui.Size = .{ .width = 800, .height = 500 },
+    search_ranges: []text.Range = &.{},
+    search_revision: ?u64 = null,
+    search_visible: bool = false,
     search_query: []u8 = &.{},
     search_case_sensitive: bool = true,
     pub fn init(a: std.mem.Allocator) !Editor {
@@ -63,6 +70,7 @@ pub const Editor = struct {
         self.syntax_cache.deinit();
         for (self.history.items) |entry| self.allocator.free(entry.items);
         self.history.deinit(self.allocator);
+        self.allocator.free(self.search_ranges);
         self.allocator.free(self.search_query);
         self.* = undefined;
     }
@@ -124,8 +132,30 @@ pub const Editor = struct {
         if (self.inline_blame) |*value| value.deinit(self.allocator);
         self.inline_blame = null;
     }
+    pub fn projected(self: *const Editor) bool {
+        return self.soft_wrap != .none or self.wrap_cache.folding.collapsed.items.len > 0;
+    }
+    pub fn projectionWidth(self: *const Editor, width: f32) f32 {
+        return if (self.soft_wrap != .none) width else 1e12;
+    }
+    pub fn toggleFold(self: *Editor, snapshot: text.Snapshot, row: usize) !bool {
+        try self.wrap_cache.folding.ensure(self.allocator, snapshot, self.tab_width);
+        if (!try self.wrap_cache.folding.toggle(self.allocator, row)) return false;
+        self.wrap_cache.revision = null;
+        self.wrap_cache.pending = null;
+        self.hideBlame();
+        const region = self.wrap_cache.folding.region(row).?;
+        if (self.wrap_cache.folding.isCollapsed(region.start)) {
+            self.selections.single(.{ .anchor = region.start, .head = region.start });
+            self.vim.cursor = region.start;
+            for (self.git_changes) |*change| {
+                if (change.start >= row and change.start <= region.last) change.expanded = false;
+            }
+        }
+        return true;
+    }
     pub fn rowAt(self: *const Editor, y: f32, revision: u64) usize {
-        if (self.soft_wrap != .none and self.wrap_cache.valid(revision)) return self.wrap_cache.rows.items[self.wrap_cache.visualAt(y, self.line_height, self.visibleChanges(revision))].line;
+        if (self.projected() and self.wrap_cache.valid(revision)) return self.wrap_cache.rows.items[self.wrap_cache.visualAt(y, self.line_height, self.visibleChanges(revision))].line;
         return @import("annotations.zig").sourceRow(y, self.line_height, self.visibleChanges(revision));
     }
     pub fn primary(self: *const Editor) selection.Selection {
@@ -364,20 +394,24 @@ pub const Editor = struct {
     }
     pub fn prepareView(self: *Editor, snapshot: text.Snapshot, viewport: ui.Size, metrics: ui.layout.Measurer) !void {
         self.last_viewport = viewport;
-        if (self.soft_wrap != .none) {
+        if (self.projected()) {
             const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
-            try self.wrap_cache.ensure(snapshot, viewport.width - gutter - 12, self.font_size, self.tab_width, metrics);
-            self.horizontal = 0;
+            try self.wrap_cache.ensure(snapshot, self.projectionWidth(viewport.width - gutter - 12), self.font_size, self.tab_width, metrics);
+            if (self.soft_wrap != .none) self.horizontal = 0;
         }
         self.reveal(snapshot);
     }
     pub fn reveal(self: *Editor, snapshot: text.Snapshot) void {
+        if (self.wrap_cache.folding.reveal(self.primary().head)) {
+            self.wrap_cache.revision = null;
+            self.wrap_cache.pending = null;
+        }
         const row = (snapshot.pointAt(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head) catch return).line;
-        const start = if (self.soft_wrap != .none and self.wrap_cache.valid(snapshot.revision())) self.wrap_cache.rowY(self.wrap_cache.atOffset(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head), self.line_height, self.visibleChanges(snapshot.revision())) else self.rowY(row, snapshot.revision());
+        const start = if (self.projected() and self.wrap_cache.valid(snapshot.revision())) self.wrap_cache.rowY(self.wrap_cache.atOffset(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head), self.line_height, self.visibleChanges(snapshot.revision())) else self.rowY(row, snapshot.revision());
         self.scroll.reveal(start, start + self.line_height, self.contentHeight(snapshot), self.last_viewport.height);
     }
     pub fn rowY(self: *const Editor, row: usize, revision: u64) f32 {
-        if (self.soft_wrap != .none and self.wrap_cache.valid(revision)) return self.wrap_cache.y(row, self.line_height, self.visibleChanges(revision));
+        if (self.projected() and self.wrap_cache.valid(revision)) return self.wrap_cache.y(row, self.line_height, self.visibleChanges(revision));
         return @import("annotations.zig").rowY(row, self.line_height, self.visibleChanges(revision));
     }
     pub fn visibleChanges(self: *const Editor, revision: u64) []const @import("annotations.zig").GitChange {
@@ -395,9 +429,22 @@ pub const Editor = struct {
         const modal = self.vim.enabled and self.vim.mode != .insert;
         const start = if (modal and self.primary().empty()) (if (backward) try snapshot.previousBoundary(self.primary().head) else try snapshot.nextBoundary(self.primary().head)) else if (backward) self.primary().range().start else self.primary().range().end;
         const direction: text.Direction = if (backward) .backward else .forward;
-        const found = (try snapshot.find(query, start, direction, self.search_case_sensitive)) orelse (try snapshot.find(query, if (backward) snapshot.byteLen() else 0, direction, self.search_case_sensitive));
+        const found: ?text.Range = if (self.search_revision == snapshot.revision() and std.mem.eql(u8, query, self.search_query)) blk: {
+            if (self.search_ranges.len == 0) break :blk null;
+            if (backward) {
+                var i = self.search_ranges.len;
+                while (i > 0) {
+                    i -= 1;
+                    if (self.search_ranges[i].start < self.primary().range().start) break :blk self.search_ranges[i];
+                }
+                break :blk self.search_ranges[self.search_ranges.len - 1];
+            }
+            for (self.search_ranges) |range| if (range.start >= start) break :blk range;
+            break :blk self.search_ranges[0];
+        } else (try snapshot.find(query, start, direction, self.search_case_sensitive)) orelse (try snapshot.find(query, if (backward) snapshot.byteLen() else 0, direction, self.search_case_sensitive));
         self.allocator.free(self.search_query);
         self.search_query = owned;
+        self.search_visible = true;
         if (found) |range| {
             self.selections.single(.{ .anchor = range.start, .head = if (modal) range.start else range.end });
             if (modal) {
@@ -433,7 +480,7 @@ pub const Editor = struct {
             var fixed: ui.layout.FixedMetrics = .{ .advance = self.font_size * 0.6, .line_height = self.line_height };
             const metrics = if (event._surface != null) try event.textMetrics() else fixed.measurer();
             const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
-            try self.wrap_cache.ensure(snapshot, event.bounds.width - gutter - 12, self.font_size, self.tab_width, metrics);
+            try self.wrap_cache.ensure(snapshot, self.projectionWidth(event.bounds.width - gutter - 12), self.font_size, self.tab_width, metrics);
             if (event.data == .text or event.data == .edit or event.data == .key_down) self.reveal(snapshot);
         }
         if (result.handled and event._surface != null and (event.data == .text or event.data == .edit or event.data == .key_down)) {

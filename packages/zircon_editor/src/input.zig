@@ -10,6 +10,20 @@ const navigation = @import("navigation.zig");
 pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !Outcome {
     try self.validate();
     self.last_viewport = .{ .width = e.bounds.width, .height = e.bounds.height };
+    if (e.data == .pointer_move or e.data == .pointer_down) {
+        const point = if (e.data == .pointer_move) e.data.pointer_move.position else e.data.pointer_down.position;
+        var source = document.snapshot();
+        defer source.deinit();
+        const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(source.lineCount(), self.font_size) else 20;
+        self.gutter_hovered = point.x >= e.bounds.x and point.x < e.bounds.x + gutter;
+        if (self.show_fold_controls and self.show_line_numbers and e.data == .pointer_down and e.data.pointer_down.button == .primary and point.x >= e.bounds.x + gutter - 28 and point.x < e.bounds.x + gutter - 4) {
+            const row = @min(source.lineCount() - 1, self.rowAt(point.y - e.bounds.y + self.scroll.offset, source.revision()));
+            if (try self.toggleFold(source, row)) {
+                e.preventDefault();
+                return .{ .handled = true };
+            }
+        }
+    } else if (e.data == .pointer_leave) self.gutter_hovered = false;
     if (try @import("vim.zig").handle(self, document, e)) |result| return result;
     var snapshot = document.snapshot();
     defer snapshot.deinit();
@@ -92,7 +106,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             // Candidate navigation and acceptance belong to the input method
             // while marked text exists. Escape explicitly cancels our group.
             if (self.marked != null and !command and key.key != .escape) return .{};
-            if (!command and (key.key == .up or key.key == .down or key.key == .page_up or key.key == .page_down) and (e._surface != null or self.soft_wrap != .none)) {
+            if (!command and (key.key == .up or key.key == .down or key.key == .page_up or key.key == .page_down) and (e._surface != null or self.projected())) {
                 try navigation.vertical(self, snapshot, e, key.key, key.modifiers.shift);
                 e.preventDefault();
                 return .{ .handled = true };

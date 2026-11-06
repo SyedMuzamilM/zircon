@@ -197,10 +197,16 @@ test "Vim slash search uses the focused find field and returns to Normal" {
     _ = try app.step(0);
     const Read = struct {
         fn matched(self: *const zircon.Shell) bool {
-            return self.overlay == .none and self.tabs.items[0].editor.vim.mode == .normal and self.tabs.items[0].editor.primary().head == 4;
+            return self.overlay == .none and !self.find.visible and self.tabs.items[0].editor.vim.mode == .normal and self.tabs.items[0].editor.primary().head == 4;
         }
     };
     const owner = try app.windowEntity(zircon.Shell, h);
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (!try app.read(owner, Read.matched, .{})) {
+        _ = try app.step(0);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.FindTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
     try t.expect(try app.read(owner, Read.matched, .{}));
 }
 

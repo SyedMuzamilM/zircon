@@ -4,15 +4,19 @@ const ui = @import("zircon_ui");
 const Shell = @import("../shell.zig").Shell;
 const a = std.heap.page_allocator;
 pub const Stamp = struct { generation: u64 = 0, index: usize = 0, document: ?@import("zircon_workspace").DocumentId = null, revision: u64 = 0 };
+pub const SearchMatch = struct { start: usize, end: usize, replacement: []const u8 };
+pub const SearchResult = struct { matches: []const SearchMatch, truncated: bool };
 pub const Highlights = struct { spans: []const @import("zircon_editor").syntax.Span, bytes: usize };
 pub const Result = struct {
     highlights: ?std.json.Parsed(Highlights) = null,
+    search: ?std.json.Parsed(SearchResult) = null,
     stamp: Stamp,
     success: bool,
     stdout: []u8,
     stderr: []u8,
     pub fn deinit(self: *Result) void {
         if (self.highlights) |*parsed| parsed.deinit();
+        if (self.search) |*parsed| parsed.deinit();
         a.free(self.stdout);
         a.free(self.stderr);
     }
@@ -33,6 +37,17 @@ const Job = struct {
             result.highlights = std.json.parseFromSlice(Highlights, a, result.stdout, .{ .allocate = .alloc_always }) catch |err| blk: {
                 result.success = false;
                 const message = try std.fmt.allocPrint(a, "Invalid grammar response: {s}", .{@errorName(err)});
+                a.free(result.stderr);
+                result.stderr = message;
+                break :blk null;
+            };
+            a.free(result.stdout);
+            result.stdout = &.{};
+        }
+        if (result.success and self.argv.len > 1 and std.mem.eql(u8, self.argv[1], "search")) {
+            result.search = std.json.parseFromSlice(SearchResult, a, result.stdout, .{ .allocate = .alloc_always }) catch |err| blk: {
+                result.success = false;
+                const message = try std.fmt.allocPrint(a, "Invalid search response: {s}", .{@errorName(err)});
                 a.free(result.stderr);
                 result.stderr = message;
                 break :blk null;

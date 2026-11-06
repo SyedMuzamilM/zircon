@@ -26,7 +26,7 @@ pub fn icon(b: *ui.Ui, name: Icon, color: ui.Color, size: f32) !ui.Element {
     return ui.controls.icons.element(b, name, color, size);
 }
 pub fn iconButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, name: Icon, selected: bool) !ui.Element {
-    return b.button(.{ .label = label, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(action, Shell.onCommand), .style = iconButtonStyle(c, selected) });
+    return b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(action, Shell.onCommand), .style = iconButtonStyle(c, selected) });
 }
 pub fn iconButtonStyle(c: Palette, selected: bool) ui.Style {
     return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover };
@@ -35,7 +35,7 @@ pub fn buttonStyle(c: Palette, primary: bool) ui.Style {
     return .{ .direction = .row, .height = .{ .px = metrics.control }, .gap = 6, .align_items = .center, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = metrics.control_radius, .background = if (primary) c.primary else c.element, .hover_background = if (primary) c.primary_hover else c.hover, .text = .{ .size = 12, .color = if (primary) c.on_primary else c.text }, .flex_shrink = 0 };
 }
 pub fn inputAppearance(c: Palette) ui.controls.TextInput.Appearance {
-    return .{ .background = c.document, .foreground = c.text, .placeholder = c.muted, .selection = c.selection, .caret = c.accent, .focus_border = c.accent };
+    return .{ .background = c.document, .border = c.line, .foreground = c.text, .placeholder = c.muted, .selection = c.selection, .caret = c.accent, .focus_border = c.accent };
 }
 pub fn actionButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, primary: bool) !ui.Element {
     const glyph: ?Icon = switch (action) {
@@ -115,3 +115,12 @@ const PanelSurface = struct {
         try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + 1, .y = bounds.y + 1, .width = @max(0, bounds.width - 2), .height = @max(0, bounds.height - 2) }, .radius = metrics.popover_radius - 1, .color = self.colors.panel });
     }
 };
+
+/// Resolve semantic file icons everywhere through the active installed theme.
+pub fn fileGlyph(self: *const Shell, b: *ui.Ui, path: []const u8, directory: bool, expanded: bool, size: f32) !ui.Element {
+    if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(self.active_icon_theme)) |theme| switch (theme.resolve(path, directory)) {
+        .symbol => |symbol| return text(b, symbol, if (directory) self.colors.folder else fileColor(self.colors, path), size),
+        .png => |asset| if (self.icons.find(asset.path)) |image| return @import("image.zig").element(b, image, .{ .width = .{ .px = size }, .height = .{ .px = size }, .flex_shrink = 0 }),
+    };
+    return icon(b, if (directory) (if (expanded) .folder_open else .folder) else fileIcon(path), if (directory) self.colors.muted else fileColor(self.colors, path), size);
+}

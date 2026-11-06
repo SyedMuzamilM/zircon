@@ -110,6 +110,7 @@ pub fn build(b: *std.Build) void {
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);
     const extension_host_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
     extension_host_build.addFileArg(b.path("tools/zed-extension-host/Cargo.toml"));
+    if (target.result.os.tag == .macos) app_run.step.dependOn(&extension_host_build.step);
     const extension_host_install = b.addInstallFileWithDir(b.path("tools/zed-extension-host/target/release/zircon-extension-host"), .bin, "zircon-extension-host");
     extension_host_install.step.dependOn(&extension_host_build.step);
     b.step("extension-host", "Build and install the Zed extension worker").dependOn(&extension_host_install.step);
@@ -154,6 +155,7 @@ pub fn build(b: *std.Build) void {
         app_native_tests.root_module.addAnonymousImport("language_fixture", .{ .root_source_file = b.path("packages/zircon_language/tests/fixture.py") });
         app_native_tests.root_module.addAnonymousImport("image_fixture", .{ .root_source_file = b.path("packages/zircon_extensions/tests/fixtures/pixel.png") });
         const app_native_run = b.addRunArtifact(app_native_tests);
+        app_native_run.step.dependOn(&extension_host_build.step);
         b.step("test-editor-native", "Drive native editor input, persistence, and close policy").dependOn(&app_native_run.step);
         const settings_native_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/zircon/tests/settings_native.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
         const settings_native_run = b.addRunArtifact(settings_native_tests);

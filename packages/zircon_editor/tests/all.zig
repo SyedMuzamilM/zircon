@@ -384,7 +384,7 @@ test "adjacent modified rows paint one continuous Git gutter marker" {
     _ = try app.step(0);
     var markers: usize = 0;
     var height: f32 = 0;
-    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.x == 4 and item.rect.width == 3) {
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.x == 0 and item.rect.width == 6) {
         markers += 1;
         height += item.rect.height;
     };
@@ -874,4 +874,71 @@ test "comments use extension delimiters and block-only profiles with CRLF and mu
     result = try state.execute(&document, .toggle_comment);
     release(&result);
     try expectText(&document, "  日 = 1\r\n  x = 2\r\n");
+}
+
+test "folding hides body rows without wrapping and revealing a hidden cursor unfolds it" {
+    var doc = try text.Document.init(t.allocator, "fn main() {\n    one();\n    two();\n}\nnext();\n");
+    defer doc.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    var source = doc.snapshot();
+    defer source.deinit();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try t.expect(try state.toggleFold(source, 0));
+    try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
+    try t.expectEqual(@as(usize, 3), state.wrap_cache.rows.items.len);
+    try t.expectEqual(@as(usize, 4), state.rowAt(22, source.revision()));
+    try t.expectApproxEqAbs(@as(f32, 22), state.rowY(4, source.revision()), 0.01);
+    var result = try state.execute(&doc, .{ .move = .{ .direction = .right } });
+    release(&result);
+    try t.expectEqual(@as(usize, 1), state.wrap_cache.folding.collapsed.items.len);
+    const hidden = try source.lineStart(2);
+    try state.setSelection(source, .{ .start = hidden, .end = hidden });
+    state.reveal(source);
+    try t.expectEqual(@as(usize, 0), state.wrap_cache.folding.collapsed.items.len);
+    try t.expectEqual(@as(usize, 2), state.rowAt(44, source.revision()));
+}
+
+test "folded wrapped buffers keep row mappings and Vim vertical motion skips folded text" {
+    var doc = try text.Document.init(t.allocator, "fn main() {\n    one();\n    two();\n}\nnext();\n");
+    defer doc.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.soft_wrap = .editor_width;
+    state.setVim(true);
+    var source = doc.snapshot();
+    defer source.deinit();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try t.expect(try state.toggleFold(source, 0));
+    try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
+    try vimKeys(&state, &doc, "j");
+    try t.expectEqual(@as(usize, 4), (try source.pointAt(state.primary().head)).line);
+    try t.expectEqual(@as(usize, 1), state.wrap_cache.folding.collapsed.items.len);
+}
+test "folds survive edits before a header and unfolding restores all wrapped source rows" {
+    var doc = try text.Document.init(t.allocator, "before\nfn main() {\n    one();\n    two();\n}\nafter\n");
+    defer doc.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.soft_wrap = .editor_width;
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    {
+        var source = doc.snapshot();
+        defer source.deinit();
+        try t.expect(try state.toggleFold(source, 1));
+        try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
+    }
+    var outcome = try state.applyEdits(&doc, &.{.{ .range = .{ .start = 0, .end = 0 }, .text = "added\n" }}, 0);
+    release(&outcome);
+    var source = doc.snapshot();
+    defer source.deinit();
+    const header = try source.lineStart(2);
+    try state.setSelection(source, .{ .start = header, .end = header });
+    try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
+    try t.expectEqual(@as(usize, 1), state.wrap_cache.folding.collapsed.items.len);
+    try t.expectEqual(@as(usize, 5), state.wrap_cache.rows.items.len);
+    try t.expect(try state.toggleFold(source, 2));
+    try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
+    try t.expectEqual(source.lineCount(), state.wrap_cache.rows.items.len);
+    for (state.wrap_cache.rows.items, 0..) |row, i| try t.expectEqual(i, row.line);
 }

@@ -2720,6 +2720,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "libc",
+ "regex",
  "resvg",
  "serde_json",
  "tar",

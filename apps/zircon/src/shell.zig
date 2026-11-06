@@ -13,7 +13,7 @@ pub const TreeRow = struct { name: []u8, path: []u8, directory: bool, depth: u16
 pub const IndexedFile = struct { path: []u8, label: []u8 };
 pub const Overlay = enum { none, open_project, palette, quick_open, open_path, save_as, extension_path, project_search, find, replace, dirty };
 pub const CloseTarget = union(enum) { tab: usize, window };
-pub const Fields = struct { agent_query: ui.Entity(ui.controls.TextInput), extension_query: ui.Entity(ui.controls.TextInput), query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
+pub const Fields = struct { find_query: ui.Entity(ui.controls.TextInput), agent_query: ui.Entity(ui.controls.TextInput), extension_query: ui.Entity(ui.controls.TextInput), query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     workspace: workspace.Workspace,
@@ -24,6 +24,13 @@ pub const Shell = struct {
     active_pane: enum { primary, secondary } = .primary,
     sidebar_visible: bool = true,
     sidebar_width: f32 = 250,
+    project_default_width: f32 = 250,
+    project_entry_spacing: f32 = 24,
+    project_file_icons: bool = true,
+    project_folder_icons: bool = true,
+    tooltips: bool = true,
+    tooltip_delay: f32 = 400,
+    agent_editor_setting: bool = true,
     git_sidebar_width: f32 = 320,
     menu_anchor: ui.Rect = .{},
     split_anchor: ui.Rect = .{},
@@ -59,9 +66,10 @@ pub const Shell = struct {
     settings: ?ui.Entity(@import("settings/model.zig").Settings) = null,
     settings_window: ?ui.WindowHandle = null,
     colors: @import("theme.zig").Palette = .{},
-    editor_options: struct { soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
+    editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: @import("services/git.zig").Model = .{},
     search: @import("services/search.zig").Model = .{},
+    find: @import("services/buffer_find.zig").Model = .{},
     catalog: @import("services/catalog.zig").Model = .{},
     extension_host_path: ?[]const u8 = null,
     language: @import("services/language.zig").Model = .{},
@@ -101,6 +109,7 @@ pub const Shell = struct {
         self.allocator.free(self.status);
         self.git.deinit();
         self.search.deinit();
+        self.find.deinit(self.allocator);
         self.catalog.deinit();
         self.agents.deinit(self.allocator);
         self.language.deinit(self.allocator);
@@ -155,6 +164,24 @@ pub const Shell = struct {
         var values: preferences.Values = undefined;
         try cx.read(settings, preferences.Settings.copy, .{ arena.allocator(), &values });
         self.key_bindings = values.key_bindings;
+        if (values.project_panel_width != self.project_default_width) {
+            self.sidebar_width = values.project_panel_width;
+            self.project_default_width = values.project_panel_width;
+        }
+        self.project_entry_spacing = values.project_entry_spacing;
+        self.project_file_icons = values.project_file_icons;
+        self.project_folder_icons = values.project_folder_icons;
+        self.tooltips = values.tooltips;
+        self.tooltip_delay = values.tooltip_delay;
+        if (!self.find.visible) {
+            self.find.case_sensitive = values.search_case_sensitive;
+            self.find.whole_word = values.search_whole_word;
+        }
+        if (values.agent_editor != self.agent_editor_setting) {
+            self.agent_editor = values.agent_editor;
+            self.agent_editor_setting = values.agent_editor;
+        }
+
         self.inline_blame_enabled = values.git_inline_blame;
         if (!self.inline_blame_enabled) {
             for (self.tabs.items) |*tab| if (tab.editor.inline_blame != null and !tab.editor.inline_blame.?.expanded) tab.editor.hideBlame();
@@ -190,6 +217,9 @@ pub const Shell = struct {
             tab.editor.show_line_numbers = values.line_numbers;
             tab.editor.theme = if (light) editor.Theme.light else .{};
             tab.editor.show_git_gutters = values.git_gutters;
+            tab.editor.show_indent_guides = values.indent_guides;
+            tab.editor.highlight_active_line = values.active_line;
+            tab.editor.show_fold_controls = values.fold_controls;
         }
         if (self.secondary) |*pane| {
             pane.editor.soft_wrap = values.soft_wrap;
@@ -202,6 +232,9 @@ pub const Shell = struct {
             pane.editor.show_line_numbers = values.line_numbers;
             pane.editor.theme = if (light) editor.Theme.light else .{};
             pane.editor.show_git_gutters = values.git_gutters;
+            pane.editor.show_indent_guides = values.indent_guides;
+            pane.editor.highlight_active_line = values.active_line;
+            pane.editor.show_fold_controls = values.fold_controls;
         }
         self.allocator.free(self.active_icon_theme);
         self.active_icon_theme = icon_theme;
@@ -233,7 +266,7 @@ pub const Shell = struct {
             pane.editor.synchronize(snapshot);
             try actions.prepareEditor(self, cx, &pane.editor, snapshot, "secondary-editor");
         }
-        self.editor_options = .{ .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        self.editor_options = .{ .indent_guides = values.indent_guides, .active_line = values.active_line, .fold_controls = values.fold_controls, .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
         try self.styleInputs(cx);
         cx.notify();
     }
@@ -241,13 +274,16 @@ pub const Shell = struct {
         if (self.agents.composer) |*compose| compose.editor.theme = self.editor_options.theme;
         for (self.agents.sessions.items) |session| session.preview.colors = self.previewColors();
         const appearance = @import("views/components.zig").inputAppearance(self.colors);
-        if (self.fields) |fields| inline for (.{ "agent_query", "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
+        if (self.fields) |fields| inline for (.{ "find_query", "agent_query", "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
     }
     pub fn panelWidth(self: *const Shell) f32 {
         return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;
     }
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
         const options = self.editor_options;
+        state.show_indent_guides = options.indent_guides;
+        state.highlight_active_line = options.active_line;
+        state.show_fold_controls = options.fold_controls;
         state.soft_wrap = options.soft_wrap;
         state.setVim(options.vim_mode);
         state.vim.bindings = options.vim_bindings;
@@ -332,7 +368,7 @@ pub const Shell = struct {
             self.sidebar_visible = true;
             for (self.tree.items, 0..) |row, index| if (std.mem.eql(u8, row.path, path[0..target.prefix])) {
                 if (row.directory and !row.expanded) try actions.activateTree(self, index);
-                self.tree_scroll.reveal(@as(f32, @floatFromInt(index)) * 24, @as(f32, @floatFromInt(index + 1)) * 24, @as(f32, @floatFromInt(self.tree.items.len)) * 24, 400);
+                self.tree_scroll.reveal(@as(f32, @floatFromInt(index)) * self.project_entry_spacing, @as(f32, @floatFromInt(index + 1)) * self.project_entry_spacing, @as(f32, @floatFromInt(self.tree.items.len)) * self.project_entry_spacing, 400);
                 break;
             };
         };
@@ -416,7 +452,7 @@ pub const Shell = struct {
     }
     pub fn onTreeInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         if (e.data == .scroll) {
-            self.tree_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(self.tree.items.len)) * 24, e.bounds.height);
+            self.tree_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(self.tree.items.len)) * self.project_entry_spacing, e.bounds.height);
             e.preventDefault();
             cx.notify();
         }
@@ -470,11 +506,15 @@ pub const Shell = struct {
             cx.notify();
         };
     }
+    pub fn onFindQuery(self: *Shell, cx: *ui.Context(Shell), _: ui.Entity(ui.controls.TextInput)) !void {
+        if (self.find.visible) try @import("services/buffer_find.zig").changed(self, cx);
+    }
     pub fn pollLanguage(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.window) |handle| _ = cx.app.window(handle) catch |err| switch (err) {
             error.WindowNotFound => return,
             else => return err,
         };
+        try @import("services/buffer_find.zig").poll(self, cx);
         try @import("services/agents.zig").poll(self, cx);
         try @import("services/language.zig").poll(self, cx);
         try @import("services/git.zig").pollBlame(self, cx);

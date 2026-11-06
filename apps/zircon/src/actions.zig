@@ -15,6 +15,10 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
     _ = try cx.observe(self.settings.?, Shell.onSettings);
     try self.onSettings(cx, self.settings.?);
     if (self.fields == null) {
+        var find_input = try ui.controls.TextInput.init(self.allocator, "");
+        find_input.leading_icon = .search;
+        find_input.placeholder = "Find in buffer…";
+        const find_query = try cx.createChild(ui.controls.TextInput, find_input);
         var agent_input = try ui.controls.TextInput.init(self.allocator, "");
         agent_input.leading_icon = .search;
         agent_input.placeholder = "Search providers or models…";
@@ -29,7 +33,9 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
         extension_input.placeholder = "Search Zed extensions…";
         const extension_query = try cx.createChild(ui.controls.TextInput, extension_input);
         const project_query = try cx.createChild(ui.controls.TextInput, project_input);
-        const replacement = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        var replace_input = try ui.controls.TextInput.init(self.allocator, "");
+        replace_input.placeholder = "Replace with…";
+        const replacement = try cx.createChild(ui.controls.TextInput, replace_input);
         const destination = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         const path = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         var commit_input = try ui.controls.TextInput.init(self.allocator, "");
@@ -38,8 +44,10 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
             commit_input.deinit(self.allocator);
             return err;
         };
-        self.fields = .{ .agent_query = agent_query, .extension_query = extension_query, .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
+        self.fields = .{ .find_query = find_query, .agent_query = agent_query, .extension_query = extension_query, .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
     }
+    _ = try cx.observe(self.fields.?.find_query, Shell.onFindQuery);
+    _ = try cx.observe(self.fields.?.replacement, Shell.onFindQuery);
     _ = try cx.observe(self.fields.?.path, Shell.onGitPickerQuery);
     try self.styleInputs(cx);
     try @import("project_index.zig").start(self, cx);
@@ -286,12 +294,13 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
     if (try @import("editor_git.zig").handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
+    const old_gutter_hover = selected.editor.gutter_hovered;
     const shortcut = self.key_bindings.resolve(e.data);
     var outcome = if (shortcut == .delete_line or shortcut == .toggle_comment) try selected.editor.execute(&record.doc, if (shortcut == .delete_line) .delete_line else .toggle_comment) else try selected.editor.handle(&record.doc, e);
     if (outcome.handled and (shortcut == .delete_line or shortcut == .toggle_comment)) e.preventDefault();
     if (outcome.request_find) {
         self.vim_find_pending = true;
-        try show(self, cx, .find);
+        try @import("services/buffer_find.zig").open(self, cx, false);
     }
     if (outcome.change != null or outcome.reset) {
         self.allocator.free(self.status);
@@ -311,7 +320,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
         else => try self.reportError(err),
     };
-    if (outcome.handled) cx.notify();
+    if (outcome.handled or old_gutter_hover != selected.editor.gutter_hovered) cx.notify();
     return outcome.handled;
 }
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
@@ -504,8 +513,8 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .open_path => try show(self, cx, .open_path),
         .quick_open => try show(self, cx, .quick_open),
         .palette => try show(self, cx, .palette),
-        .find => try show(self, cx, .find),
-        .replace => try show(self, cx, .replace),
+        .find => try @import("services/buffer_find.zig").open(self, cx, false),
+        .replace => try @import("services/buffer_find.zig").open(self, cx, true),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
         .split_menu => self.split_menu_open = !self.split_menu_open,
         .restart_language_servers => self.language.deinit(self.allocator),
@@ -664,33 +673,11 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             }
         },
         .find_next, .find_previous, .replace_one, .replace_all => {
+            const finder = @import("services/buffer_find.zig");
             const current = try active(self);
-            const record = try self.workspace.get(current.id);
-            const query = try field(cx, self.fields.?.query, self.allocator);
-            defer self.allocator.free(query);
-            if (query.len == 0) return;
-            if (which == .replace_all) {
-                const replacement = try field(cx, self.fields.?.replacement, self.allocator);
-                defer self.allocator.free(replacement);
-                var result = try current.editor.replaceAll(&record.doc, query, replacement);
-                try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result);
-            } else if (which == .replace_one) {
-                var snapshot = record.doc.snapshot();
-                defer snapshot.deinit();
-                const range = current.editor.primary().range();
-                const selected = try snapshot.copy(self.allocator, range);
-                defer self.allocator.free(selected);
-                if (std.mem.eql(u8, selected, query)) {
-                    const replacement = try field(cx, self.fields.?.replacement, self.allocator);
-                    defer self.allocator.free(replacement);
-                    var result = try current.editor.execute(&record.doc, .{ .insert = replacement });
-                    try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result);
-                }
-                _ = try current.editor.findNext(&record.doc, query, false);
-            } else {
-                const found = try current.editor.findNext(&record.doc, query, (which == .find_previous) != (self.vim_find_pending and current.editor.vim.search_backward));
-                if (!found) try self.setStatus(try self.allocator.dupe(u8, "No matches"));
-            }
+            if (!self.find.visible and (which == .replace_one or which == .replace_all)) return finder.open(self, cx, true);
+            try finder.bind(self, cx, current.id, if (self.active_pane == .secondary) 1 else 0);
+            return finder.action(self, cx, which);
         },
         .toggle_comment, .delete_line, .undo, .redo, .select_all => {
             const current = try active(self);
@@ -731,6 +718,12 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
     }
     if (e.data != .key_down) return;
     const key = e.data.key_down;
+    if (self.overlay == .none and self.find.visible and key.key == .escape) {
+        @import("services/buffer_find.zig").close(self, cx);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+    }
     if (try @import("views/git_controls.zig").input(self, e, cx)) return;
     if ((self.menu_open or self.split_menu_open) and key.key == .escape) {
         self.menu_open = false;

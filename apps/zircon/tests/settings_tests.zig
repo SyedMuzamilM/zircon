@@ -19,6 +19,21 @@ test "settings update persists atomically retains unknown keys and refuses inval
     try store.update(.{ .ui_font_size = 15 });
     try store.update(.{ .line_height = 1.8 });
     try store.update(.{ .font_ligatures = true });
+    try store.update(.{ .indent_guides = false });
+    try store.update(.{ .active_line = false });
+    try store.update(.{ .fold_controls = false });
+    try store.update(.{ .project_file_icons = false });
+    try store.update(.{ .project_folder_icons = false });
+    try store.update(.{ .project_panel_width = 300 });
+    try store.update(.{ .project_entry_spacing = 28 });
+    try store.update(.{ .tooltips = false });
+    try store.update(.{ .tooltip_delay = 700 });
+    try store.update(.{ .search_case_sensitive = true });
+    try store.update(.{ .search_whole_word = true });
+    try store.update(.{ .agent_editor = false });
+    try t.expectError(error.InvalidSettings, store.update(.{ .project_entry_spacing = 4 }));
+    try t.expectError(error.InvalidSettings, store.update(.{ .tooltip_delay = 10000 }));
+    try t.expectError(error.InvalidSettings, store.update(.{ .project_panel_width = 10 }));
     try t.expectError(error.InvalidSettings, store.update(.{ .font_size = 0 }));
     try t.expectEqual(@as(f32, 18), store.values().font_size);
     var reopened = try zircon.SettingsStore.init(t.allocator, t.io, path);
@@ -30,6 +45,13 @@ test "settings update persists atomically retains unknown keys and refuses inval
     try t.expectEqual(@as(f32, 15), reopened.values().ui_font_size);
     try t.expectEqual(@as(f32, 1.8), reopened.values().line_height);
     try t.expect(reopened.values().font_ligatures);
+    const values = reopened.values();
+    try t.expect(!values.indent_guides and !values.active_line and !values.fold_controls);
+    try t.expect(!values.project_file_icons and !values.project_folder_icons);
+    try t.expectEqual(@as(f32, 300), values.project_panel_width);
+    try t.expectEqual(@as(f32, 28), values.project_entry_spacing);
+    try t.expect(!values.tooltips and values.tooltip_delay == 700);
+    try t.expect(values.search_case_sensitive and values.search_whole_word and !values.agent_editor);
     const output = try tmp.dir.readFileAlloc(t.io, "settings.json", t.allocator, .limited(4096));
     defer t.allocator.free(output);
     try t.expect(std.mem.indexOf(u8, output, "future_option") != null);
@@ -84,6 +106,53 @@ fn hasText(app: *ui.App, h: ui.WindowHandle, bytes: []const u8) !bool {
     }
     return false;
 }
+test "nested settings sections collapse independently and gutter controls update the editor live" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const path = try std.fs.path.join(t.allocator, &.{ root, "settings.json" });
+    defer t.allocator.free(path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const shell = try zircon.Shell.init(t.allocator, t.io, root, null);
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, shell);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.loadSettings, .{path});
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    try app.update(owner, Ops.open, .{});
+    _ = try app.step(0);
+    const child = try app.read(owner, Ops.child, .{});
+    try t.expect(try hasText(&app, child, "Gutter and folding"));
+    try clickLabel(&app, child, "Editor");
+    _ = try app.step(0);
+    try t.expect(!try hasText(&app, child, "Gutter and folding"));
+    try t.expect(try hasText(&app, child, "Typography"));
+    try clickLabel(&app, child, "Editor");
+    _ = try app.step(0);
+    try clickLabel(&app, child, "Gutter and folding");
+    _ = try app.step(0);
+    try clickLabel(&app, child, "Folding controls");
+    _ = try app.step(0);
+    const Read = struct {
+        fn hidden(self: *const zircon.Shell) bool {
+            return !self.tabs.items[0].editor.show_fold_controls;
+        }
+        fn light(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .theme = "zircon.light" }});
+        }
+    };
+    try t.expect(try app.read(owner, Read.hidden, .{}));
+    if (comptime ui.testing.native != void) try (try app.window(child)).snapshot("/tmp/zircon-settings-gutter-dark.png");
+    try app.update(owner, Read.light, .{});
+    _ = try app.step(0);
+    if (comptime ui.testing.native != void) try (try app.window(child)).snapshot("/tmp/zircon-settings-gutter-light.png");
+    try app.closeWindow(child);
+    var store = try zircon.SettingsStore.init(t.allocator, t.io, path);
+    defer store.deinit();
+    try t.expect(!store.values().fold_controls);
+}
 test "settings search scroll hit geometry and JSON editing persist real user changes" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
@@ -122,7 +191,7 @@ test "settings search scroll hit geometry and JSON editing persist real user cha
     _ = try app.step(4);
     const before = try keyBounds(&app, child, "motion");
     try t.expect(before.y > 460);
-    try app.dispatch(child, .{ .scroll = .{ .position = .{ .x = 800, .y = 350 }, .x = 0, .y = -10000 } });
+    try app.dispatch(child, .{ .scroll = .{ .position = .{ .x = 800, .y = 350 }, .x = 0, .y = -(before.y - 180) } });
     _ = try app.step(5);
     const after = try keyBounds(&app, child, "motion");
     try t.expect(after.y < 400 and after.y > 60);
@@ -229,6 +298,7 @@ test "settings choice search filters independently and commits only with Enter" 
     try app.dispatch(child, .{ .text = "men" });
     _ = try app.step(1);
     try app.dispatch(child, .{ .key_down = .{ .key = .down } });
+    try app.dispatch(child, .{ .key_down = .{ .key = .up } });
     try app.dispatch(child, .{ .key_down = .{ .key = .enter } });
     _ = try app.step(1);
     const Check = struct {

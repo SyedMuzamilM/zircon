@@ -31,6 +31,7 @@ pub const Window = struct {
     capture: ?u32 = null,
     pressed: ?u32 = null,
     pointer_position: ?g.Point = null,
+    hover_started: f64 = 0,
     dirty: bool = true,
     closed: bool = false,
     active: bool = true,
@@ -81,6 +82,7 @@ pub const Window = struct {
         errdefer w.animations.discardFrame();
         staging.timeline = &w.animations;
         staging.time = w.time;
+        staging.hover_started = w.hover_started;
         staging.viewport = w.dimensions;
         const root = try w.render_root(&w.app, w.root, staging);
         try staging.setRoot(root);
@@ -218,7 +220,10 @@ pub const Window = struct {
         const hit = if (point) |p| hitTest(frame, route_root, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
         if (point) |position| {
             w.pointer_position = position;
-            if (frame.hovered_node != hit) w.dirty = true;
+            if (frame.hovered_node != hit) {
+                w.dirty = true;
+                w.hover_started = w.time;
+            }
         }
         const target = if (input == .close) frame.root.?.index else if (point != null) w.capture orelse hit orelse route_root else w.focus orelse route_root;
         if (input == .pointer_down) {

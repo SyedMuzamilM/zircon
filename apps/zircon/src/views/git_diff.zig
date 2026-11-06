@@ -73,7 +73,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             if (!std.mem.eql(u8, previous, hunk.path)) {
                 if (visible(position, file_height, top, bottom)) {
                     if (first == null) first = position;
-                    try lines.append(b.allocator(), try fileHeader(b, c, hunk.path));
+                    try lines.append(b.allocator(), try fileHeader(self, b, c, hunk.path));
                 }
                 position += file_height;
             }
@@ -123,10 +123,10 @@ fn comparison(b: *ui.Ui, c: v.Palette, command: Command, name: []const u8, selec
     style.background = if (selected) c.element else null;
     return b.button(.{ .label = name, .on_click = try b.onClickWith(command, Shell.onCommand), .style = style });
 }
-fn fileHeader(b: *ui.Ui, c: v.Palette, path: []const u8) !ui.Element {
+fn fileHeader(self: *const Shell, b: *ui.Ui, c: v.Palette, path: []const u8) !ui.Element {
     const name = std.fs.path.basename(path);
     const parent = std.fs.path.dirname(path) orelse "";
-    return b.row(.{ .height = .{ .px = file_height }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 14, .right = 12 }, .background = c.sidebar, .overflow = .hidden }, &.{ try v.icon(b, v.fileIcon(path), v.fileColor(c, path), 16), try v.text(b, name, c.text, 13), try b.styled(try v.text(b, parent, c.muted, 12), .{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }) });
+    return b.row(.{ .height = .{ .px = file_height }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 14, .right = 12 }, .background = c.sidebar, .overflow = .hidden }, &.{ try v.fileGlyph(self, b, path, false, false, 16), try v.text(b, name, c.text, 13), try b.styled(try v.text(b, parent, c.muted, 12), .{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }) });
 }
 fn message(b: *ui.Ui, c: v.Palette, bytes: []const u8) !ui.Element {
     return b.styled(try v.text(b, bytes, c.muted, 13), .{ .padding = ui.Insets.all(16), .text = .{ .size = 13, .color = c.muted } });

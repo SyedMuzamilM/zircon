@@ -3,6 +3,7 @@ mod highlight;
 mod languages;
 mod process;
 mod runtime;
+mod search;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::{
@@ -13,6 +14,16 @@ fn run() -> Result<Value> {
     let args: Vec<String> = std::env::args().collect();
     let arg = |n: usize| args.get(n).map(String::as_str).context("missing argument");
     match arg(1)? {
+        "search" => {
+            let mut input = String::new();
+            io::stdin()
+                .take(64 * 1024 * 1024 + 1)
+                .read_to_string(&mut input)?;
+            if input.len() > 64 * 1024 * 1024 {
+                anyhow::bail!("search input too large");
+            }
+            search::run(&serde_json::from_str(&input)?)
+        }
         "catalog" => catalog::list(args.get(2).map(String::as_str).unwrap_or("")),
         "install" => {
             if let Some(id) = arg(2)?.strip_prefix("language-") {
@@ -46,7 +57,7 @@ fn run() -> Result<Value> {
             }
             highlight::run(Path::new(arg(2)?), arg(3)?, Path::new(arg(4)?), &source)
         }
-        _ => anyhow::bail!("expected catalog, install, import, resolve or highlight"),
+        _ => anyhow::bail!("expected catalog, install, import, resolve, highlight or search"),
     }
 }
 fn main() {

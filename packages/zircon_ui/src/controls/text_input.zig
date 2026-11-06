@@ -18,6 +18,7 @@ pub const TextInput = struct {
         placeholder: g.Color = g.Color.rgb(0xa9afbc),
         selection: g.Color = g.Color.rgb(0x364357),
         caret: g.Color = g.Color.rgb(0x74ade8),
+        border: g.Color = g.Color.rgb(0x3e4451),
         focus_border: g.Color = g.Color.rgb(0x74ade8),
     };
     allocator: std.mem.Allocator,
@@ -217,8 +218,9 @@ const Field = struct {
         return caret;
     }
     pub fn paint(self: *Field, cx: *custom.PaintCx, bounds: g.Rect, metrics: *LayoutState, caret: *g.Rect) !void {
-        try cx.painter.fillRect(.{ .bounds = bounds, .color = self.appearance.background, .radius = @import("metrics.zig").control_radius });
-        if (cx.focused and self.show_focus_border) try cx.painter.strokeRect(bounds, self.appearance.focus_border, 1);
+        const radius = @import("metrics.zig").control_radius;
+        try cx.painter.fillRect(.{ .bounds = bounds, .color = if (cx.focused and self.show_focus_border) self.appearance.focus_border else self.appearance.border, .radius = radius });
+        try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + 1, .y = bounds.y + 1, .width = @max(0, bounds.width - 2), .height = @max(0, bounds.height - 2) }, .color = self.appearance.background, .radius = @max(0, radius - 1) });
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
         if (self.leading_icon) |icon| try icons.draw(icon, cx.painter, .{ .x = bounds.x + 8, .y = bounds.y + (bounds.height - 14) / 2, .width = 14, .height = 14 }, self.appearance.placeholder);

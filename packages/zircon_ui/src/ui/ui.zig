@@ -6,7 +6,7 @@ const styles = @import("style.zig");
 const adapter = @import("adapter.zig");
 const runtime = @import("../app/app.zig");
 const identity = @import("../entity/entity.zig");
-pub const Button = struct { label: []const u8, on_click: ?adapter.ClickHandler = null, style: styles.Style = .{}, children: []const elements.Element = &.{} };
+pub const Button = struct { tooltip_colors: ?[3]@import("../layout/geometry.zig").Color = null, tooltip: ?[]const u8 = null, label: []const u8, on_click: ?adapter.ClickHandler = null, style: styles.Style = .{}, children: []const elements.Element = &.{} };
 pub const Ui = struct {
     frame: *tree.Frame,
     owner: identity.Token,
@@ -39,9 +39,11 @@ pub const Ui = struct {
             const node = &ui.frame.nodes.items[element.index];
             node.kind = .{ .button = .{ .label = label, .on_click = options.on_click } };
             node.focusable = true;
+            node.tooltip_colors = options.tooltip_colors;
+            if (options.tooltip) |tip| node.tooltip = try ui.allocator().dupe(u8, tip);
             return element;
         }
-        return ui.frame.append(.{ .style = options.style, .focusable = true, .kind = .{ .button = .{ .label = label, .on_click = options.on_click } } });
+        return ui.frame.append(.{ .style = options.style, .tooltip_colors = options.tooltip_colors, .tooltip = if (options.tooltip) |tip| try ui.allocator().dupe(u8, tip) else null, .focusable = true, .kind = .{ .button = .{ .label = label, .on_click = options.on_click } } });
     }
     pub fn onClick(ui: *Ui, comptime callback: anytype) adapter.ClickHandler {
         return adapter.click(ui.owner, callback);

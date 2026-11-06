@@ -23,7 +23,7 @@ pub fn changeY(change: GitChange, height: f32, changes: []const GitChange) f32 {
 pub fn marker(change: GitChange, changes: []const GitChange, height: f32, bounds: @import("zircon_ui").Rect, scroll: f32) @import("zircon_ui").Rect {
     const rows = change.end -| change.start;
     const old_rows = if (change.expanded) change.old_count else 0;
-    return .{ .x = bounds.x + 4, .y = bounds.y + changeY(change, height, changes) - scroll - if (rows + old_rows == 0) @as(f32, 2) else 0, .width = 3, .height = if (rows + old_rows == 0) 4 else @as(f32, @floatFromInt(rows + old_rows)) * height };
+    return .{ .x = bounds.x, .y = bounds.y + changeY(change, height, changes) - scroll - if (rows + old_rows == 0) @as(f32, 2) else 0, .width = 6, .height = if (rows + old_rows == 0) 4 else @as(f32, @floatFromInt(rows + old_rows)) * height };
 }
 pub const Blame = struct {
     line: usize,

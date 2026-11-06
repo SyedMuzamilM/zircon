@@ -19,6 +19,7 @@ pub const Cache = struct {
         for (theme.files) |entry| try self.add(a, entry.icon);
         for (theme.folders) |entry| try self.add(a, entry.icon);
         for (theme.extensions) |entry| try self.add(a, entry.icon);
+        for (theme.stems) |entry| try self.add(a, entry.icon);
         try self.add(a, theme.default_file);
         try self.add(a, theme.default_folder);
         return self;

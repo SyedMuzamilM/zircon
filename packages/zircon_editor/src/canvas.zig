@@ -13,7 +13,7 @@ pub fn gutterWidth(lines: usize, font_size: f32) f32 {
     var digits: usize = 1;
     var remaining = lines;
     while (remaining >= 10) : (remaining /= 10) digits += 1;
-    return @max(52, @as(f32, @floatFromInt(digits)) * font_size * 0.62 + 24);
+    return @max(76, @as(f32, @floatFromInt(digits)) * font_size * 0.62 + 46);
 }
 pub fn render(state: *const editor.Editor, document: *const text.Document, b: *ui.Ui) !ui.Element {
     var snapshot = document.snapshot();
@@ -41,7 +41,7 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
         while (hi < state.grammar_spans.len and state.grammar_spans[hi].start < end) hi += 1;
         break :blk try b.allocator().dupe(syntax.Span, state.grammar_spans[lo..hi]);
     } else null;
-    const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search = try b.allocator().dupe(u8, state.search_query) };
+    const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
     return b.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
 const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22, segment: ?@import("wrap.zig").Row = null };
@@ -51,6 +51,7 @@ const Canvas = struct {
     grammar_spans: ?[]const syntax.Span,
     wrap_cache: *@import("wrap.zig").Cache,
     soft_wrap: bool,
+    wrap_enabled: bool,
     block_cursor: bool,
     cursor: usize,
     profile: ?@import("profile.zig").Profile,
@@ -59,6 +60,10 @@ const Canvas = struct {
     blame_message_scroll: f32,
     theme: @import("theme.zig").Theme,
     show_line_numbers: bool,
+    gutter_hovered: bool,
+    indent_guides: bool,
+    highlight_active_line: bool,
+    fold_controls: bool,
     selections: []const selection.Selection,
     scroll: f32,
     horizontal: f32,
@@ -70,6 +75,8 @@ const Canvas = struct {
     state_start: usize,
     marked: ?text.Range,
     search: []const u8,
+    search_ranges: []const text.Range,
+    external_search: bool,
     pub const LayoutState = ui.layout.Measurer;
     pub const PrepaintState = Prepared;
     pub fn deinit(self: *Canvas) void {
@@ -81,7 +88,8 @@ const Canvas = struct {
     }
     pub fn prepaint(self: *Canvas, cx: *ui.PrepaintCx, bounds: ui.Rect, metrics: *LayoutState) !Prepared {
         const gutter: f32 = if (self.show_line_numbers) gutterWidth(self.snapshot.lineCount(), self.font_size) else 20;
-        if (self.soft_wrap) try self.wrap_cache.ensure(self.snapshot, bounds.width - gutter - 12, self.font_size, self.tab_width, metrics.*);
+        try self.wrap_cache.folding.ensure(self.wrap_cache.allocator, self.snapshot, self.tab_width);
+        if (self.soft_wrap) try self.wrap_cache.ensure(self.snapshot, if (self.wrap_enabled) bounds.width - gutter - 12 else 1e12, self.font_size, self.tab_width, metrics.*);
         const first = if (self.soft_wrap) self.wrap_cache.visualAt(self.scroll, self.line_height, self.git_changes) else annotations.sourceRow(self.scroll, self.line_height, self.git_changes);
         const total_rows = if (self.soft_wrap) self.wrap_cache.rows.items.len else self.snapshot.lineCount();
         const visible = try ui.controls.visibleRows(total_rows, self.line_height, @as(f32, @floatFromInt(first)) * self.line_height, bounds.height, 2);
@@ -146,7 +154,7 @@ const Canvas = struct {
         const style: ui.TextStyle = .{ .size = self.font_size, .mono = true, .color = self.theme.foreground };
         const primary_row = if (self.selections.len > 0) (try self.snapshot.pointAt(if (self.block_cursor) self.cursor else self.selections[0].head)).line else 0;
         for (prepared.lines) |line| {
-            if (cx.focused and line.row == primary_row and (line.segment == null or (self.cursor >= line.segment.?.start and (self.cursor < line.segment.?.end or self.cursor == line.range.end)))) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
+            if (self.highlight_active_line and cx.focused and line.row == primary_row and (line.segment == null or (self.cursor >= line.segment.?.start and (self.cursor < line.segment.?.end or self.cursor == line.range.end)))) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
             for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end) {
                 var fill = self.theme.git_added;
                 fill.a = 0.15;
@@ -170,9 +178,27 @@ const Canvas = struct {
                 const last_guide = @min(cells, @as(usize, @intFromFloat(@ceil((self.horizontal + bounds.width) / advance))));
                 var tint = self.theme.line_number;
                 tint.a = 0.2;
-                while (guide < last_guide) : (guide += self.tab_width) {
+                while (self.indent_guides and guide < last_guide) : (guide += self.tab_width) {
                     const guide_x = @as(f32, @floatFromInt(guide)) * advance;
                     try cx.painter.fillRect(.{ .bounds = .{ .x = x + guide_x, .y = line.y, .width = 1, .height = self.line_height }, .color = tint });
+                }
+                var match_start: usize = 0;
+                var match_end = self.search_ranges.len;
+                while (match_start < match_end) {
+                    const mid = match_start + (match_end - match_start) / 2;
+                    if (self.search_ranges[mid].end < line.range.start) match_start = mid + 1 else match_end = mid;
+                }
+                for (self.search_ranges[match_start..]) |range| {
+                    if (range.start > line.range.end) break;
+                    if (range.end < line.range.start or range.start > line.range.end) continue;
+                    const begin = @max(range.start -| line.range.start, segment_start);
+                    const end = @min(range.end -| line.range.start, segment_end);
+                    if (begin > end) continue;
+                    const left = line.display.caret(metrics.*, style, begin);
+                    const right = line.display.caret(metrics.*, style, end);
+                    var fill = self.theme.caret;
+                    fill.a = 0.18;
+                    try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y, .width = @max(2, right - left), .height = self.line_height }, .color = fill });
                 }
                 for (self.selections) |item| {
                     const range = item.range();
@@ -184,7 +210,7 @@ const Canvas = struct {
                     const right = line.display.caret(metrics.*, style, end) + if (range.end > line.range.end and segment_end == line.original.len) self.font_size * 0.6 else @as(f32, 0);
                     try cx.painter.fillRect(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y, .width = @abs(right - left), .height = self.line_height }, .color = if (cx.focused) self.theme.selection else self.theme.inactive_selection });
                 }
-                if (self.search.len > 0 and std.mem.indexOfScalar(u8, self.search, '\n') == null) {
+                if (!self.external_search and self.search.len > 0 and std.mem.indexOfScalar(u8, self.search, '\n') == null) {
                     var at: usize = 0;
                     while (std.mem.indexOfPos(u8, line.original, at, self.search)) |found| {
                         if (found + self.search.len <= segment_start or found >= segment_end) {
@@ -231,16 +257,22 @@ const Canvas = struct {
                 }
             };
             cx.painter.popClip();
-            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (cx.focused and line.row == primary_row) self.theme.active_line else self.theme.background });
+            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (self.highlight_active_line and cx.focused and line.row == primary_row) self.theme.active_line else self.theme.background });
 
+            if (self.fold_controls and self.show_line_numbers and (line.segment == null or line.segment.?.first)) if (self.wrap_cache.folding.region(line.row)) |fold| {
+                const folded = self.wrap_cache.folding.isCollapsed(fold.start);
+                if (folded or self.gutter_hovered) try ui.controls.icons.draw(if (folded) .chevron_right else .chevron_down, cx.painter, .{ .x = bounds.x + prepared.gutter - 24, .y = line.y + (self.line_height - 12) / 2, .width = 12, .height = 12 }, self.theme.line_number);
+                if (folded) try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + (try metrics.text(metrics.context, line.display.bytes, style)).width + 10, .y = line.y + 2, .width = 20, .height = self.line_height }, .text = "…", .style = .{ .size = self.font_size, .color = self.theme.line_number } });
+            };
             if (self.show_line_numbers and (line.segment == null or line.segment.?.first)) {
                 const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{line.row + 1});
                 const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true };
                 const number_width = metrics.text(metrics.context, number, number_style) catch ui.Size{ .width = 20, .height = 16 };
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 18 - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (cx.focused and line.row == primary_row) self.theme.active_number else self.theme.line_number } });
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - 36 - number_width.width, .y = line.y + (self.line_height - number_width.height) / 2, .width = number_width.width + 2, .height = number_width.height }, .text = number, .style = .{ .size = self.font_size - 1, .mono = true, .color = if (cx.focused and line.row == primary_row) self.theme.active_number else self.theme.line_number } });
             }
         }
         for (self.git_changes) |change| {
+            if (self.wrap_cache.folding.hidden(try self.snapshot.lineStart(@min(change.start, self.snapshot.lineCount() - 1)))) continue;
             if (change.expanded) try self.paintRemoved(cx, metrics.*, prepared.gutter, bounds, change);
             var marker = annotations.marker(change, self.git_changes, self.line_height, bounds, self.scroll);
             if (self.soft_wrap) {

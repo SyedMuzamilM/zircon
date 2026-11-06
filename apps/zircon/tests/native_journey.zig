@@ -9,6 +9,8 @@ test {
     _ = @import("agent_tests.zig");
     _ = @import("workspace_polish_tests.zig");
     _ = @import("experience_tests.zig");
+    _ = @import("buffer_controls_tests.zig");
+    _ = @import("settings_tests.zig");
 }
 fn bytes(self: *const zircon.Shell, a: std.mem.Allocator, out: *[]u8) !void {
     const tab = self.tabs.items[self.active];
@@ -35,6 +37,19 @@ fn command(app: *ui.App, owner: ui.Entity(zircon.Shell), which: zircon.Command) 
         }
     };
     try app.update(owner, Call.invoke, .{which});
+}
+fn waitFind(app: *ui.App, owner: ui.Entity(zircon.Shell)) !void {
+    const Read = struct {
+        fn pending(self: *const zircon.Shell) bool {
+            return self.find.waiting or self.find.busy;
+        }
+    };
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (try app.read(owner, Read.pending, .{})) {
+        _ = try app.step(10);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.FindTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
 }
 test "native editor edits finds replaces splits saves and protects dirty close" {
     var tmp = t.tmpDir(.{});
@@ -118,6 +133,7 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
     try app.dispatch(h, .{ .text = "84" });
     _ = try app.step(9);
     try command(&app, owner, .replace_all);
+    try waitFind(&app, owner);
     _ = try app.step(10);
     try sendKey(&app, h, .escape, .{});
     _ = try app.step(11);
@@ -179,6 +195,11 @@ test "native search and palette typing refresh replacement ranges between keystr
     inline for (.{ zircon.Command.project_search, zircon.Command.palette, zircon.Command.open_path, zircon.Command.find, zircon.Command.replace }) |action| {
         try command(&app, owner, action);
         _ = try app.step(4);
+        if (action == .find or action == .replace) {
+            try nativeKey(window, 0, "a", 1 << 20);
+            try nativeKey(window, 51, "", 0);
+            _ = try app.step(4);
+        }
         try nativeKey(window, 0, "a", 0);
         _ = try app.step(4);
         try nativeKey(window, 1, "s", 0);

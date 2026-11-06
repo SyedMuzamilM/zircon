@@ -305,7 +305,18 @@ fn motion(self: *Editor, s: text.Snapshot, key: u8, count: usize, event: *ui.Eve
             }
         },
         'j', 'k' => {
-            const row = if (key == 'j') @min(s.lineCount() - 1, point.line +| count) else point.line -| count;
+            var row = if (key == 'j') @min(s.lineCount() - 1, point.line +| count) else point.line -| count;
+            if (self.wrap_cache.folding.collapsed.items.len > 0 and self.wrap_cache.valid(s.revision())) {
+                row = point.line;
+                for (0..count) |_| {
+                    const target_range = try s.lineRange(row);
+                    const index = self.wrap_cache.atOffset(if (key == 'j') target_range.end else target_range.start);
+                    const next = if (key == 'j') @min(self.wrap_cache.rows.items.len - 1, index + 1) else index -| 1;
+                    const line = self.wrap_cache.rows.items[next].line;
+                    if (line == row) break;
+                    row = line;
+                }
+            }
             return try @import("vim_geometry.zig").vertical(self, s, at, row, event);
         },
         '+', '-' => {
