@@ -3,6 +3,18 @@ const status = @import("status.zig");
 const diff = @import("diff.zig");
 const history = @import("history.zig");
 const t = std.testing;
+test "history hunks retain separate file headings including spaces and deletions" {
+    var patch = try diff.parse(t.allocator, "diff --git a/first file.zig b/first file.zig\n--- a/first file.zig\n+++ b/first file.zig\n@@ -1 +1 @@\n-old\n+new\n" ++
+        "diff --git a/deleted.zig b/deleted.zig\n--- a/deleted.zig\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n" ++
+        "diff --git a/new.zig b/new.zig\n--- /dev/null\n+++ b/new.zig\n@@ -0,0 +1 @@\n+added\n");
+    defer patch.deinit();
+    try t.expectEqual(@as(usize, 3), patch.hunks.len);
+    try t.expectEqualStrings("first file.zig", patch.hunks[0].path);
+    try t.expectEqualStrings("deleted.zig", patch.hunks[1].path);
+    try t.expectEqualStrings("new.zig", patch.hunks[2].path);
+    try t.expectEqual(@as(?usize, 1), patch.hunks[0].lines[0].old_line);
+    try t.expectEqual(@as(?usize, 1), patch.hunks[0].lines[1].new_line);
+}
 test "machine parsers retain path bytes and release allocation failures" {
     try t.checkAllAllocationFailures(t.allocator, allocationCase, .{});
 }

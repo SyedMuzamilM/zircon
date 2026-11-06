@@ -1,7 +1,7 @@
 //! Unified patch parsing and bounded line diff for unsaved-buffer gutters.
 const std = @import("std");
 pub const Line = struct { kind: enum { context, addition, deletion, metadata }, text: []const u8, old_line: ?usize = null, new_line: ?usize = null };
-pub const Hunk = struct { old_start: usize, old_count: usize, new_start: usize, new_count: usize, header: []const u8, lines: []const Line };
+pub const Hunk = struct { old_start: usize, old_count: usize, new_start: usize, new_count: usize, header: []const u8, lines: []const Line, path: []const u8 = "" };
 pub const Diff = struct {
     arena: std.heap.ArenaAllocator,
     text: []const u8,
@@ -21,6 +21,7 @@ pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Diff {
     var current: ?Hunk = null;
     var old: usize = 0;
     var new: usize = 0;
+    var path: []const u8 = "";
     var iterator = std.mem.splitScalar(u8, owned, '\n');
     while (iterator.next()) |line| {
         if (std.mem.startsWith(u8, line, "@@ -")) {
@@ -33,7 +34,7 @@ pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Diff {
             _ = fields.next();
             const previous = try range(fields.next() orelse return error.InvalidGitDiff);
             const next = try range(fields.next() orelse return error.InvalidGitDiff);
-            current = .{ .old_start = previous.start, .old_count = previous.count, .new_start = next.start, .new_count = next.count, .header = line, .lines = &.{} };
+            current = .{ .old_start = previous.start, .old_count = previous.count, .new_start = next.start, .new_count = next.count, .header = line, .lines = &.{}, .path = path };
             old = previous.start;
             new = next.start;
         } else if (std.mem.startsWith(u8, line, "diff --git ")) {
@@ -43,6 +44,11 @@ pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Diff {
                 current = null;
                 lines = .empty;
             }
+            path = "";
+        } else if (current == null and (std.mem.startsWith(u8, line, "--- ") or std.mem.startsWith(u8, line, "+++ "))) {
+            // Keep Git's quoting for unusual names; never split paths on spaces.
+            const name = line[4..];
+            if (!std.mem.eql(u8, name, "/dev/null")) path = if (std.mem.startsWith(u8, name, "a/") or std.mem.startsWith(u8, name, "b/")) name[2..] else name;
         } else if (current != null and line.len > 0) {
             const item: Line = switch (line[0]) {
                 ' ' => blk: {
