@@ -5,6 +5,7 @@ const typography = @import("zircon_ui").typography;
 pub const Values = struct {
     key_bindings: @import("../key_bindings.zig").Overrides = .{},
     vim_mode: bool = false,
+    soft_wrap: @import("zircon_editor").wrap.Mode = .none,
     vim_bindings: @import("zircon_editor").vim.Bindings = .{},
     font_size: f32 = 14,
     editor_font_name: typography.FontName = .{},
@@ -22,7 +23,7 @@ pub const Values = struct {
     theme: []const u8 = "zircon.dark",
     icon_theme: []const u8 = "zircon.default",
 };
-pub const Patch = union(enum) { editor_font_name: typography.FontName, interface_font_name: typography.FontName, vim_mode: bool, font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
+pub const Patch = union(enum) { soft_wrap: @import("zircon_editor").wrap.Mode, editor_font_name: typography.FontName, interface_font_name: typography.FontName, vim_mode: bool, font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
 pub const Store = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -67,6 +68,7 @@ pub const Store = struct {
             .font_size, .ui_font_size, .line_height => |n| .{ .float = n },
             .tab_width => |n| .{ .integer = n },
             .vim_mode, .reduced_motion, .line_numbers, .git_gutters, .git_inline_blame, .font_ligatures => |b| .{ .bool = b },
+            .soft_wrap => |mode| .{ .string = @tagName(mode) },
             .font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
             .ui_font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
             .theme, .icon_theme => |s| .{ .string = try arena.dupe(u8, s) },
@@ -104,6 +106,7 @@ fn read(value: std.json.Value) Values {
         result.ui_font_family = parseEnum(typography.UiFont, v) orelse .plex;
         if (v == .string and parseEnum(typography.UiFont, v) == null) result.interface_font_name = typography.FontName.init(v.string) catch .{};
     }
+    if (value.object.get("soft_wrap")) |v| result.soft_wrap = parseEnum(@import("zircon_editor").wrap.Mode, v) orelse .none;
     if (value.object.get("tab_width")) |v| if (v == .integer and v.integer >= 1 and v.integer <= 16) {
         result.tab_width = @intCast(v.integer);
     };
@@ -160,6 +163,7 @@ fn validate(value: std.json.Value) !void {
     if (value.object.get("ui_font_family")) |v| if (v == .string) {
         _ = try typography.FontName.init(v.string);
     } else return error.InvalidSettings;
+    if (value.object.get("soft_wrap")) |v| if (parseEnum(@import("zircon_editor").wrap.Mode, v) == null) return error.InvalidSettings;
     if (value.object.get("tab_width")) |v| if (v != .integer or v.integer < 1 or v.integer > 16) return error.InvalidSettings;
     inline for (.{ "vim_mode", "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {

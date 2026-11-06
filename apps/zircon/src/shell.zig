@@ -13,7 +13,7 @@ pub const TreeRow = struct { name: []u8, path: []u8, directory: bool, depth: u16
 pub const IndexedFile = struct { path: []u8, label: []u8 };
 pub const Overlay = enum { none, open_project, palette, quick_open, open_path, save_as, extension_path, project_search, find, replace, dirty };
 pub const CloseTarget = union(enum) { tab: usize, window };
-pub const Fields = struct { query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
+pub const Fields = struct { extension_query: ui.Entity(ui.controls.TextInput), query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     workspace: workspace.Workspace,
@@ -59,9 +59,11 @@ pub const Shell = struct {
     settings: ?ui.Entity(@import("settings/model.zig").Settings) = null,
     settings_window: ?ui.WindowHandle = null,
     colors: @import("theme.zig").Palette = .{},
-    editor_options: struct { vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
+    editor_options: struct { soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: @import("services/git.zig").Model = .{},
     search: @import("services/search.zig").Model = .{},
+    catalog: @import("services/catalog.zig").Model = .{},
+    extension_host_path: ?[]const u8 = null,
     language: @import("services/language.zig").Model = .{},
     left_panel: enum { project, git_changes, git_history } = .project,
     panel: enum { editor, git_diff, extensions, search, image, markdown } = .editor,
@@ -96,6 +98,7 @@ pub const Shell = struct {
         self.allocator.free(self.status);
         self.git.deinit();
         self.search.deinit();
+        self.catalog.deinit();
         self.language.deinit(self.allocator);
         if (self.image) |*asset| asset.deinit(self.allocator);
         if (self.preview) |*preview| preview.view.deinit();
@@ -172,6 +175,8 @@ pub const Shell = struct {
         const light = @import("theme.zig").isLight(values.theme, self.system_dark);
         self.colors = if (light) @import("theme.zig").Palette.light else .{};
         for (self.tabs.items) |*tab| {
+            tab.editor.soft_wrap = values.soft_wrap;
+            tab.editor.wrap_cache.revision = null;
             tab.editor.setVim(values.vim_mode);
             tab.editor.vim.bindings = values.vim_bindings;
             tab.editor.font_size = values.font_size;
@@ -182,6 +187,8 @@ pub const Shell = struct {
             tab.editor.show_git_gutters = values.git_gutters;
         }
         if (self.secondary) |*pane| {
+            pane.editor.soft_wrap = values.soft_wrap;
+            pane.editor.wrap_cache.revision = null;
             pane.editor.setVim(values.vim_mode);
             pane.editor.vim.bindings = values.vim_bindings;
             pane.editor.font_size = values.font_size;
@@ -210,6 +217,7 @@ pub const Shell = struct {
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
             tab.editor.synchronize(snapshot);
+            if (std.meta.eql(tab.document, self.tabs.items[self.active].document)) try actions.prepareEditor(self, cx, &tab.editor, snapshot, "primary-editor");
         }
         if (self.secondary) |*pane| {
             const record = self.workspace.getConst(pane.document) catch unreachable;
@@ -218,20 +226,22 @@ pub const Shell = struct {
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
             pane.editor.synchronize(snapshot);
+            try actions.prepareEditor(self, cx, &pane.editor, snapshot, "secondary-editor");
         }
-        self.editor_options = .{ .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        self.editor_options = .{ .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
         try self.styleInputs(cx);
         cx.notify();
     }
     pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
         const appearance = @import("views/components.zig").inputAppearance(self.colors);
-        if (self.fields) |fields| inline for (.{ "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
+        if (self.fields) |fields| inline for (.{ "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
     }
     pub fn panelWidth(self: *const Shell) f32 {
         return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;
     }
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
         const options = self.editor_options;
+        state.soft_wrap = options.soft_wrap;
         state.setVim(options.vim_mode);
         state.vim.bindings = options.vim_bindings;
         state.font_size = options.font_size;

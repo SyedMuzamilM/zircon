@@ -125,7 +125,9 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
         try items.append(b.allocator(), try v.text(b, location, c.muted, 11));
         if (state.vim.enabled) try items.append(b.allocator(), try v.text(b, state.vim.label(), c.accent, 11));
         try items.append(b.allocator(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "Spaces: {d}", .{state.tab_width}), c.muted, 11));
-        const language = switch (state.language) {
+        const record = try self.workspace.getConst(if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document);
+        const detected = if (self.extension_snapshot) |generation| generation.languageForPath(record.path orelse "") else null;
+        const language = if (detected) |definition| definition.name else switch (state.language) {
             .plain => "Plain text",
             .zig => "Zig",
             .rust => "Rust",
@@ -133,7 +135,7 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
             .markdown => "Markdown",
             .custom => "Extension",
         };
-        try items.append(b.allocator(), try v.text(b, language, c.muted, 11));
+        try items.append(b.allocator(), try b.button(.{ .label = "Install language support", .children = &.{try v.text(b, if (detected == null and state.language != .markdown) try std.fmt.allocPrint(b.allocator(), "{s} · Install language…", .{language}) else language, c.muted, 11)}, .on_click = try b.onClickWith(@import("../commands.zig").Command.install_language_support, Shell.onCommand), .style = .{ .height = .{ .px = 22 }, .align_items = .center, .hover_background = c.hover, .radius = v.metrics.control_radius } }));
     }
     try items.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .extensions, "Extensions", .extension, self.panel == .extensions), try v.iconButton(b, c, .settings, "Settings", .settings, false) });
     return b.key(.{ .string = "status" }, try b.column(.{ .height = .{ .px = v.metrics.status }, .flex_shrink = 0, .background = c.chrome }, &.{ try v.rule(b, c), try b.row(.{ .flex_grow = 1, .align_items = .center, .gap = 4, .padding = .{ .left = 5, .right = 5 }, .overflow = .hidden }, items.items) }));

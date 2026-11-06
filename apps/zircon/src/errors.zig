@@ -26,6 +26,8 @@ pub fn message(err: anyerror) []const u8 {
         error.EmptyCommitMessage => "Enter a commit message first.",
         error.InvalidSettings => "This settings value is invalid. The previous value is still active.",
         error.StaleSearchResult => "This search result changed. Run the search again.",
+        error.ExtensionHostUnavailable => "The extension host is missing. Rebuild Zircon with the extension-host target.",
+        error.ExtensionInstallBusy => "An extension is installing. Wait for it to finish before installing another.",
         error.NoLanguageServer => "No enabled language server is configured for this file.",
         error.ServerNotReady => "The language server is starting or unavailable. Try again when it is ready.",
         error.CompletionNotSupported => "This server does not provide completions.",

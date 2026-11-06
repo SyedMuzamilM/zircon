@@ -27,7 +27,7 @@ Change actions offers Stage all, Unstage all, Stash all, Stash tracked, Pop stas
 
 Extensions opens the actual installed list. Install dev extension accepts a directory containing `extension.json`. Install Oxide installs the bundled example. Enable/Disable and Remove update effective contributions. Use theme/icon buttons to activate them; settings also lists enabled theme/icon choices.
 
-The native app stores extensions under `~/Library/Application Support/Zircon/extensions` and preferences in the sibling `settings.json`. The [extension package guide](../packages/zircon_extensions/README.md) describes manifests, validation and atomic installation. Contributions include colors, symbol/PNG icon mappings, language associations/lexical rules and executable/argv server configurations. Server executables must already be installed; configuration does not download a server.
+The native app stores extensions under `~/Library/Application Support/Zircon/extensions` and preferences in the sibling `settings.json`. The [extension package guide](../packages/zircon_extensions/README.md) describes manifests, validation and atomic installation. The Extensions panel can search the full official Zed registry, install supported contributions, update packages and manage activation. It also offers common-language providers for languages Zed bundles in its core. Language-server adapters can install their servers in an extension working directory; some require Node.js/npm, Go or clangd. See [Zed compatibility and limits](zed-extensions.md).
 
 `Ctrl+Space` requests completion. Click an item or press Enter to accept the first result; Escape dismisses it. Completion and additional edits form one undo operation. Responses must match server, URI, revision and request; changing the caret invalidates acceptance. Diagnostics below the editor navigate to their source. Disabling the providing extension stops its servers. Only versioned diagnostics are currently displayed.
 
@@ -104,3 +104,7 @@ This adds a Split down shortcut and removes its default binding. `vim_bindings` 
 | `apps/zircon/src/views`, `settings`, `panes.zig` | Product screens, shared settings and captured pane interactions |
 
 [Implementation status](status.md) records current limits and verification evidence.
+
+## Word wrap
+
+Option-Z or **Editor: toggle word wrap** switches between horizontal scrolling and viewport wrapping. The same choice is in Settings and persists as `"soft_wrap": "editor_width"` or `"none"`. Wrapped continuation rows retain the source line number; wrapping does not add line endings to your files.

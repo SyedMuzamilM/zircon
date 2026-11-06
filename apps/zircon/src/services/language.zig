@@ -6,7 +6,9 @@ const lsp = @import("zircon_language");
 const text = @import("zircon_text");
 const ws = @import("zircon_workspace");
 const Shell = @import("../shell.zig").Shell;
-const Session = struct { id: []u8, client: ?*lsp.Client };
+const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false };
+const SyntaxDocument = struct { id: ws.DocumentId, revision: ?u64 = null, observed: ?u64 = null, changed_at: f64 = 0, pending: bool = false };
+const host = @import("extension_host.zig");
 const Document = struct {
     id: ws.DocumentId,
     uri: []u8,
@@ -17,6 +19,9 @@ const Document = struct {
 };
 pub const Pending = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64, cursor: usize };
 pub const Model = struct {
+    generation: u64 = 0,
+    syntax_documents: std.ArrayList(SyntaxDocument) = .empty,
+    syntax_waiting: bool = false,
     sessions: std.ArrayList(Session) = .empty,
     documents: std.ArrayList(Document) = .empty,
     completions: ?lsp.Message = null,
@@ -49,17 +54,31 @@ pub const Model = struct {
             a.free(session.id);
         }
         self.sessions.deinit(a);
-        self.* = .{};
+        self.syntax_documents.deinit(a);
+        self.* = .{ .generation = self.generation +% 1 };
     }
 };
 fn wake(_: ?*anyopaque) void {
     ui.App.wake();
 }
-fn sessionFor(self: *Shell, server: *const @import("zircon_extensions").Server) !usize {
+fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const @import("zircon_extensions").Server) !usize {
     for (self.language.sessions.items, 0..) |session, index| if (std.mem.eql(u8, session.id, server.id)) return index;
     const id = try self.allocator.dupe(u8, server.id);
     errdefer self.allocator.free(id);
     try self.language.sessions.ensureUnusedCapacity(self.allocator, 1);
+    if (server.zed_wasm != null or std.mem.eql(u8, server.command, "@zircon-builtin")) {
+        const root = self.extensions.?.home;
+        const work = try std.fs.path.join(self.allocator, &.{ root, ".work", server.id });
+        defer self.allocator.free(work);
+        const index = self.language.sessions.items.len;
+        var settings_path: ?[]u8 = null;
+        if (self.settings) |settings| try cx.read(settings, @import("../settings/model.zig").Settings.copyPath, .{ self.allocator, &settings_path });
+        defer if (settings_path) |path| self.allocator.free(path);
+        const argv: []const []const u8 = if (server.zed_wasm) |wasm| &.{ "resolve", wasm, server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" } else &.{ "resolve-builtin", server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" };
+        try host.start(self, cx, argv, null, .{ .generation = self.language.generation, .index = index }, resolved);
+        self.language.sessions.appendAssumeCapacity(.{ .id = id, .client = null, .resolving = true });
+        return index;
+    }
     const client = lsp.Client.start(self.allocator, self.workspace.io, .{ .command = server.command, .args = server.args, .cwd = self.workspace.root_path, .wake = .{ .notify = wake } }) catch |err| blk: {
         try self.reportError(err);
         break :blk null;
@@ -71,6 +90,7 @@ fn sessionFor(self: *Shell, server: *const @import("zircon_extensions").Server) 
 /// Full text is serialized only for didOpen or a newer document revision.
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     const snapshot = self.extension_snapshot orelse return;
+    try pollSyntax(self, cx);
     var changed = false;
     var i: usize = 0;
     while (i < self.language.documents.items.len) {
@@ -105,7 +125,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             break;
         };
         const index = found orelse blk: {
-            const session = try sessionFor(self, server);
+            const session = try sessionFor(self, cx, server);
             const uri = try lsp.fileUri(self.allocator, path);
             errdefer self.allocator.free(uri);
             const owned_path = try self.allocator.dupe(u8, path);
@@ -125,20 +145,25 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             try client.didChange(doc.uri, source);
             if (doc.diagnostics) |*value| value.deinit();
             doc.diagnostics = null;
-        } else try client.didOpen(doc.uri, language_id, source);
+        } else try client.didOpen(doc.uri, if (snapshot.languageForPath(path)) |language| language.lsp_id orelse language.id else language_id, source);
         doc.version = source.revision();
     }
     for (self.language.sessions.items, 0..) |session, session_index| if (session.client) |client| {
         const messages = try client.drain(self.allocator);
         defer lsp.deinitMessages(self.allocator, messages);
         for (messages) |*raw| {
-            const message = raw.*;
+            var message = raw.*;
             var moved = false;
             defer if (moved) {
                 raw.arena = .init(std.heap.page_allocator);
             };
             switch (message.data) {
-                .initialized, .exited => changed = true,
+                .initialized => changed = true,
+                .exited => {
+                    try self.setStatus(try std.fmt.allocPrint(self.allocator, "Language server {s} stopped. Run Language: restart servers to retry.", .{session.id}));
+                    self.status_is_error = true;
+                    changed = true;
+                },
                 .failure => |failure| {
                     try self.setStatus(try self.allocator.dupe(u8, failure.message));
                     self.status_is_error = true;
@@ -146,7 +171,10 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                 },
                 .diagnostics => |value| for (self.language.documents.items) |*doc| {
                     if (doc.session != session_index or !std.mem.eql(u8, doc.uri, value.uri)) continue;
-                    if (doc.version == null or value.version == null or value.version.? != doc.version.?) break;
+                    if (doc.version == null or (value.version != null and value.version.? != doc.version.?)) break;
+                    const current = self.workspace.getConst(doc.id) catch break;
+                    if (current.doc.revision() != doc.version.?) break;
+                    if (value.version == null) message.data.diagnostics.version = doc.version;
                     if (doc.diagnostics) |*old| old.deinit();
                     doc.diagnostics = message;
                     moved = true;
@@ -229,8 +257,122 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
         }
     }.less);
     var outcome = try current.editor.applyEdits(&record.doc, edits.items, try @import("zircon_editor").Editor.freshGroup());
-    try @import("../actions.zig").applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &outcome);
+    try @import("../actions.zig").applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome);
     self.language.clearCompletion();
     self.editor_focus_request +%= 1;
     cx.notify();
+}
+
+fn resolved(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
+    const box = raw catch |err| {
+        try self.reportError(err);
+        cx.notify();
+        return;
+    };
+    var result = box.take();
+    defer result.deinit();
+    if (result.stamp.generation != self.language.generation or result.stamp.index >= self.language.sessions.items.len) return;
+    const session = &self.language.sessions.items[result.stamp.index];
+    session.resolving = false;
+    if (!result.success) {
+        try self.setStatus(try self.allocator.dupe(u8, result.stderr));
+        self.status_is_error = true;
+        cx.notify();
+        return;
+    }
+    const Resolved = struct { command: []const u8, args: []const []const u8, cwd: []const u8, env: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null };
+    var parsed = try std.json.parseFromSlice(Resolved, self.allocator, result.stdout, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    session.client = lsp.Client.start(self.allocator, self.workspace.io, .{ .command = parsed.value.command, .args = parsed.value.args, .cwd = parsed.value.cwd, .root_path = self.workspace.root_path, .environment = parsed.value.env, .initialization_options = parsed.value.initialization_options, .workspace_configuration = parsed.value.workspace_configuration, .wake = .{ .notify = wake } }) catch |err| {
+        try self.reportError(err);
+        cx.notify();
+        return;
+    };
+    cx.notify();
+}
+fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
+    const was_waiting = self.language.syntax_waiting;
+    defer if (was_waiting != self.language.syntax_waiting) cx.notify();
+    self.language.syntax_waiting = false;
+    const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
+    const snapshot = self.extension_snapshot orelse return;
+    for (self.tabs.items, 0..) |tab, tab_index| {
+        if (tab_index != self.active and (self.secondary == null or !std.meta.eql(self.secondary.?.document, tab.document))) continue;
+        const record = try self.workspace.getConst(tab.document);
+        const language = snapshot.languageForPath(record.path orelse "") orelse continue;
+        const grammar = language.grammar orelse continue;
+        var index: ?usize = null;
+        for (self.language.syntax_documents.items, 0..) |entry, i| if (std.meta.eql(entry.id, tab.document)) {
+            index = i;
+            break;
+        };
+        const i = index orelse blk: {
+            try self.language.syntax_documents.append(self.allocator, .{ .id = tab.document });
+            break :blk self.language.syntax_documents.items.len - 1;
+        };
+        const tracked = &self.language.syntax_documents.items[i];
+        if (tracked.revision == record.doc.revision()) continue;
+        if (tracked.observed != record.doc.revision()) {
+            tracked.observed = record.doc.revision();
+            tracked.changed_at = now;
+        }
+        if (tracked.pending) continue;
+        if (tracked.revision != null and now - tracked.changed_at < 0.08) {
+            self.language.syntax_waiting = true;
+            continue;
+        }
+        var source = record.doc.snapshot();
+        defer source.deinit();
+        if (source.byteLen() > 8 * 1024 * 1024) continue;
+        const bytes = try source.copy(self.allocator, .{ .start = 0, .end = source.byteLen() });
+        defer self.allocator.free(bytes);
+        try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
+        tracked.pending = true;
+        tracked.revision = source.revision();
+    }
+}
+fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
+    const box = raw catch |err| {
+        try self.reportError(err);
+        cx.notify();
+        return;
+    };
+    var result = box.take();
+    defer result.deinit();
+    if (result.stamp.generation != self.language.generation or result.stamp.index >= self.language.syntax_documents.items.len) return;
+    self.language.syntax_documents.items[result.stamp.index].pending = false;
+    if (!result.success) {
+        try self.setStatus(try self.allocator.dupe(u8, result.stderr));
+        self.status_is_error = true;
+        cx.notify();
+        return;
+    }
+    const document = result.stamp.document orelse return;
+    const record = self.workspace.getConst(document) catch return;
+    if (record.doc.revision() != result.stamp.revision) {
+        try pollSyntax(self, cx);
+        return;
+    }
+    const parsed = result.highlights orelse return error.InvalidHighlights;
+    var source = record.doc.snapshot();
+    defer source.deinit();
+    if (parsed.value.bytes != source.byteLen()) return error.InvalidHighlights;
+    for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, document)) try tab.editor.setHighlights(source, parsed.value.spans);
+    if (self.secondary) |*pane| if (std.meta.eql(pane.document, document)) try pane.editor.setHighlights(source, parsed.value.spans);
+    cx.notify();
+}
+
+const SyntaxWake = struct {
+    pub const LayoutState = void;
+    pub const PrepaintState = void;
+    pub fn requestLayout(_: *SyntaxWake, _: *ui.LayoutCx) !ui.LayoutResult(void) {
+        return .{ .size = .{ .width = 0, .height = 0 }, .state = {} };
+    }
+    pub fn prepaint(_: *SyntaxWake, cx: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {
+        try cx.requestFrameAfter(0.08);
+    }
+    pub fn paint(_: *SyntaxWake, _: *ui.PaintCx, _: ui.Rect, _: *void, _: *void) !void {}
+};
+pub fn syntaxWake(b: *ui.Ui) !ui.Element {
+    return b.custom(SyntaxWake, .{}, .{ .width = .{ .px = 0 }, .height = .{ .px = 0 } });
 }

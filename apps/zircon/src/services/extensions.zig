@@ -39,6 +39,11 @@ pub fn applyTheme(self: *Shell, id: []const u8) void {
     if (self.secondary) |*pane| pane.editor.theme = palette;
 }
 pub fn applyLanguage(self: *Shell, state: *editor.Editor, path: []const u8) void {
+    const next = if (self.extension_snapshot) |snapshot| snapshot.languageForPath(path) else null;
+    const id = if (next) |language| language.id else null;
+    const changed = if (state.language_id) |old| (id == null or !std.mem.eql(u8, old, id.?)) else id != null;
+    if (changed) state.grammar_revision = null;
+    state.language_id = id;
     state.language_profile = null;
     state.language = editor.syntax.languageForPath(path);
     const snapshot = self.extension_snapshot orelse return;
@@ -49,6 +54,13 @@ pub fn applyLanguage(self: *Shell, state: *editor.Editor, path: []const u8) void
 }
 pub fn install(self: *Shell, cx: *ui.Context(Shell), path: []const u8) !void {
     const registry = if (self.extensions) |*value| value else return error.ExtensionsNotConfigured;
+    const manifest = try std.fs.path.join(self.allocator, &.{ path, "extension.json" });
+    defer self.allocator.free(manifest);
+    _ = std.Io.Dir.cwd().statFile(self.workspace.io, manifest, .{}) catch |err| {
+        if (err != error.FileNotFound) return err;
+        try @import("catalog.zig").importDev(self, cx, path);
+        return;
+    };
     _ = try registry.install(path);
     try refresh(self, cx);
     self.panel = .extensions;

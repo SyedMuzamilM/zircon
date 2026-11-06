@@ -1,0 +1,37 @@
+{
+  "captured": "2026-11-06",
+  "method": "Hidden native AppKit windows, committed framework frame exports; real official packages and servers.",
+  "journey": "./tools/zig build verify-zed-extensions -Dzed-output=/tmp/zircon-zed-native-release",
+  "files": [
+    {
+      "file": "extensions-catalog.png",
+      "sha256": "0caa73de211ff60c048c627592767d4a12aa06b768cc832940697c562870344a",
+      "bytes": 79602
+    },
+    {
+      "file": "extensions-installed.png",
+      "sha256": "e64e40847f740be9e6b2d56c305d5e5b7202a0be8e052a08f3f8b25ebef2c4e7",
+      "bytes": 75875
+    },
+    {
+      "file": "official-zig-theme-icons-wrap.png",
+      "sha256": "82ded230c80a3447ca88aa76a5d84501859a43b2a344cf6d921c50684ea8ed09",
+      "bytes": 52320
+    },
+    {
+      "file": "official-zls-completion.png",
+      "sha256": "3d41d8b2a88eda5c022785696eab5158551a9d14e81d9ffd5951764cebd04660",
+      "bytes": 74295
+    },
+    {
+      "file": "python-light-theme.png",
+      "sha256": "a2965201ca6c4d27374f12d06ff3b3b7b0f71540a1301db8423ddc600b406554",
+      "bytes": 38696
+    },
+    {
+      "file": "python-pyright-completion.png",
+      "sha256": "23a6d8ea3ef29ef05aface84e5b8ce91d24484ca895abcb580b63742e5c85425",
+      "bytes": 50977
+    }
+  ]
+}

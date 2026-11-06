@@ -9,3 +9,5 @@ pub const Settings = @import("settings/model.zig").Settings;
 pub const SettingsStore = @import("settings/store.zig").Store;
 pub const SettingsPatch = @import("settings/store.zig").Patch;
 pub const SettingsView = @import("settings/view.zig").View;
+
+pub const refreshExtensions = @import("services/extensions.zig").refresh;

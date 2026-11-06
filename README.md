@@ -13,6 +13,7 @@ Use Zig 0.17.1 through the project-local wrapper:
 ./tools/zig build check
 ./tools/zig build test-editor-native # native editor and feature journeys
 ./tools/zig build test-language-real # optional, installed Apple clangd
+# Native builds also compile the Rust extension worker with Cargo.
 ./tools/zig build test-native        # macOS, actual AppKit/CoreText/Metal tests
 ./tools/zig build counter-native     # interactive native counter with spring animation
 ./tools/zig build counter            # inspect a tree without a window
@@ -25,6 +26,6 @@ Read [implementation status](docs/status.md) for tested coverage and limitations
 
 The editor provides real file opening/saving, project navigation, draggable tabs and two editor panes, multi-cursor editing, grouped undo/redo, clipboard/selection, lexical highlighting, find/replace, a command palette and unsaved-close protection. Integrated macOS chrome retains the native traffic lights. Settings opens in a separate child window and persists appearance/editor preferences.
 
-Independent Git, extension, search, Markdown and language-server packages now power real editor views. Git supports combined and working/staged diffs, staging, commits/history, continuous gutters with inline hunk expansion, blame hover cards, branch creation/switching, fetch/pull/push and stash workflows. Local extensions change themes, icons, language profiles and server configurations. Project search includes unsaved buffers and opens source matches. Markdown previews update beside their source; images use the framework's retained image renderer. Stdio language servers provide versioned diagnostics and completion edits.
+Independent Git, extension, search, Markdown and language-server packages now power real editor views. Git supports combined and working/staged diffs, staging, commits/history, continuous gutters with inline hunk expansion, blame hover cards, branch creation/switching, fetch/pull/push and stash workflows. The extension manager searches the official Zed registry and installs supported themes, icons, Tree-sitter grammars and WASM language-server adapters. Common languages bundled in Zed have separate installable providers. Project search includes unsaved buffers and opens source matches. Markdown previews update beside their source; images use the framework's retained image renderer. Stdio language servers provide versioned diagnostics and completion edits.
 
-See the [editor guide](docs/editor-guide.md) for controls, installation paths and limits. Search excerpts currently open the original document for editing; arbitrary pane trees, a remote extension marketplace and broad LSP coverage remain work. The [implementation status](docs/status.md) distinguishes tested behavior from the remaining framework/editor scope.
+See the [editor guide](docs/editor-guide.md) for controls, installation paths and limits. Search excerpts currently open the original document for editing; arbitrary pane trees and broad LSP navigation/refactoring remain work. Zed extension compatibility and word wrapping are described in [the compatibility guide](docs/zed-extensions.md). The [implementation status](docs/status.md) distinguishes tested behavior from the remaining framework/editor scope.

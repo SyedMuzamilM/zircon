@@ -101,7 +101,14 @@ pub fn build(b: *std.Build) void {
     }) });
     const example_run = b.addRunArtifact(example);
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);
+    const extension_host_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
+    extension_host_build.addFileArg(b.path("tools/zed-extension-host/Cargo.toml"));
+    const extension_host_install = b.addInstallFileWithDir(b.path("tools/zed-extension-host/target/release/zircon-extension-host"), .bin, "zircon-extension-host");
+    extension_host_install.step.dependOn(&extension_host_build.step);
+    b.step("extension-host", "Build and install the Zed extension worker").dependOn(&extension_host_install.step);
     if (target.result.os.tag == .macos) {
+        b.getInstallStep().dependOn(&extension_host_install.step);
+
         const native_dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = true });
         const native_ui = native_dependency.module("zircon_ui");
         const native_editor = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize, .native = true }).module("zircon_editor");
@@ -111,6 +118,12 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module } },
         });
+        const zed_journey = b.addExecutable(.{ .name = "zircon-zed-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_zed_extensions.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_extensions", .module = extension_module } } }) });
+        const zed_journey_run = b.addRunArtifact(zed_journey);
+        zed_journey_run.step.dependOn(&extension_host_build.step);
+        zed_journey_run.addArg(b.option([]const u8, "zed-fixtures", "Imported official bundles directory") orelse "/tmp/zircon-zed-host-test");
+        zed_journey_run.addArg(b.option([]const u8, "zed-output", "New directory for the native extension journey") orelse "/tmp/zircon-zed-native");
+        b.step("verify-zed-extensions", "Verify downloaded official grammars, ZLS, themes and icons natively").dependOn(&zed_journey_run.step);
         const ui_review = b.addExecutable(.{ .name = "zircon-ui-review", .root_module = b.createModule(.{
             .root_source_file = b.path("tools/capture_ui_review.zig"),
             .target = target,

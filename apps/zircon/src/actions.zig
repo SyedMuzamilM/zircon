@@ -19,6 +19,10 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
         var project_input = try ui.controls.TextInput.init(self.allocator, "");
         project_input.leading_icon = .search;
         project_input.placeholder = "Search project files and open buffers…";
+        var extension_input = try ui.controls.TextInput.init(self.allocator, "");
+        extension_input.leading_icon = .search;
+        extension_input.placeholder = "Search Zed extensions…";
+        const extension_query = try cx.createChild(ui.controls.TextInput, extension_input);
         const project_query = try cx.createChild(ui.controls.TextInput, project_input);
         const replacement = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         const destination = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
@@ -29,7 +33,7 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
             commit_input.deinit(self.allocator);
             return err;
         };
-        self.fields = .{ .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
+        self.fields = .{ .extension_query = extension_query, .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
     }
     _ = try cx.observe(self.fields.?.path, Shell.onGitPickerQuery);
     try self.styleInputs(cx);
@@ -252,7 +256,7 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
         },
     } else self.overlay = .none;
 }
-pub fn applyOutcome(self: *Shell, id: ws.DocumentId, pane: u8, outcome: *editing.Outcome) !void {
+pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome) !void {
     defer if (outcome.change) |*change| change.deinit();
     if (outcome.change == null and !outcome.reset) return;
     self.language.clearCompletion();
@@ -266,6 +270,8 @@ pub fn applyOutcome(self: *Shell, id: ws.DocumentId, pane: u8, outcome: *editing
         if (outcome.change) |*change| other.editor.mapChange(change);
         other.editor.synchronize(snapshot);
     };
+    for (self.tabs.items, 0..) |*tab, index| if (std.meta.eql(tab.document, id) and index == self.active) try prepareEditor(self, cx, &tab.editor, snapshot, "primary-editor");
+    if (self.secondary) |*other| if (std.meta.eql(other.document, id)) try prepareEditor(self, cx, &other.editor, snapshot, "secondary-editor");
     if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) try preview.view.refresh(snapshot);
 }
 pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !bool {
@@ -287,11 +293,12 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         self.status_is_error = false;
         if (self.git.repository) try @import("services/git.zig").start(self, cx, .refresh);
     }
-    try applyOutcome(self, selected.id, pane, &outcome);
+    try applyOutcome(self, cx, selected.id, pane, &outcome);
     if (outcome.handled) cx.notify();
     return outcome.handled;
 }
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
+    if (which != .complete) self.language.clearCompletion();
     switch (which) {
         .open_project => {
             self.overlay = .open_project;
@@ -459,6 +466,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .replace => try show(self, cx, .replace),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
         .split_menu => self.split_menu_open = !self.split_menu_open,
+        .restart_language_servers => self.language.deinit(self.allocator),
+        .extension_search => try @import("services/catalog.zig").search(self, cx),
+        .install_language_support => try @import("services/catalog.zig").recommend(self, cx),
+        .toggle_soft_wrap => try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{@import("settings/model.zig").Patch{ .soft_wrap = if (self.editor_options.soft_wrap == .none) .editor_width else .none }}),
         .git_next_change, .git_previous_change, .git_toggle_hunk => {
             const current = try active(self);
             const record = try self.workspace.getConst(current.id);
@@ -620,7 +631,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 const replacement = try field(cx, self.fields.?.replacement, self.allocator);
                 defer self.allocator.free(replacement);
                 var result = try current.editor.replaceAll(&record.doc, query, replacement);
-                try applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+                try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result);
             } else if (which == .replace_one) {
                 var snapshot = record.doc.snapshot();
                 defer snapshot.deinit();
@@ -631,7 +642,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                     const replacement = try field(cx, self.fields.?.replacement, self.allocator);
                     defer self.allocator.free(replacement);
                     var result = try current.editor.execute(&record.doc, .{ .insert = replacement });
-                    try applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+                    try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result);
                 }
                 _ = try current.editor.findNext(&record.doc, query, false);
             } else {
@@ -648,7 +659,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 .redo => .redo,
                 else => .select_all,
             });
-            try applyOutcome(self, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+            try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result);
         },
         .zoom_in, .zoom_out => {
             const current = try active(self);
@@ -839,4 +850,19 @@ fn historyBoundary(self: *Shell, id: ws.DocumentId) void {
     if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
         pane.editor.typing_group = 0;
     };
+}
+
+pub fn prepareEditor(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, snapshot: text.Snapshot, key: []const u8) !void {
+    if (state.soft_wrap == .none) return;
+    const handle = self.window orelse return;
+    const window = try cx.app.window(handle);
+    var viewport = state.last_viewport;
+    for (window.frames.committed.nodes.items, 0..) |node, i| if (node.key) |id| if (id == .string and std.mem.eql(u8, id.string, key)) {
+        const bounds = window.frames.committed.bounds[i];
+        viewport = .{ .width = bounds.width, .height = bounds.height };
+        break;
+    };
+    var fixed: ui.layout.FixedMetrics = .{ .advance = state.font_size * 0.6, .line_height = state.line_height };
+    const metrics = if (window.surface) |surface| surface.measurer() else fixed.measurer();
+    try state.prepareView(snapshot, viewport, metrics);
 }

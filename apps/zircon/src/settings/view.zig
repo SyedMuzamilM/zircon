@@ -7,9 +7,9 @@ const model = @import("model.zig");
 const Shell = @import("../shell.zig").Shell;
 const v = @import("../views/components.zig");
 const Category = enum { general, appearance, editor, version_control };
-const Change = enum { vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
+const Change = enum { wrap, vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
 const Picker = enum { none, theme, icons, code_font, ui_font };
-const Row = enum { vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
+const Row = enum { wrap, vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
 const row_height: f32 = 88;
 pub const View = struct {
     allocator: std.mem.Allocator,
@@ -254,6 +254,7 @@ pub const View = struct {
         var values: model.Values = undefined;
         try cx.read(self.settings, model.Settings.copy, .{ arena.allocator(), &values });
         try self.apply(cx, switch (which) {
+            .wrap => .{ .soft_wrap = if (values.soft_wrap == .none) .editor_width else .none },
             .vim => .{ .vim_mode = !values.vim_mode },
             .lilex => .{ .font_family = .lilex },
             .menlo => .{ .font_family = .menlo },
@@ -292,7 +293,7 @@ fn categoryName(category: Category) []const u8 {
 fn contains(category: Category, row: Row) bool {
     return category == .general or switch (row) {
         .theme, .icons, .ui_font_family, .ui_font_size, .motion => category == .appearance,
-        .vim, .font_family, .font, .line_height, .ligatures, .tabs, .numbers => category == .editor,
+        .wrap, .vim, .font_family, .font, .line_height, .ligatures, .tabs, .numbers => category == .editor,
         .gutters, .blame => category == .version_control,
     };
 }
@@ -308,6 +309,7 @@ fn rowSearch(row: Row) []const u8 {
         .ligatures => "Font ligatures editor typography",
         .font => "Font size editor",
         .tabs => "Tab width size indentation editor",
+        .wrap => "Word text soft wrapping editor width",
         .numbers => "Line numbers editor",
         .gutters => "Git change markers gutters version control",
         .blame => "Git inline blame author version control",
@@ -335,12 +337,14 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         .ligatures => "Font ligatures",
         .font => "Font size",
         .tabs => "Tab width",
+        .wrap => "Word wrap",
         .numbers => "Line numbers",
         .gutters => "Git change markers",
         .blame => "Inline Git blame",
         .motion => "Reduced motion",
     };
     const help: []const u8 = switch (row) {
+        .wrap => "Wrap long lines at the editor width without changing the file.",
         .theme => "Choose the colors used throughout the editor.",
         .icons => "Choose icons for files and folders in the project panel.",
         .vim => "Normal, Insert and Visual modes. Escape returns to Normal.",
@@ -393,16 +397,18 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 try controls.append(b.allocator(), try b.button(.{ .label = choice[1], .on_click = try b.onClickWith(choice[0], View.change), .style = style }));
             }
         },
-        .vim, .numbers, .gutters, .blame, .motion, .ligatures => {
+        .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures => {
             const enabled = switch (row) {
                 .vim => values.vim_mode,
                 .ligatures => values.font_ligatures,
+                .wrap => values.soft_wrap != .none,
                 .numbers => values.line_numbers,
                 .gutters => values.git_gutters,
                 .blame => values.git_inline_blame,
                 else => values.reduced_motion,
             };
             const change: Change = switch (row) {
+                .wrap => .wrap,
                 .vim => .vim,
                 .ligatures => .ligatures,
                 .numbers => .numbers,

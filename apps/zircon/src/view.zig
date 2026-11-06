@@ -29,6 +29,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
+    if (self.language.syntax_waiting) try layers.append(b.allocator(), try @import("services/language.zig").syntaxWake(b));
     if (self.git.menu != .none) try layers.append(b.allocator(), try @import("views/git_controls.zig").render(self, b));
     if (self.split_menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").splitMenu(self, b));
     if (self.menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").menu(self, b));
@@ -111,7 +112,12 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             const message = document.diagnostics orelse break;
             const record = try self.workspace.getConst(active_id);
             if (message.data.diagnostics.version != record.doc.revision()) break;
-            for (message.data.diagnostics.items[0..@min(4, message.data.diagnostics.items.len)], 0..) |diagnostic, index| try children.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s}  {d}:{d}  {s}", .{ @tagName(diagnostic.severity), diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }), .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onDiagnostic), .style = .{ .height = .{ .px = 28 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 6 }, .background = colors.panel, .text = .{ .size = 12, .color = colors.warning }, .overflow = .hidden } })));
+            for (message.data.diagnostics.items[0..@min(4, message.data.diagnostics.items.len)], 0..) |diagnostic, index| try children.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s}  {d}:{d}  {s}", .{ switch (diagnostic.severity) {
+                .error_value => "Error",
+                .warning => "Warning",
+                .information => "Information",
+                .hint => "Hint",
+            }, diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }), .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onDiagnostic), .style = .{ .height = .{ .px = 28 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 6 }, .background = colors.panel, .text = .{ .size = 12, .color = colors.warning }, .overflow = .hidden } })));
             break;
         };
     }

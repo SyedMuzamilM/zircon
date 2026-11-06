@@ -18,6 +18,10 @@ pub fn handle(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, docu
     if (e.data == .pointer_down and e.data.pointer_down.button == .primary and point.x >= e.bounds.x and point.x < e.bounds.x + 14) {
         for (state.visibleChanges(snapshot.revision()), 0..) |change, index| {
             var marker = annotations.marker(change, state.visibleChanges(snapshot.revision()), state.line_height, e.bounds, state.scroll.offset);
+            if (state.soft_wrap != .none and state.wrap_cache.valid(snapshot.revision())) {
+                marker.y = e.bounds.y + state.rowY(change.start, snapshot.revision()) - state.scroll.offset - (if (change.expanded) @as(f32, @floatFromInt(change.old_count)) * state.line_height else 0);
+                if (change.end > change.start) marker.height = state.rowY(change.end, snapshot.revision()) - state.rowY(change.start, snapshot.revision()) + (if (change.expanded) @as(f32, @floatFromInt(change.old_count)) * state.line_height else 0);
+            }
             marker.x = e.bounds.x;
             marker.width = 14;
             if (change.kind == .deleted and !change.expanded) {
@@ -34,7 +38,7 @@ pub fn handle(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, docu
     const blame = if (state.inline_blame) |*value| value else return false;
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const geometry = (try editing.blame_view.layout(arena.allocator(), snapshot, blame.*, state.visibleChanges(snapshot.revision()), .{ .font = state.font_size, .line_height = state.line_height, .gutter = if (state.show_line_numbers) editing.gutterWidth(snapshot.lineCount(), state.font_size) else 20, .horizontal = state.horizontal, .scroll = state.scroll.offset, .tab_width = state.tab_width }, try e.textMetrics(), e.bounds)) orelse return false;
+    const geometry = (try editing.blame_view.layout(arena.allocator(), snapshot, blame.*, state.visibleChanges(snapshot.revision()), .{ .source_y = if (state.soft_wrap != .none and state.wrap_cache.valid(snapshot.revision())) state.wrap_cache.rowY(state.wrap_cache.starts.items[blame.line + 1] - 1, state.line_height, state.visibleChanges(snapshot.revision())) else null, .source_x = if (state.soft_wrap != .none and state.wrap_cache.valid(snapshot.revision())) state.wrap_cache.rows.items[state.wrap_cache.starts.items[blame.line + 1] - 1].x else 0, .font = state.font_size, .line_height = state.line_height, .gutter = if (state.show_line_numbers) editing.gutterWidth(snapshot.lineCount(), state.font_size) else 20, .horizontal = state.horizontal, .scroll = state.scroll.offset, .tab_width = state.tab_width }, try e.textMetrics(), e.bounds)) orelse return false;
     const on_label = annotations.contains(geometry.label, point);
     const bridge_top = @min(geometry.label.y + geometry.label.height, geometry.card.y + geometry.card.height);
     const bridge_bottom = @max(geometry.label.y, geometry.card.y);
