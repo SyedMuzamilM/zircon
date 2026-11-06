@@ -8,10 +8,9 @@ const Shell = shell.Shell;
 const catalogue = @import("commands.zig");
 const Command = catalogue.Command;
 const Palette = @import("theme.zig").Palette;
-const toolbar_height: f32 = 42;
-const tab_height: f32 = 36;
-const status_height: f32 = 26;
-const tree_row_height: f32 = 24;
+const toolbar_height = @import("views/components.zig").metrics.titlebar;
+const tab_height = @import("views/components.zig").metrics.tabs;
+const status_height = @import("views/components.zig").metrics.status;
 const result_limit = 12;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
@@ -30,6 +29,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
+    if (self.menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").menu(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlay(self, b));
     if (self.overlay == .none) if (self.language.completions) |message| {
         var choices: std.ArrayList(ui.Element) = .empty;
@@ -44,63 +44,24 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
 }
 
 fn toolbar(self: *const Shell, b: *ui.Ui) !ui.Element {
-    const colors = self.colors;
-    const compact = b.viewport().width < 600;
-    const title = try label(b, colors, "Zircon", colors.text, 14);
-    const native_controls = try b.div(.{ .width = .{ .px = 64 }, .flex_shrink = 0 }, &.{});
-    const location = try b.styled(try b.text(std.fs.path.basename(self.workspace.root_path)), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = colors.muted }, .overflow = .hidden });
-    var children: std.ArrayList(ui.Element) = .empty;
-    try children.appendSlice(b.allocator(), &.{ native_controls, title, location, try commandButton(b, colors, .open_path, "Open", false) });
-    if (!compact) try children.appendSlice(b.allocator(), &.{ try commandButton(b, colors, .project_search, "Search", false), try commandButton(b, colors, .git_changes, "Git", self.left_panel != .project), try commandButton(b, colors, .extensions, "Extensions", self.panel == .extensions), try commandButton(b, colors, .settings, "Settings", false), try commandButton(b, colors, .palette, "Commands", false), try commandButton(b, colors, .split, if (self.secondary != null) "Unsplit" else "Split", false) });
-    return b.dragRegion(try b.key(.{ .string = "toolbar" }, try b.row(.{ .height = .{ .px = toolbar_height }, .flex_shrink = 0, .align_items = .center, .gap = 18, .padding = .{ .left = 16, .right = 12 }, .background = colors.chrome, .overflow = .hidden }, children.items)));
+    return @import("views/chrome.zig").titlebar(self, b);
 }
-
-fn sidebar(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui.Element {
-    const colors = self.colors;
-    if (self.left_panel != .project) return @import("views/git.zig").sidebar(self, b, width, @max(0, window_height - toolbar_height - status_height));
-    const heading = try b.row(.{ .height = .{ .px = 36 }, .flex_shrink = 0, .align_items = .center, .padding = .{ .left = 14, .right = 10 }, .gap = 8 }, &.{
-        try b.styled(try label(b, colors, "Project", colors.muted, 12), .{ .flex_grow = 1, .text = .{ .size = 12, .color = colors.muted } }),
-        try commandButton(b, colors, .new_file, "+", false),
-    });
-    const available = @max(0, window_height - toolbar_height - status_height - 36);
-    const visible = try ui.controls.visibleRows(self.tree.items.len, tree_row_height, self.tree_scroll.offset, available, 0);
-    var rows: std.ArrayList(ui.Element) = .empty;
-    const active_path = if (activeRecord(self)) |record| record.path else null;
-    for (self.tree.items[visible.start..visible.end], visible.start..) |entry, i| {
-        const selected = if (active_path) |path| std.mem.eql(u8, path, entry.path) else false;
-        const contribution = if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(self.active_icon_theme)) |icons| icons.resolve(entry.path, entry.directory) else null else null;
-        const symbol = if (contribution) |icon| if (icon == .symbol) icon.symbol else "" else if (entry.directory) (if (entry.expanded) "▾" else "▸") else "·";
-        const name = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ symbol, entry.name });
-        var children: []const ui.Element = &.{};
-        if (contribution) |icon| if (icon == .png) if (self.icons.find(icon.png.path)) |image| {
-            const thumbnail = try @import("views/image.zig").element(b, image, .{ .width = .{ .px = 18 }, .height = .{ .px = 18 }, .flex_shrink = 0 });
-            const owned = try b.allocator().alloc(ui.Element, 2);
-            owned[0] = thumbnail;
-            owned[1] = try label(b, colors, entry.name, if (selected) colors.text else colors.muted, 13);
-            children = owned;
-        };
-        const row = try b.button(.{
-            .label = name,
-            .children = children,
-            .on_click = try b.onClickWith(@as(u32, @intCast(i)), Shell.onTree),
-            .style = .{ .direction = .row, .gap = 6, .height = .{ .px = tree_row_height }, .flex_shrink = 0, .padding = .{ .left = 12 + @as(f32, @floatFromInt(entry.depth)) * 14, .top = 4, .right = 8 }, .background = if (selected) colors.selected else colors.sidebar, .text = .{ .size = 13, .color = if (selected) colors.text else colors.muted }, .overflow = .hidden },
-        });
-        try rows.append(b.allocator(), try b.listen(try b.key(.{ .number = @intCast(i) }, row), .{ .on_input = try b.onInputWith(@as(u32, @intCast(i)), Shell.onTreeDrag) }));
-    }
-    if (self.tree.items.len == 0) try rows.append(b.allocator(), try b.column(.{ .padding = .{ .left = 14, .right = 14, .top = 8 }, .gap = 10 }, &.{
-        try label(b, colors, "This folder is empty.", colors.muted, 12),
-        try commandButton(b, colors, .new_file, "Create a file", false),
-    }));
-    const list = try b.listen(try b.key(.{ .string = "project-files" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, rows.items)), .{ .on_input = b.onInput(Shell.onTreeInput) });
-    return b.key(.{ .string = "sidebar" }, try b.column(.{ .width = .{ .px = width }, .flex_shrink = 0, .background = colors.sidebar, .overflow = .hidden }, &.{ heading, list }));
+fn sidebar(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Element {
+    return @import("views/project.zig").render(self, b, width, height);
 }
 
 fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     const colors = self.colors;
-    if (self.panel == .image) return @import("views/image.zig").render(self, b);
-    if (self.panel == .extensions) return @import("views/extensions.zig").render(self, b);
-    if (self.panel == .search) return @import("views/search.zig").render(self, b);
-    if (self.panel == .git_diff) return @import("views/git.zig").diffPane(self, b);
+    if (self.panel != .editor and self.panel != .markdown) {
+        const panel = switch (self.panel) {
+            .image => try @import("views/image.zig").render(self, b),
+            .extensions => try @import("views/extensions.zig").render(self, b),
+            .search => try @import("views/search.zig").render(self, b),
+            .git_diff => try @import("views/git.zig").diffPane(self, b),
+            else => unreachable,
+        };
+        return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, &.{ try tabs(self, b, width), panel }));
+    }
     var children: std.ArrayList(ui.Element) = .empty;
     try children.append(b.allocator(), try tabs(self, b, width));
     if (self.tabs.items.len == 0) {
@@ -117,7 +78,7 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         primary = try b.styled(primary, .{ .width = .{ .px = primary_width }, .flex_grow = 1, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden });
         primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 0), Shell.onEditor) });
         primary = try b.requestFocus(try b.autofocus(primary), if (self.active_pane == .primary) self.editor_focus_request else 0);
-        try panes.append(b.allocator(), try b.column(.{ .width = .{ .px = primary_width }, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, primary_record), primary }));
+        try panes.append(b.allocator(), try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, primary_record), primary })));
         if (preview_visible) {
             try panes.append(b.allocator(), try divider(b, colors, 1));
             const preview = try b.listen(try b.key(.{ .string = "markdown-preview" }, try self.preview.?.view.render(b)), .{ .focusable = true, .on_input = b.onInput(Shell.onPreview) });
@@ -129,7 +90,7 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             secondary_canvas = try b.styled(secondary_canvas, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
             secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 1), Shell.onEditor) });
             secondary_canvas = try b.requestFocus(secondary_canvas, if (self.active_pane == .secondary) self.editor_focus_request else 0);
-            try panes.append(b.allocator(), try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, record), secondary_canvas }));
+            try panes.append(b.allocator(), try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, record), secondary_canvas })));
         }
         try children.append(b.allocator(), try b.key(.{ .string = "panes" }, try b.row(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, panes.items)));
         const active_id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else tab.document;
@@ -144,42 +105,10 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, children.items));
 }
 fn fileHeading(self: *const Shell, b: *ui.Ui, record: *const workspace.Record) !ui.Element {
-    const c = self.colors;
-    var path = record.path orelse record.title();
-    if (std.mem.startsWith(u8, path, self.workspace.root_path) and path.len > self.workspace.root_path.len) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
-    return b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 14, .right = 8 }, .align_items = .center, .gap = 10, .background = c.document, .overflow = .hidden }, &.{ try b.styled(try label(b, c, path, c.muted, 12), .{ .flex_grow = 1, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }), if (@import("zircon_editor").syntax.languageForPath(record.path orelse "") == .markdown) try commandButton(b, c, .markdown_preview, "Preview", false) else try b.div(.{}, &.{}) });
+    return @import("views/chrome.zig").fileHeader(self, b, record);
 }
-
 fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
-    const colors = self.colors;
-    var items: std.ArrayList(ui.Element) = .empty;
-    const capacity = @max(@as(usize, 1), @as(usize, @intFromFloat(@floor(@max(108, width - 56) / 108))));
-    const overflow = self.tabs.items.len > capacity;
-    const first = if (overflow and self.active >= capacity) @min(self.active - capacity + 1, self.tabs.items.len - capacity) else 0;
-    const end = @min(self.tabs.items.len, first + capacity);
-    const tab_space = @max(90, width - if (overflow) @as(f32, 56) else 0);
-    const tab_width = @min(@as(f32, 190), @max(@as(f32, 90), tab_space / @as(f32, @floatFromInt(@max(@as(usize, 1), end - first)))));
-    if (overflow) try items.append(b.allocator(), try tabNavigation(b, colors, if (first > 0) first - 1 else null, "previous-tab", "‹"));
-    for (self.tabs.items[first..end], first..) |tab, i| {
-        const record = try self.workspace.getConst(tab.document);
-        const selected = i == self.active;
-        const background = if (selected) colors.document else colors.chrome;
-        const title = try std.fmt.allocPrint(b.allocator(), "{s}{s}", .{ record.title(), if (record.dirty()) " •" else "" });
-        const tab_button = try b.listen(try b.button(.{ .label = title, .on_click = try b.onClickWith(@as(u32, @intCast(i)), Shell.onTab), .style = .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .padding = .{ .left = 12, .top = 10, .right = 3 }, .background = background, .text = .{ .size = 12, .color = if (selected) colors.text else colors.muted }, .overflow = .hidden } }), .{ .on_input = try b.onInputWith(tab.document, Shell.onTabDrag) });
-        const close = try b.key(.{ .string = "close" }, try b.button(.{ .label = "×", .on_click = try b.onClickWith(@as(u32, @intCast(i)), Shell.onCloseTab), .style = .{ .width = .{ .px = 26 }, .flex_shrink = 0, .padding = .{ .top = 9, .left = 6 }, .background = background, .text = .{ .size = 13, .color = colors.muted } } }));
-        try items.append(b.allocator(), try b.key(.{ .number = @import("panes.zig").key(tab.document) }, try b.column(.{ .width = .{ .px = tab_width }, .min_width = .{ .px = 90 }, .flex_shrink = 1 }, &.{
-            try b.row(.{ .flex_grow = 1, .background = background }, &.{ tab_button, close }),
-            try b.div(.{ .height = .{ .px = 1 }, .flex_shrink = 0, .background = if (selected) colors.accent else colors.chrome }, &.{}),
-        })));
-    }
-    if (overflow) try items.append(b.allocator(), try tabNavigation(b, colors, if (end < self.tabs.items.len) end else null, "next-tab", "›"));
-    if (items.items.len == 0) try items.append(b.allocator(), try label(b, colors, "No open files", colors.muted, 12));
-    return b.key(.{ .string = "tabs" }, try b.row(.{ .height = .{ .px = tab_height }, .flex_shrink = 0, .background = colors.chrome, .overflow = .hidden }, items.items));
-}
-
-fn tabNavigation(b: *ui.Ui, colors: Palette, target: ?usize, key: []const u8, text: []const u8) !ui.Element {
-    const style: ui.Style = .{ .width = .{ .px = 28 }, .height = .{ .px = tab_height }, .flex_shrink = 0, .padding = .{ .left = 8, .top = 7 }, .text = .{ .size = 18, .color = colors.muted }, .background = colors.chrome };
-    return b.key(.{ .string = key }, if (target) |index| try b.button(.{ .label = text, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onTab), .style = style }) else try b.div(style, &.{}));
+    return @import("views/chrome.zig").tabs(self, b, width);
 }
 
 fn emptyEditor(b: *ui.Ui, colors: Palette) !ui.Element {
@@ -191,55 +120,11 @@ fn emptyEditor(b: *ui.Ui, colors: Palette) !ui.Element {
 }
 
 fn divider(b: *ui.Ui, colors: Palette, kind: u8) !ui.Element {
-    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .width = .{ .px = 5 }, .flex_shrink = 0, .background = colors.line }, &.{})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
-}
-
-fn activeRecord(self: *const Shell) ?*const workspace.Record {
-    if (self.active_pane == .secondary) if (self.secondary) |pane| return self.workspace.getConst(pane.document) catch null;
-    if (self.tabs.items.len == 0) return null;
-    return self.workspace.getConst(self.tabs.items[@min(self.active, self.tabs.items.len - 1)].document) catch null;
+    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.column(.{ .width = .{ .px = 5 }, .flex_shrink = 0, .align_items = .center, .background = colors.document }, &.{try b.div(.{ .width = .{ .px = 1 }, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
 }
 
 fn statusBar(self: *const Shell, b: *ui.Ui) !ui.Element {
-    const colors = self.colors;
-    var state: []const u8 = "Ready";
-    var location: []const u8 = "";
-    if (activeRecord(self)) |record| {
-        const current_editor = if (self.active_pane == .secondary and self.secondary != null) &self.secondary.?.editor else &self.tabs.items[@min(self.active, self.tabs.items.len - 1)].editor;
-        var snapshot = record.doc.snapshot();
-        defer snapshot.deinit();
-        const caret = current_editor.primary().head;
-        const point = try snapshot.pointAt(@min(caret, snapshot.byteLen()));
-        const line = try snapshot.lineRange(point.line);
-        var column: usize = 0;
-        const prefix_range = @import("zircon_text").Range{ .start = line.start, .end = @min(caret, line.end) };
-        if (prefix_range.end - prefix_range.start <= 64 * 1024) {
-            var chunks = try snapshot.chunks(prefix_range);
-            while (chunks.next()) |chunk| for (chunk) |byte| {
-                if (byte == '\t') column += current_editor.tab_width - column % current_editor.tab_width else if (byte & 0xc0 != 0x80) column += 1;
-            };
-        } else column = point.byte_column;
-        location = try std.fmt.allocPrint(b.allocator(), "Ln {d}, Col {d}   {s}   UTF-8", .{ point.line + 1, column + 1, languageName(current_editor.language) });
-        state = if (record.dirty()) "Modified" else "Saved";
-        if (current_editor.selections.items.items.len > 1) state = try std.fmt.allocPrint(b.allocator(), "{d} cursors", .{current_editor.selections.items.items.len});
-    }
-    if (self.status.len > 0) state = self.status else if (self.indexing) state = "Indexing project…";
-    if (self.tab_drag) |drag| if (drag.moved) {
-        state = "Drop on tabs to reorder, or on the right to split · Esc cancels";
-    };
-    const state_element = try b.styled(try label(b, colors, state, if (self.status.len > 0 and self.status_is_error) colors.warning else colors.muted, 11), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 11, .color = if (self.status.len > 0 and self.status_is_error) colors.warning else colors.muted }, .overflow = .hidden });
-    return b.key(.{ .string = "status" }, try b.row(.{ .height = .{ .px = status_height }, .flex_shrink = 0, .align_items = .center, .padding = .{ .left = 12, .right = 12 }, .gap = 12, .background = colors.chrome, .overflow = .hidden }, &.{ state_element, try label(b, colors, location, colors.muted, 11) }));
-}
-
-fn languageName(language: @import("zircon_editor").syntax.Language) []const u8 {
-    return switch (language) {
-        .plain => "Plain text",
-        .zig => "Zig",
-        .rust => "Rust",
-        .json => "JSON",
-        .markdown => "Markdown",
-        .custom => "Extension",
-    };
+    return @import("views/chrome.zig").statusbar(self, b);
 }
 
 fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {

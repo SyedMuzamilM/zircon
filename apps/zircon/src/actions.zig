@@ -265,6 +265,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 }
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     switch (which) {
+        .workspace_menu => self.menu_open = true,
         .project_files => {
             self.left_panel = .project;
             self.sidebar_visible = true;
@@ -283,11 +284,13 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .complete => try @import("services/language.zig").request(self, cx),
         .git_changes => {
             self.left_panel = .git_changes;
+            self.git.sidebar_scroll.offset = 0;
             self.sidebar_visible = true;
             try @import("services/git.zig").start(self, cx, .refresh);
         },
         .git_history => {
             self.left_panel = .git_history;
+            self.git.sidebar_scroll.offset = 0;
             self.sidebar_visible = true;
             try @import("services/git.zig").start(self, cx, .refresh);
         },
@@ -333,7 +336,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             const View = @import("settings/view.zig").View;
             const handle = try cx.app.openChildWindow(self.window.?, View, .{ .title = "Zircon Settings", .chrome = .integrated, .width = 1000, .height = 700 }, .{ .allocator = self.allocator, .settings = self.settings.?, .workspace = cx.owner });
             self.settings_window = handle;
-            try cx.app.update(try cx.app.windowEntity(View, handle), View.bootstrap, .{});
+            try cx.app.update(try cx.app.windowEntity(View, handle), View.bootstrap, .{handle});
         },
         .new_file => try newFile(self),
         .open_path => try show(self, cx, .open_path),
@@ -374,7 +377,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 if (self.image) |*asset| asset.deinit(self.allocator);
                 self.image = null;
                 self.panel = .editor;
-            } else if (self.tabs.items.len > 0) try requestTabClose(self, cx, self.active);
+            } else if (self.panel != .editor and self.panel != .markdown) self.panel = .editor else if (self.tabs.items.len > 0) try requestTabClose(self, cx, self.active);
         },
         .quit => try cx.app.requestCloseWindow(self.window.?),
         .dismiss => {
@@ -482,6 +485,13 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (e.data != .key_down) return;
     const key = e.data.key_down;
+    if (self.menu_open and key.key == .escape) {
+        self.menu_open = false;
+        e.preventDefault();
+        e.stopPropagation();
+        cx.notify();
+        return;
+    }
     if (self.tab_drag != null and key.key == .escape) {
         @import("panes.zig").cancel(self);
         e.releasePointer();

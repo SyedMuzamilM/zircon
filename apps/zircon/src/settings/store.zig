@@ -61,6 +61,15 @@ pub const Store = struct {
         self.parsed = next;
         self.revision += 1;
     }
+    pub fn ensureFile(self: *Store) !void {
+        const path = self.path orelse return error.TemporarySettings;
+        _ = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch |err| {
+            if (err != error.FileNotFound) return err;
+            const bytes = try std.json.Stringify.valueAlloc(self.allocator, self.parsed.value, .{ .whitespace = .indent_2 });
+            defer self.allocator.free(bytes);
+            try persist(self.io, path, bytes);
+        };
+    }
 };
 fn read(value: std.json.Value) Values {
     var result: Values = .{};

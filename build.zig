@@ -121,9 +121,13 @@ pub fn build(b: *std.Build) void {
         app_native_tests.root_module.addAnonymousImport("image_fixture", .{ .root_source_file = b.path("packages/zircon_extensions/tests/fixtures/pixel.png") });
         const app_native_run = b.addRunArtifact(app_native_tests);
         b.step("test-editor-native", "Drive native editor input, persistence, and close policy").dependOn(&app_native_run.step);
+        const settings_native_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/zircon/tests/settings_native.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
+        const settings_native_run = b.addRunArtifact(settings_native_tests);
+        settings_native_run.step.dependOn(&app_native_run.step);
+        b.step("test-settings-native", "Reproduce settings opening through native window notifications").dependOn(&settings_native_run.step);
         const real_language_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/zircon/tests/clangd_journey.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
         const real_language_run = b.addRunArtifact(real_language_tests);
-        real_language_run.step.dependOn(&app_native_run.step);
+        real_language_run.step.dependOn(&settings_native_run.step);
         b.step("test-language-real", "Accept a completion from the installed Apple clangd").dependOn(&real_language_run.step);
         const zircon = b.addExecutable(.{ .name = "zircon", .root_module = b.createModule(.{
             .root_source_file = b.path("apps/zircon/src/main.zig"),

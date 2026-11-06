@@ -25,4 +25,10 @@ pub const Settings = struct {
         try self.store.update(patch);
         cx.notify();
     }
+    pub fn copyPath(self: *const Settings, a: std.mem.Allocator, output: *?[]u8) !void {
+        output.* = if (self.store.path) |path| try a.dupe(u8, path) else null;
+    }
+    pub fn prepareFile(self: *Settings, _: *ui.Context(Settings)) !void {
+        try self.store.ensureFile();
+    }
 };

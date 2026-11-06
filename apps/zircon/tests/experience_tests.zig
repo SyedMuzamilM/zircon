@@ -161,7 +161,7 @@ fn elementBounds(app: *ui.App, h: ui.WindowHandle, name: []const u8) !ui.Rect {
 }
 fn buttonPoint(app: *ui.App, h: ui.WindowHandle, name: []const u8) !ui.Point {
     const frame = &(try app.window(h)).frames.committed;
-    for (frame.nodes.items, 0..) |node, index| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, name)) {
+    for (frame.nodes.items, 0..) |node, index| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, name) and insideTabs(frame, @intCast(index))) {
         const rect = frame.bounds[index];
         return .{ .x = rect.x + rect.width / 2, .y = rect.y + rect.height / 2 };
     };
@@ -340,6 +340,14 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try settle(&app);
     try app.update(owner, Ops.gitFile, .{});
     try settle(&app);
+    var numbered = false;
+    var addition = false;
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .text) {
+        if (std.mem.eql(u8, node.kind.text, "1")) numbered = true;
+        if (std.mem.eql(u8, node.kind.text, "const value = 2;")) addition = true;
+        try t.expect(!std.mem.eql(u8, node.kind.text, "+const value = 2;"));
+    };
+    try t.expect(numbered and addition);
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-changes.png");
     try click(&app, h, "Stage file");
     try settle(&app);
@@ -459,4 +467,12 @@ test "project search captures unsaved buffers and opens the real source selectio
     try app.read(owner, Ops.source, .{ t.allocator, &source });
     defer t.allocator.free(source);
     try t.expectEqualStrings("edited unsaved\ndisk only\n", source);
+}
+
+fn insideTabs(frame: anytype, start: u32) bool {
+    var current: ?u32 = start;
+    while (current) |index| : (current = frame.nodes.items[index].parent) {
+        if (frame.nodes.items[index].key) |key| if (key == .string and std.mem.eql(u8, key.string, "tabs")) return true;
+    }
+    return false;
 }

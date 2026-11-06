@@ -1,0 +1,18 @@
+# Zed workspace UI reference
+
+Inspected 2026-11-06 at Zed commit [`4a6121bb0f10c6e8037b741b7dc0a4cd639ae289`](https://github.com/zed-industries/zed/tree/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289), dated 2026-11-05. The controlling visual references remain the user's [editor and settings screenshots](../specification/editor-experience.md). This is source/layout research, without a GPUI dependency or copied Rust implementation.
+
+| Source observation | Zircon design consequence |
+| --- | --- |
+| [Title bar](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/title_bar/src/title_bar.rs) separates platform controls, project name and worktree/branch context. The screenshot has a compact title strip. | A 34 px strip, traffic-light reserve, project and branch controls, quiet trailing actions. Move the broad action list out of the titlebar. |
+| [Tabs](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/ui/src/components/tab.rs) use `DynamicSpacing::Base32` and positional borders. The [tab bar](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/ui/src/components/tab_bar.rs) separates navigation, tabs and trailing controls. | 32 px bordered tabs, document-colored active tab, muted inactive tabs, navigation and split/new controls. |
+| [Project panel](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/project_panel/src/project_panel.rs) composes tree items, file icons, indentation guides and selection states. | Outline icons, file-type tint, folder hierarchy, compact rows and a restrained selected-file treatment. |
+| [Status bar](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/workspace/src/status_bar.rs) has separate left/right item groups. | Left panel selectors; right caret/language and settings controls. Keep the canvas dominant. |
+| [Settings window](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/crates/settings_ui/src/settings_ui.rs) separates `render_nav`, `render_page`, file context, search and reusable toggle/dropdown/number controls. | Full-height side navigation with search under traffic lights, contextual header, separated setting rows, proper switches and choice controls. Show only settings that work in Zircon. |
+| [One Dark theme](https://github.com/zed-industries/zed/blob/4a6121bb0f10c6e8037b741b7dc0a4cd639ae289/assets/themes/one/one.json) distinguishes title/status `#3b414d`, panel/tab `#2f343e`, editor `#282c33`, text `#dce0e5`, muted `#a9afbc`, accent `#74ade8`. | Use these reference roles rather than one chrome color on every area. Their separation matters as much as their individual values. |
+
+The implementation uses original small outline icons drawn through Zircon UI. No Zed icon artwork or GPUI widget implementation is imported. Typography uses the native system UI face and a monospaced editor face. No inactive feature buttons, fake account controls, or fabricated repository data are added to resemble the screenshots.
+
+## Settings opening regression
+
+`zig build test-settings-native` reproduced `BorrowConflict` when AppKit's synchronous `windowDidResignKey` callback arrived while the workspace action held an entity update. The platform callback previously attempted a second dispatch into that entity. Native focus notifications now drain at the next application step, after the borrow ends, preserving a blur before a subsequent focus. Child windows center above their actual parent. The native regression also opens settings by mouse and physical `Cmd+,`, closes it, and reopens it.

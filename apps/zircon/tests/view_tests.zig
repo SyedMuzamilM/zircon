@@ -33,7 +33,7 @@ test "workspace chrome leaves the canvas room and focuses the editor initially" 
     var canvas = false;
     var open_button = false;
     for (frame.nodes.items, 0..) |node, i| {
-        if (node.kind == .custom) {
+        if (node.key != null and node.key.? == .string and std.mem.eql(u8, node.key.?.string, "primary-editor")) {
             canvas = true;
             try t.expect(frame.bounds[i].width > 600);
             try t.expect(frame.bounds[i].height > 500);
@@ -57,7 +57,7 @@ test "palette uses an editable focused query and Escape restores canvas focus" {
     _ = try app.step(2);
     var split_result = false;
     var new_file_result = false;
-    for (window.frames.committed.nodes.items) |node| if (node.kind == .button) {
+    for (window.frames.committed.nodes.items, 0..) |node, index| if (node.kind == .button and inScope(&window.frames.committed, @intCast(index), "dialog")) {
         if (std.mem.startsWith(u8, node.kind.button.label, "Split editor")) split_result = true;
         if (std.mem.startsWith(u8, node.kind.button.label, "New file")) new_file_result = true;
     };
@@ -76,7 +76,7 @@ test "compact workspace hides sidebar and still arranges an editable canvas" {
     const frame = &(try app.window(handle)).frames.committed;
     for (frame.nodes.items, 0..) |node, i| {
         if (node.key) |key| if (key == .string) try t.expect(!std.mem.eql(u8, key.string, "sidebar"));
-        if (node.kind == .custom) try t.expect(frame.bounds[i].width >= 390 and frame.bounds[i].height > 150);
+        if (node.key != null and node.key.? == .string and std.mem.eql(u8, node.key.?.string, "primary-editor")) try t.expect(frame.bounds[i].width >= 390 and frame.bounds[i].height > 150);
     }
 }
 
@@ -124,7 +124,7 @@ test "many tabs keep the active document visible and navigation reaches hidden t
     var previous: ?ui.Rect = null;
     var active_visible = false;
     for (window.frames.committed.nodes.items, 0..) |node, i| if (node.kind == .button) {
-        if (std.mem.eql(u8, node.kind.button.label, "‹")) previous = window.frames.committed.bounds[i];
+        if (std.mem.eql(u8, node.kind.button.label, "previous-tab")) previous = window.frames.committed.bounds[i];
         if (std.mem.eql(u8, node.kind.button.label, "Untitled 15")) active_visible = true;
     };
     try t.expect(active_visible and previous != null);
@@ -133,4 +133,12 @@ test "many tabs keep the active document visible and navigation reaches hidden t
     try app.dispatch(handle, .{ .pointer_up = .{ .position = position } });
     _ = try app.step(1);
     try t.expect((try app.read(owner, Operations.active, .{})) < 14);
+}
+
+fn inScope(frame: anytype, start: u32, key: []const u8) bool {
+    var current: ?u32 = start;
+    while (current) |index| : (current = frame.nodes.items[index].parent) {
+        if (frame.nodes.items[index].key) |value| if (value == .string and std.mem.eql(u8, value.string, key)) return true;
+    }
+    return false;
 }

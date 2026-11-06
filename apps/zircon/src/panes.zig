@@ -60,7 +60,7 @@ fn advance(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
             const size = try e.windowSize();
             const left = if (self.sidebar_visible and size.width >= 600) @min(self.sidebar_width, @max(140, size.width * 0.4)) + 5 else 0;
             const point = pointer.position;
-            if (point.x < left or point.x >= size.width or point.y < 42 or point.y >= size.height - 26) {
+            if (point.x < left or point.x >= size.width or point.y < @import("views/components.zig").metrics.titlebar or point.y >= size.height - @import("views/components.zig").metrics.status) {
                 cx.notify();
                 return;
             }
@@ -78,7 +78,7 @@ fn advance(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
                 break;
             };
             const index = source orelse return;
-            if (point.y < 78) {
+            if (point.y < @import("views/components.zig").metrics.titlebar + @import("views/components.zig").metrics.tabs) {
                 const w = try cx.app.window(self.window.?);
                 var destination = self.tabs.items.len - 1;
                 for (w.frames.committed.nodes.items, 0..) |node, ni| {

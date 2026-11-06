@@ -23,7 +23,8 @@ pub const Shell = struct {
     secondary: ?Pane = null,
     active_pane: enum { primary, secondary } = .primary,
     sidebar_visible: bool = true,
-    sidebar_width: f32 = 220,
+    sidebar_width: f32 = 250,
+    menu_open: bool = false,
     split_ratio: f32 = 0.5,
     tree: std.ArrayList(TreeRow) = .empty,
     file_index: std.ArrayList(IndexedFile) = .empty,
@@ -203,6 +204,7 @@ pub const Shell = struct {
         try actions.newFile(self);
     }
     pub fn onCommand(self: *Shell, e: *ui.Event(ui.Click), cx: *ui.Context(Shell), which: Command) !void {
+        self.menu_open = false;
         if (self.overlay == .palette) self.overlay = .none;
         actions.execute(self, cx, which, null) catch |err| try self.reportError(err);
         if (self.overlay == .none) self.editor_focus_request +%= 1;
@@ -211,6 +213,13 @@ pub const Shell = struct {
     }
     pub fn onRoot(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         try actions.rootInput(self, e, cx);
+    }
+    pub fn onMenuInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
+        if (e.data == .pointer_down and e.phase == .target) {
+            self.menu_open = false;
+            e.preventDefault();
+            cx.notify();
+        }
     }
     pub fn onGlobal(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         try actions.globalInput(self, e, cx);
@@ -287,12 +296,14 @@ pub const Shell = struct {
     }
     pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), which: u8) void {
         if (e.data != .scroll) return;
+        const git_view = @import("views/git.zig");
         if (which == 0) {
             const count = if (self.left_panel == .git_history) self.git.commits.len else if (self.git.status) |status| status.entries.len else 0;
-            self.git.sidebar_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(count)) * 54, e.bounds.height);
+            const row_height = if (self.left_panel == .git_history) git_view.history_row_height else git_view.change_row_height;
+            self.git.sidebar_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(count)) * row_height, e.bounds.height);
         } else {
-            const count = if (self.git.diff) |diff| std.mem.count(u8, diff.text, "\n") + 1 else 0;
-            self.git.diff_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(count)) * 22, e.bounds.height);
+            const count = if (self.git.diff) |diff| git_view.diffRowCount(diff) else 0;
+            self.git.diff_scroll.wheel(e.data.scroll.y, @as(f32, @floatFromInt(count)) * git_view.diff_row_height, e.bounds.height);
         }
         e.preventDefault();
         cx.notify();
