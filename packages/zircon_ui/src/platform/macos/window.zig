@@ -60,6 +60,7 @@ const State = struct {
     marked: Id = null,
     input: ?platform.TextSnapshot = null,
     awaiting_snapshot: bool = false,
+    font_generation: u64 = 0,
     text_requests: std.ArrayList(TextRequest) = .empty,
     closed: bool = false,
     pending_appearance: ?bool = null,
@@ -189,6 +190,7 @@ const ops: platform.Surface.Ops = .{
     .set_appearance = setAppearance,
     .choose_path = choosePath,
     .typography = setTypography,
+    .font_families = fontFamilies,
     .deinit = deinit,
     .size = size,
     .present = present,
@@ -287,9 +289,10 @@ fn present(raw: *anyopaque, frame: scene.Frame) !bool {
     return true;
 }
 fn measurer(raw: *anyopaque) measurement.Measurer {
-    return .{ .context = raw, .text = measureText, .caret_fn = caret, .index_fn = index };
+    return .{ .generation = state(raw).font_generation, .context = raw, .text = measureText, .caret_fn = caret, .index_fn = index };
 }
 fn setTypography(raw: *anyopaque, value: @import("../../text/typography.zig").Typography) void {
+    state(raw).font_generation +%= 1;
     metal.setTypography(state(raw).renderer, value);
 }
 fn choosePath(_: *anyopaque, allocator: std.mem.Allocator, kind: platform.Surface.PathKind) !?[]u8 {
@@ -473,6 +476,8 @@ fn keyDown(object: Id, _: Sel, event: Id) callconv(.c) void {
 }
 fn key(code: u16) platform.Key {
     return switch (code) {
+        33 => .left_bracket,
+        30 => .right_bracket,
         0 => .a,
         1 => .s,
         2 => .d,
@@ -679,4 +684,8 @@ fn didFocus(object: Id, _: Sel, _: Id) callconv(.c) void {
 fn didBlur(object: Id, _: Sel, _: Id) callconv(.c) void {
     const s = nativeState(object) orelse return;
     s.emit(.{ .focus = false });
+}
+
+fn fontFamilies(_: *anyopaque, a: std.mem.Allocator) ![]@import("../../text/typography.zig").FontName {
+    return shaping.fontFamilies(a);
 }

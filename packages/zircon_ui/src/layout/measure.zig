@@ -1,6 +1,8 @@
 //! Text measurement is injected so layout is testable without a font system.
 const geometry = @import("geometry.zig");
 pub const Measurer = struct {
+    /// Changes whenever resolved fonts or text metrics change.
+    generation: u64 = 0,
     context: ?*anyopaque,
     text: *const fn (?*anyopaque, []const u8, @import("../text/style.zig").TextStyle) anyerror!geometry.Size,
     caret_fn: ?*const fn (?*anyopaque, []const u8, @import("../text/style.zig").TextStyle, usize) f32 = null,

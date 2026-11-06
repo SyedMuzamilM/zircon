@@ -104,3 +104,20 @@ test "shared SVG icons retain filled shapes and source opacity under theme tinti
     };
     try t.expect(translucent);
 }
+
+test "search fields honor macOS command and option deletion on UTF8 boundaries" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const field = try ui.controls.TextInput.init(t.allocator, "one 日🙂");
+    const h = try app.openWindow(ui.controls.TextInput, .{ .visible = false, .width = 300, .height = 80 }, field);
+    const root = try app.windowEntity(ui.controls.TextInput, h);
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .key_down = .{ .key = .backspace, .modifiers = .{ .alt = true } } });
+    var actual: []u8 = undefined;
+    try app.read(root, ui.controls.TextInput.copy, .{ t.allocator, &actual });
+    defer t.allocator.free(actual);
+    try t.expectEqualStrings("one ", actual);
+    try app.dispatch(h, .{ .key_down = .{ .key = .backspace, .modifiers = .{ .command = true } } });
+    _ = try app.step(0);
+    try t.expectEqualStrings("", (try app.window(h)).frames.committed.text_input.?.text);
+}

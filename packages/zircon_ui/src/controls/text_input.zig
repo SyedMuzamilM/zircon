@@ -122,6 +122,21 @@ pub const TextInput = struct {
             .key_down => |key| {
                 const command = key.modifiers.command or key.modifiers.control;
                 if (command) switch (key.key) {
+                    .left, .home => {
+                        self.cursor = 0;
+                        if (!key.modifiers.shift) self.anchor = self.cursor;
+                    },
+                    .right, .end => {
+                        self.cursor = self.bytes.items.len;
+                        if (!key.modifiers.shift) self.anchor = self.cursor;
+                    },
+                    .backspace, .delete => {
+                        var range = self.selection();
+                        if (range.start == range.end) {
+                            if (key.key == .backspace) range.start = 0 else range.end = self.bytes.items.len;
+                        }
+                        try self.replace(range, "");
+                    },
                     .a => {
                         self.anchor = 0;
                         self.cursor = self.bytes.items.len;
@@ -139,11 +154,11 @@ pub const TextInput = struct {
                     else => return,
                 } else switch (key.key) {
                     .left => {
-                        if (!key.modifiers.shift and self.anchor != self.cursor) self.cursor = self.selection().start else self.cursor = previous(self.bytes.items, self.cursor);
+                        if (!key.modifiers.shift and self.anchor != self.cursor) self.cursor = self.selection().start else self.cursor = if (key.modifiers.alt) wordBoundary(self.bytes.items, self.cursor, false) else previous(self.bytes.items, self.cursor);
                         if (!key.modifiers.shift) self.anchor = self.cursor;
                     },
                     .right => {
-                        if (!key.modifiers.shift and self.anchor != self.cursor) self.cursor = self.selection().end else self.cursor = next(self.bytes.items, self.cursor);
+                        if (!key.modifiers.shift and self.anchor != self.cursor) self.cursor = self.selection().end else self.cursor = if (key.modifiers.alt) wordBoundary(self.bytes.items, self.cursor, true) else next(self.bytes.items, self.cursor);
                         if (!key.modifiers.shift) self.anchor = self.cursor;
                     },
                     .home => {
@@ -157,7 +172,7 @@ pub const TextInput = struct {
                     .backspace, .delete => {
                         var range = self.selection();
                         if (range.start == range.end) {
-                            if (key.key == .backspace) range.start = previous(self.bytes.items, self.cursor) else range.end = next(self.bytes.items, self.cursor);
+                            if (key.key == .backspace) range.start = if (key.modifiers.alt) wordBoundary(self.bytes.items, self.cursor, false) else previous(self.bytes.items, self.cursor) else range.end = if (key.modifiers.alt) wordBoundary(self.bytes.items, self.cursor, true) else next(self.bytes.items, self.cursor);
                         }
                         try self.replace(range, "");
                     },
@@ -236,4 +251,16 @@ fn next(bytes: []const u8, at: usize) usize {
     var i = at + 1;
     while (i < bytes.len and bytes[i] & 0xc0 == 0x80) : (i += 1) {}
     return i;
+}
+
+fn wordBoundary(bytes: []const u8, from: usize, forward: bool) usize {
+    var at = from;
+    if (forward) {
+        while (at < bytes.len and !std.ascii.isWhitespace(bytes[at])) at = next(bytes, at);
+        while (at < bytes.len and std.ascii.isWhitespace(bytes[at])) at = next(bytes, at);
+    } else {
+        while (at > 0 and std.ascii.isWhitespace(bytes[previous(bytes, at)])) at = previous(bytes, at);
+        while (at > 0 and !std.ascii.isWhitespace(bytes[previous(bytes, at)])) at = previous(bytes, at);
+    }
+    return at;
 }

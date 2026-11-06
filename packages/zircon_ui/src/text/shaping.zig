@@ -127,7 +127,8 @@ pub const TextSystem = struct {
             const face = entry.?;
             if (face.size == size and face.mono == mono) return face.value;
         }
-        var value = if (mono) switch (system.typography.code_font) {
+        const family = if (mono) system.typography.code_family else system.typography.ui_family;
+        var value = if (family.len > 0) try namedFont(family.slice(), size) else if (mono) switch (system.typography.code_font) {
             .lilex => try bundledFont(system, 0, @embedFile("fonts/Lilex-Regular.ttf"), size),
             .menlo => try namedFont("Menlo-Regular", size),
             .monaco => try namedFont("Monaco", size),
@@ -338,4 +339,29 @@ test "native UTF-16 ranges preserve accented code points and surrogate pairs" {
     try std.testing.expectEqual(@as(usize, 3), utf16ToByte(text, 3));
     try std.testing.expectEqual(@as(usize, 7), utf16ToByte(text, 4));
     try std.testing.expectEqual(text.len, utf16ToByte(text, 999));
+}
+
+extern "c" fn CTFontManagerCopyAvailableFontFamilyNames() ?CFRef;
+extern "c" fn CFStringGetCString(CFStringRef, [*]u8, CFIndex, u32) u8;
+pub fn fontFamilies(a: std.mem.Allocator) ![]@import("typography.zig").FontName {
+    const Name = @import("typography.zig").FontName;
+    const array = CTFontManagerCopyAvailableFontFamilyNames() orelse return error.NativeFontUnavailable;
+    defer CFRelease(array);
+    var result: std.ArrayList(Name) = .empty;
+    errdefer result.deinit(a);
+    const count = CFArrayGetCount(array);
+    var i: CFIndex = 0;
+    while (i < count) : (i += 1) {
+        var bytes: [256]u8 = @splat(0);
+        if (CFStringGetCString(CFArrayGetValueAtIndex(array, i), &bytes, bytes.len, 0x08000100) == 0) continue;
+        const value = std.mem.sliceTo(&bytes, 0);
+        if (value.len == 0 or value[0] == '.') continue;
+        try result.append(a, try Name.init(value));
+    }
+    std.mem.sort(Name, result.items, {}, struct {
+        fn less(_: void, lhs: Name, rhs: Name) bool {
+            return std.ascii.orderIgnoreCase(lhs.slice(), rhs.slice()) == .lt;
+        }
+    }.less);
+    return result.toOwnedSlice(a);
 }

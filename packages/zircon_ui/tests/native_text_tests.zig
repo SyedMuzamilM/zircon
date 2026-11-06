@@ -218,3 +218,29 @@ test "UTF-16 native ranges round at supplementary and UTF-8 code point boundarie
     try t.expectEqual(@as(usize, 0), text.byteToUtf16("", 10));
     try t.expectEqual(@as(usize, 0), text.utf16ToByte("", 10));
 }
+
+test "installed families are discoverable and selecting one changes actual CoreText faces" {
+    var autorelease = pool();
+    defer autorelease.deinit();
+    const families = try text.fontFamilies(t.allocator);
+    defer t.allocator.free(families);
+    try t.expect(families.len > 10);
+    var found = false;
+    for (families) |family| if (std.mem.eql(u8, family.slice(), "Menlo")) {
+        found = true;
+        break;
+    };
+    try t.expect(found);
+    var system = text.TextSystem.init(t.allocator);
+    defer system.deinit();
+    var typography = system.typography;
+    typography.code_family = try @TypeOf(typography.code_family).init("Menlo");
+    typography.ui_family = try @TypeOf(typography.ui_family).init("Helvetica Neue");
+    system.setTypography(typography);
+    const code = CTFontCopyPostScriptName(try system.font(14, true));
+    defer text.CFRelease(code);
+    const interface = CTFontCopyPostScriptName(try system.font(14, false));
+    defer text.CFRelease(interface);
+    try t.expect(std.mem.startsWith(u8, objc.fromString(@constCast(code)), "Menlo"));
+    try t.expect(std.mem.startsWith(u8, objc.fromString(@constCast(interface)), "HelveticaNeue"));
+}
