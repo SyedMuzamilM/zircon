@@ -13,5 +13,6 @@ pub const Theme = @import("theme.zig").Theme;
 
 pub const GitChange = @import("annotations.zig").GitChange;
 pub const Blame = @import("annotations.zig").Blame;
+pub const blame_height = @import("annotations.zig").blame_height;
 
 pub const Profile = @import("profile.zig").Profile;

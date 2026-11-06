@@ -183,3 +183,26 @@ fn inScope(frame: anytype, start: u32, key: []const u8) bool {
     }
     return false;
 }
+
+test "revisioned typing follows focus from editor to search and command fields" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    _ = try app.step(4);
+    try app.dispatch(h, .{ .text = "a long editor buffer with different ranges" });
+    _ = try app.step(4);
+    inline for (.{ zircon.Command.project_search, zircon.Command.palette, zircon.Command.open_path }) |command| {
+        try app.update(owner, Operations.command, .{command});
+        _ = try app.step(4);
+        const w = try app.window(h);
+        for ([_][]const u8{ "s", "é", "🌍", "a" }) |part| {
+            const snapshot = w.frames.committed.text_input orelse return error.MissingFieldSnapshot;
+            try app.dispatch(h, .{ .edit = .{ .revision = snapshot.revision, .range = snapshot.selection, .text = part, .selection = .{ .start = part.len, .end = part.len } } });
+            _ = try app.step(4);
+        }
+        try t.expectEqualStrings("sé🌍a", w.frames.committed.text_input.?.text);
+        try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
+        _ = try app.step(4);
+    }
+}

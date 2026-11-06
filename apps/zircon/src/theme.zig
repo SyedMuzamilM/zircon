@@ -24,3 +24,8 @@ pub const Palette = struct {
     primary: ui.Color = ui.Color.rgb(0x4d78a3),
     pub const light: Palette = .{ .document = ui.Color.rgb(0xf8f9fb), .chrome = ui.Color.rgb(0xe7ebf1), .sidebar = ui.Color.rgb(0xeff2f6), .panel = ui.Color.rgb(0xf5f7fa), .tab_bar = ui.Color.rgb(0xe7ebf1), .hover = ui.Color.rgb(0xdce2eb), .element = ui.Color.rgb(0xe3e8ef), .border_subtle = ui.Color.rgb(0xe0e4eb), .primary_hover = ui.Color.rgb(0x345e89), .on_primary = ui.Color.white, .added = ui.Color.rgb(0x477531), .deleted = ui.Color.rgb(0xb3434e), .modified = ui.Color.rgb(0x946f20), .folder = ui.Color.rgb(0x9d7333), .line = ui.Color.rgb(0xd5dce6), .text = ui.Color.rgb(0x293344), .muted = ui.Color.rgb(0x748197), .accent = ui.Color.rgb(0x315f9b), .selected = ui.Color.rgb(0xd4e2f4), .warning = ui.Color.rgb(0x9d652c), .primary = ui.Color.rgb(0x416fa9) };
 };
+
+pub fn isLight(id: []const u8, system_dark: bool) bool {
+    const std = @import("std");
+    return std.mem.eql(u8, id, "zircon.light") or (std.mem.eql(u8, id, "zircon.system") and !system_dark);
+}

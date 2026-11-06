@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Zed (Rust/GPUI) vs. Zircon (Zig/zigpui) Deep Technical Comparison</title>
+<style>
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --bg: var(--background, #0d1117);
+  --fg: var(--foreground, #e6edf3);
+  --muted-fg: var(--muted, #8b949e);
+  --card-bg: var(--card, #161b22);
+  --card-border: var(--border, #30363d);
+  --accent: var(--accent, #58a6ff);
+  --accent-surface: var(--accent-surface, rgba(56, 139, 253, 0.15));
+  --warning: var(--warning, #d29922);
+  --warning-surface: var(--warning-surface, rgba(210, 153, 34, 0.15));
+  --danger: var(--destructive, #f85149);
+  --danger-surface: var(--destructive-surface, rgba(248, 81, 73, 0.15));
+  --success: var(--success, #3fb950);
+  --success-surface: var(--success-surface, rgba(63, 185, 80, 0.15));
+  --code-bg: var(--code-background, #1f242c);
+  --radius: var(--radius, 8px);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--fg);
+  line-height: 1.5;
+  font-size: 13px;
+  padding: 8px;
+}
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--card-border);
+}
+.badge-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.badge-blue { background: var(--accent-surface); color: var(--accent); border: 1px solid var(--accent); }
+.badge-orange { background: var(--warning-surface); color: var(--warning); border: 1px solid var(--warning); }
+.badge-green { background: var(--success-surface); color: var(--success); border: 1px solid var(--success); }
+.badge-red { background: var(--danger-surface); color: var(--danger); border: 1px solid var(--danger); }
+
+h1 { font-size: 20px; font-weight: 700; color: var(--fg); }
+h2 { font-size: 15px; font-weight: 600; margin: 18px 0 10px 0; color: var(--fg); display: flex; align-items: center; gap: 8px; }
+h3 { font-size: 13px; font-weight: 600; margin: 12px 0 6px 0; color: var(--fg); }
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.card-header {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--accent);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.stat-group {
+  display: flex;
+  gap: 12px;
+  margin: 10px 0;
+}
+.stat-box {
+  background: var(--code-bg);
+  padding: 8px 12px;
+  border-radius: 6px;
+  flex: 1;
+}
+.stat-val { font-size: 16px; font-weight: 700; color: var(--fg); }
+.stat-lbl { font-size: 10px; text-transform: uppercase; color: var(--muted-fg); letter-spacing: 0.5px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 10px 0;
+}
+th, td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--card-border);
+}
+th {
+  background: var(--code-bg);
+  color: var(--muted-fg);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+tr:hover { background: rgba(255,255,255,0.02); }
+
+.code {
+  font-family: var(--font-mono);
+  background: var(--code-bg);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.alert {
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 10px 0;
+  font-size: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.alert-danger { background: var(--danger-surface); border: 1px solid var(--danger); color: var(--fg); }
+.alert-warning { background: var(--warning-surface); border: 1px solid var(--warning); color: var(--fg); }
+.alert-info { background: var(--accent-surface); border: 1px solid var(--accent); color: var(--fg); }
+
+.pill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pill-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--code-bg);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.chart-container {
+  margin: 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.bar-label { width: 140px; color: var(--muted-fg); text-align: right; }
+.bar-track { flex: 1; height: 16px; background: var(--code-bg); border-radius: 4px; overflow: hidden; display: flex; }
+.bar-fill { height: 100%; border-radius: 4px; }
+.bar-val { width: 70px; font-family: var(--font-mono); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="badge-row">
+    <span class="badge badge-blue">Zed (Rust 1.0)</span>
+    <span class="badge badge-green">Zircon (Custom Zig UI)</span>
+    <span class="badge badge-orange">Tri-Model Synthesis: GLM-5.3 + DeepSeek V4.1 + Gemini</span>
+  </div>
+  <h1>Architectural & Codebase Audit: Zed vs. Zircon (ZigPUI)</h1>
+  <p style="color:var(--muted-fg); font-size:12px;">Full-spectrum evaluation: UI Framework, Rendering Pipelines, Memory Models, Platform Portability, Discovered Defects, and Package Cleanliness.</p>
+</div>
+
+<aside class="alert alert-warning" role="note">
+  <div><strong>Evidence note, November 6, 2026.</strong> This comparison contains unmeasured performance estimates and source claims that need qualification. Read <a href="zed-feature-priorities.md">the cited follow-up and implementation update</a> before treating the rankings as findings. In particular, bidi parity, stale-window aliasing and process-memory bounds are not established here. This editor pass adds directional splits, system appearance, configurable workspace shortcuts and richer blame, so earlier feature-gap descriptions may be stale.</div>
+</aside>
+
+<!-- EXECUTIVE COMPARISON -->
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header">
+      <span>ZED EDITOR</span>
+      <span class="badge badge-blue">Rust &bull; Mature Production</span>
+    </div>
+    <div class="stat-group">
+      <div class="stat-box"><div class="stat-val">1.0M+</div><div class="stat-lbl">Lines of Rust</div></div>
+      <div class="stat-box"><div class="stat-val">180+</div><div class="stat-lbl">Crates</div></div>
+      <div class="stat-box"><div class="stat-val">3 Platforms</div><div class="stat-lbl">macOS, Linux, Win</div></div>
+    </div>
+    <p style="color:var(--muted-fg); font-size:12px;">
+      GPUI framework with 3-phase elements, Taffy flexbox, multi-buffer text engine, Tree-sitter grammars, ~80 LSPs, collaborative CRDT, DAP debugging, and AI integration. Blazing 120 FPS sub-frame rendering; prone to multi-GB RSS memory growth on large monorepos.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>ZIRCON (ZIGPUI)</span>
+      <span class="badge badge-green">Pure Zig &bull; Lean Native Stack</span>
+    </div>
+    <div class="stat-group">
+      <div class="stat-box"><div class="stat-val">21.5K</div><div class="stat-lbl">Lines of Zig</div></div>
+      <div class="stat-box"><div class="stat-val">9 Pkgs</div><div class="stat-lbl">Clean DAG</div></div>
+      <div class="stat-box"><div class="stat-val">macOS Only</div><div class="stat-lbl">Metal + AppKit</div></div>
+    </div>
+    <p style="color:var(--muted-fg); font-size:12px;">
+      Custom retained UI framework, generational entity store with runtime borrow checking, double-buffered frame arenas (8 MiB cap), AVL rope document model, zero-C direct ObjC/Metal bridge. Exceptional memory discipline by design; currently single-platform with hot-path bottlenecks.
+    </p>
+  </div>
+</div>
+
+<!-- CODEBASE & PACKAGE HYGIENE AUDIT -->
+<h2>📁 Package Structure & File Hygiene Audit (What Shouldn't Be There)</h2>
+<div class="card" style="margin-bottom:16px;">
+  <p style="margin-bottom:10px; color:var(--fg); font-size:12px;">
+    Inspection of <span class="code">packages/</span>, <span class="code">apps/</span>, <span class="code">build.zig.zon</span>, and recent commits identified critical file placement issues and packaging anti-patterns:
+  </p>
+
+  <div class="alert alert-danger">
+    <div>⚠️</div>
+    <div>
+      <strong>1. Raw Lucide SVG Assets in UI Source Tree:</strong>
+      <div style="font-size:11px; margin-top:3px; color:var(--muted-fg);">
+        <span class="code">packages/zircon_ui/src/controls/lucide/</span> contains 35 raw SVG files, LICENSE, and SOURCE.md. In <span class="code">packages/zircon_ui/build.zig.zon</span>, <span class="code">.paths = .{ "src", ... }</span> packages these into the package hash. The runtime only uses the compiled <span class="code">icon_paths.zig</span>. The SVGs belong in <span class="code">tools/assets/lucide/</span> or root <span class="code">assets/</span>, not in package <span class="code">src/</span>.
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-warning">
+    <div>⚠️</div>
+    <div>
+      <strong>2. Bundled TTF Font Binaries Inside Package Source:</strong>
+      <div style="font-size:11px; margin-top:3px; color:var(--muted-fg);">
+        <span class="code">packages/zircon_ui/src/text/fonts/</span> contains <span class="code">IBMPlexSans-Regular.ttf</span> (196 KB) and <span class="code">Lilex-Regular.ttf</span> (190 KB), embedded via <span class="code">@embedFile</span>. Placing raw font binaries in the core framework <span class="code">src/</span> directly inflates package tarballs and forces package hash churn. Should be in an assets directory or separate resource package.
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-warning">
+    <div>⚠️</div>
+    <div>
+      <strong>3. Compiled Mach-O Binaries in Repository:</strong>
+      <div style="font-size:11px; margin-top:3px; color:var(--muted-fg);">
+        <span class="code">artifacts/font-pass/baseline-zircon</span> (1.4 MB) and <span class="code">baseline-text-bench</span> (407 KB) are compiled 64-bit arm64 Mach-O executables committed or stored locally.
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-info">
+    <div>ℹ️</div>
+    <div>
+      <strong>4. Cache Bloat (5.6 GB + 710 MB):</strong>
+      <div style="font-size:11px; margin-top:3px; color:var(--muted-fg);">
+        Root <span class="code">.zig-cache/</span> is 5.6 GB, and each package has its own local <span class="code">packages/*/.zig-cache/</span> totaling ~710 MB. Needs a <span class="code">zig build clean</span> step and centralized cache policy.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BUGS & HOT PATH DEFECTS -->
+<h2>🐛 Bugs & Critical Bottlenecks Discovered in Zircon</h2>
+<div class="card" style="margin-bottom:16px;">
+  <table>
+    <thead>
+      <tr>
+        <th>Defect / Bottleneck</th>
+        <th>File Location</th>
+        <th>Impact</th>
+        <th>Fix Complexity</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong style="color:var(--danger)">Broken Settings Regression</strong></td>
+        <td><span class="code">apps/zircon/tests/settings_tests.zig:118</span></td>
+        <td>5 newly added settings rows broke scroll hit geometry assertion; <span class="code">zig build check</span> fails.</td>
+        <td><span class="badge badge-green">Low (Update test bounds)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--danger)">Non-Generational Window Handles</strong></td>
+        <td><span class="code">app/window.zig:16</span>, <span class="code">app/app.zig:86</span></td>
+        <td>Window handles hardcode generation=1; closing and reusing slots causes stale handles to silently point to new windows.</td>
+        <td><span class="badge badge-green">Low (Increment gen on reuse)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--danger)">Per-Glyph CoreText FFI Calls</strong></td>
+        <td><span class="code">backends/metal.zig:273-284</span></td>
+        <td><span class="code">CTRunGetGlyphs</span> & <span class="code">CTRunGetPositions</span> called with length=1 inside glyph loop (4k-6k C calls/frame).</td>
+        <td><span class="badge badge-orange">Medium (Bulk-extract arrays)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--danger)">Per-Span Reshaping Thrashing</strong></td>
+        <td><span class="code">zircon_editor/src/canvas.zig:174</span></td>
+        <td>Every syntax highlight token shapes a separate CTLine substring, evicting the 4 MiB / 512 layout cache on scroll.</td>
+        <td><span class="badge badge-red">High (Shape line once, slice runs)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--warning)">Quadratic O(N²) Key Reconciliation</strong></td>
+        <td><span class="code">app/window.zig:348-352</span></td>
+        <td><span class="code">reconcile()</span> linear-scans all staging nodes with recursive <span class="code">pathEqual()</span> up to 6× per frame.</td>
+        <td><span class="badge badge-orange">Medium (Hash map of keypaths)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--warning)">Per-Window GPU Duplication</strong></td>
+        <td><span class="code">backends/metal.zig</span>, <span class="code">app.zig:91</span></td>
+        <td>Settings child window instantiates a second <span class="code">MTLDevice</span>, queue, atlas (4MB), and ~63MB instance buffers.</td>
+        <td><span class="badge badge-orange">Medium (App-level shared GPU)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--warning)">Arena Retention Cap Bypass</strong></td>
+        <td><span class="code">ui/tree.zig:75</span></td>
+        <td>Frame discard calls <span class="code">reset(.retain_capacity)</span>, permanently pinning oversized frames above the 8 MiB cap.</td>
+        <td><span class="badge badge-green">Low (Check against limit)</span></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--muted-fg)">Thread-Per-Job Spawning</strong></td>
+        <td><span class="code">app/tasks.zig:102-107</span></td>
+        <td>Background tasks spawn fresh OS threads instead of utilizing a persistent thread pool.</td>
+        <td><span class="badge badge-orange">Medium (Fixed worker pool)</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ARCHITECTURAL MATRIX -->
+<h2>⚡ Deep Architectural & Performance Comparison</h2>
+<div class="card" style="margin-bottom:16px;">
+  <table>
+    <thead>
+      <tr>
+        <th>Domain</th>
+        <th>Zed (Rust / GPUI)</th>
+        <th>Zircon (Zig / zigpui)</th>
+        <th>Winner & Trade-offs</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>UI Architecture</strong></td>
+        <td>Hybrid retained/immediate; 3-phase <span class="code">Element</span> (<span class="code">request_layout</span> &rarr; <span class="code">prepaint</span> &rarr; <span class="code">paint</span>); <span class="code">Entity::cached</span> subtree caching.</td>
+        <td>Explicit double-buffered transactional frame arenas; staging &rarr; layout &rarr; hit-test &rarr; non-fallible swap; generational entity slab with borrow preflight.</td>
+        <td><strong>Tie</strong>. Zircon has cleaner transactional boundaries and runtime borrow preflight; Zed has subtree memoization.</td>
+      </tr>
+      <tr>
+        <td><strong>Text Engine</strong></td>
+        <td><span class="code">text::Buffer</span> (CRDT ropes, fragment trees) &rarr; <span class="code">language::Buffer</span> &rarr; <span class="code">MultiBuffer</span> &rarr; <span class="code">DisplayMap</span> (inlays, folds, wrap).</td>
+        <td>Immutable AVL UTF-8 rope (<span class="code">rope.zig</span>, 4 KiB leaves, checksummed summaries) &rarr; <span class="code">Document</span> &rarr; <span class="code">Snapshot</span> &rarr; <span class="code">Editor</span>.</td>
+        <td><strong>Zed</strong>. Zed handles soft-wrap, bidi, grapheme clusters, multi-buffer excerpt editing. Zircon is code-point based.</td>
+      </tr>
+      <tr>
+        <td><strong>Rendering & Shaders</strong></td>
+        <td>Platform-specific: Metal (macOS), WGPU/Vulkan (Linux), DirectX 11 (Windows). Single full-screen MSAA texture for arbitrary paths; SDF quads/shadows.</td>
+        <td>Metal only (macOS). Direct ObjC runtime calls. 80-byte instanced vertex batches, 2048² R8 shelf glyph atlas with 4×4 subpixel phases.</td>
+        <td><strong>Zed</strong> (breadth/cross-platform) / <strong>Zircon</strong> (minimal zero-dep C-free Zig bridge).</td>
+      </tr>
+      <tr>
+        <td><strong>Memory Model</strong></td>
+        <td>Unbounded cache growth. Known community issues with multi-GB RSS on large monorepos (e.g. #24724, #7939 ballooning to 4–20 GB).</td>
+        <td>Strictly bounded caches: 4 MiB glyph atlas, 4 MiB shaping cache, 64 MiB image cache, 8 MiB retired frame arenas. ~10–30 MB idle floor.</td>
+        <td><strong>Zircon</strong> (by design). Far superior memory discipline and bounded guarantees, though unbenchmarked at enterprise scale.</td>
+      </tr>
+      <tr>
+        <td><strong>Platform Support</strong></td>
+        <td>macOS (120 FPS ProMotion), Linux (Wayland & X11 via WGPU/Vulkan), Windows 10/11 (DirectX 11).</td>
+        <td>macOS only. Linux only cross-compiles non-GUI portable tests (<span class="code">build.zig</span> panics on native non-macOS). Windows has 0 support.</td>
+        <td><strong>Zed</strong>. Production cross-platform maturity.</td>
+      </tr>
+      <tr>
+        <td><strong>Syntax & LSP</strong></td>
+        <td>Tree-sitter incremental parsing, ~80 LSP language servers, semantic tokens, hover, definition, rename, formatting, snippets.</td>
+        <td>Lexical tokenization with fallback convergence; stdio LSP client supporting versioned diagnostics and completions only.</td>
+        <td><strong>Zed</strong>. Far broader language intelligence capabilities.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- PERFORMANCE & MEMORY BUDGET CHART -->
+<h2>📊 Memory Cache Budget Allocations in Zircon</h2>
+<div class="card" style="margin-bottom:16px;">
+  <div class="chart-container">
+    <div class="bar-row">
+      <div class="bar-label">Image Cache</div>
+      <div class="bar-track"><div class="bar-fill" style="width: 75%; background: var(--accent);"></div></div>
+      <div class="bar-val">64.0 MiB</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">Instance Buffers (3x)</div>
+      <div class="bar-track"><div class="bar-fill" style="width: 50%; background: var(--chart-2, #7ee787);"></div></div>
+      <div class="bar-val">~63.0 MiB</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">Retired Frame Arenas</div>
+      <div class="bar-track"><div class="bar-fill" style="width: 20%; background: var(--warning);"></div></div>
+      <div class="bar-val">16.0 MiB</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">Metal Glyph Atlas</div>
+      <div class="bar-track"><div class="bar-fill" style="width: 8%; background: var(--danger);"></div></div>
+      <div class="bar-val">4.0 MiB</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">CoreText Layout Cache</div>
+      <div class="bar-track"><div class="bar-fill" style="width: 8%; background: var(--chart-5, #d2a8ff);"></div></div>
+      <div class="bar-val">4.0 MiB</div>
+    </div>
+  </div>
+  <p style="font-size:11px; color:var(--muted-fg); margin-top:8px;">
+    *Unlike Zed which allocates dynamic unconstrained scenes, Zircon's architecture sets explicit hard ceilings for every subsystem, preventing run-away memory bloat.
+  </p>
+</div>
+
+<!-- ACTIONABLE ROADMAP -->
+<h2>🚀 Prioritized Roadmap for Zircon (How to Improve)</h2>
+<div class="card">
+  <div class="pill-list">
+    <div class="pill-item">
+      <div>
+        <strong style="color:var(--danger)">Tier 0 &bull; Fix Settings Regression & Clean Packages</strong>
+        <p style="font-size:11px; color:var(--muted-fg); margin-top:2px;">
+          Update settings test bounds in <span class="code">apps/zircon/tests/settings_tests.zig</span>. Move <span class="code">lucide/*.svg</span> and font files out of <span class="code">zircon_ui/src/</span> to preserve clean package manifests.
+        </p>
+      </div>
+      <span class="badge badge-red">Immediate</span>
+    </div>
+    <div class="pill-item">
+      <div>
+        <strong style="color:var(--warning)">Tier 1 &bull; Bulk Glyph Run Extraction in Metal</strong>
+        <p style="font-size:11px; color:var(--muted-fg); margin-top:2px;">
+          Replace single-glyph FFI calls in <span class="code">metal.zig:273</span> with single <span class="code">CTRunGetGlyphs</span> and <span class="code">CTRunGetPositions</span> calls per run into frame-arena scratch buffers.
+        </p>
+      </div>
+      <span class="badge badge-orange">High ROI</span>
+    </div>
+    <div class="pill-item">
+      <div>
+        <strong style="color:var(--warning)">Tier 1 &bull; Eliminate Per-Span Shaping Thrash</strong>
+        <p style="font-size:11px; color:var(--muted-fg); margin-top:2px;">
+          Shape the entire visible line once into a single <span class="code">CTLine</span> and slice glyph run offsets during painting, mirroring Zed's line layout design.
+        </p>
+      </div>
+      <span class="badge badge-orange">High ROI</span>
+    </div>
+    <div class="pill-item">
+      <div>
+        <strong style="color:var(--accent)">Tier 2 &bull; Subtree Memoization & Generational Windows</strong>
+        <p style="font-size:11px; color:var(--muted-fg); margin-top:2px;">
+          Leverage existing entity version tracking (<span class="code">tree.zig:107</span>) to skip layout on unchanged subtrees (tabs, project tree). Increment window handle generation on reuse.
+        </p>
+      </div>
+      <span class="badge badge-blue">Architecture</span>
+    </div>
+    <div class="pill-item">
+      <div>
+        <strong style="color:var(--success)">Tier 3 &bull; App-Level GPU Context & Vsync DisplayLink</strong>
+        <p style="font-size:11px; color:var(--muted-fg); margin-top:2px;">
+          Hoist <span class="code">MTLDevice</span> and glyph atlas from window to <span class="code">App</span> so child windows share VRAM. Replace deadline timer with <span class="code">CADisplayLink</span> vsync.
+        </p>
+      </div>
+      <span class="badge badge-green">Refinement</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

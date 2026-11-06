@@ -1,8 +1,10 @@
 //! One command catalogue drives shortcuts, toolbar controls and the palette.
 const ui = @import("zircon_ui");
-pub const Command = enum { workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
+pub const Command = enum { open_project, browse_project, submit_project, workspace_menu, project_files, markdown_preview, complete, run_project_search, install_bundled_extension, git_changes, git_history, git_refresh, git_diff_all, git_stage, git_unstage, git_stage_all, git_unstage_all, git_commit, git_working_diff, git_staged_diff, git_open_file, back_to_editor, extensions, install_extension, project_search, settings, new_file, open_path, quick_open, save, save_as, close_tab, split, split_menu, split_left, split_right, split_up, split_down, close_split, git_blame, toggle_sidebar, palette, find, replace, find_next, find_previous, replace_one, replace_all, undo, redo, select_all, zoom_in, zoom_out, quit, dismiss, submit_path, save_dirty, discard_dirty };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
+    .{ .command = .open_project, .label = "Open folder or Git repository", .shortcut = "⇧⌘O" },
+    .{ .command = .palette, .label = "Command palette", .shortcut = "⇧⌘P" },
     .{ .command = .project_files, .label = "Show project files" },
     .{ .command = .markdown_preview, .label = "Open Markdown preview" },
     .{ .command = .complete, .label = "Request language completion", .shortcut = "⌃Space" },
@@ -19,6 +21,12 @@ pub const commands = [_]Entry{
     .{ .command = .save, .label = "Save", .shortcut = "⌘S" },
     .{ .command = .save_as, .label = "Save as…", .shortcut = "⇧⌘S" },
     .{ .command = .close_tab, .label = "Close tab", .shortcut = "⌘W" },
+    .{ .command = .split_left, .label = "Split left", .shortcut = "⌥⌘←" },
+    .{ .command = .split_right, .label = "Split right", .shortcut = "⌥⌘→" },
+    .{ .command = .split_up, .label = "Split up", .shortcut = "⌥⌘↑" },
+    .{ .command = .split_down, .label = "Split down", .shortcut = "⌥⌘↓" },
+    .{ .command = .close_split, .label = "Close split" },
+    .{ .command = .git_blame, .label = "Git: toggle line blame", .shortcut = "⌥⌘B" },
     .{ .command = .split, .label = "Split editor", .shortcut = "⌥⌘S" },
     .{ .command = .toggle_sidebar, .label = "Toggle project sidebar", .shortcut = "⌘B" },
     .{ .command = .find, .label = "Find in document", .shortcut = "⌘F" },
@@ -30,6 +38,12 @@ pub const commands = [_]Entry{
     .{ .command = .zoom_out, .label = "Decrease font size" },
 };
 pub const bindings = [_]ui.Keymap(Command).Binding{
+    .{ .chord = .{ .key = .left, .modifiers = .{ .command = true, .alt = true } }, .action = .split_left },
+    .{ .chord = .{ .key = .right, .modifiers = .{ .command = true, .alt = true } }, .action = .split_right },
+    .{ .chord = .{ .key = .up, .modifiers = .{ .command = true, .alt = true } }, .action = .split_up },
+    .{ .chord = .{ .key = .down, .modifiers = .{ .command = true, .alt = true } }, .action = .split_down },
+    .{ .chord = .{ .key = .b, .modifiers = .{ .command = true, .alt = true } }, .action = .git_blame },
+    .{ .chord = .{ .key = .o, .modifiers = .{ .command = true, .shift = true } }, .action = .open_project },
     .{ .chord = .{ .key = .space, .modifiers = .{ .control = true } }, .action = .complete },
     .{ .chord = .{ .key = .f, .modifiers = .{ .command = true, .shift = true } }, .action = .project_search },
     .{ .chord = .{ .key = .comma, .modifiers = .{ .command = true } }, .action = .settings },
@@ -46,3 +60,8 @@ pub const bindings = [_]ui.Keymap(Command).Binding{
     .{ .chord = .{ .key = .b, .modifiers = .{ .command = true } }, .action = .toggle_sidebar },
     .{ .chord = .{ .key = .q, .modifiers = .{ .command = true } }, .action = .quit },
 };
+
+pub fn entry(action: Command) Entry {
+    for (commands) |item| if (item.command == action) return item;
+    return .{ .command = action, .label = @tagName(action) };
+}

@@ -74,3 +74,10 @@ pub fn fileColor(c: Palette, path: []const u8) ui.Color {
     if (std.ascii.eqlIgnoreCase(ext, ".json")) return ui.Color.rgb(0xd7ba7d);
     return c.muted;
 }
+
+pub fn menuRow(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, shortcut: []const u8, selected: bool) !ui.Element {
+    return b.key(.{ .number = @backingInt(action) }, try b.button(.{ .label = label, .children = &.{
+        try b.styled(try text(b, label, c.text, 13), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden, .text = .{ .size = 13, .color = c.text } }),
+        try text(b, shortcut, c.muted, 12),
+    }, .on_click = try b.onClickWith(action, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 20, .padding = .{ .left = 10, .right = 10 }, .radius = 3, .background = if (selected) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }));
+}

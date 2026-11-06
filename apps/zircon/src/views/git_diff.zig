@@ -3,7 +3,6 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const git = @import("zircon_git");
-const editor = @import("zircon_editor");
 const Shell = @import("../shell.zig").Shell;
 const Command = @import("../commands.zig").Command;
 const v = @import("components.zig");
@@ -24,7 +23,7 @@ pub fn contentHeight(diff: git.Diff, line_height: f32) f32 {
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     const font = self.editor_options.font_size;
-    const line_height = font + 8;
+    const line_height = font * self.editor_options.line_height;
     var rows: std.ArrayList(ui.Element) = .empty;
     var tools: std.ArrayList(ui.Element) = .empty;
     if (self.git.selected_commit.len > 0) {
@@ -126,44 +125,6 @@ fn codeRow(self: *const Shell, b: *ui.Ui, line: git.Line, path: []const u8) !ui.
     var fill = tint;
     fill.a = 0.14;
     const number = if (line.new_line orelse line.old_line) |n| try std.fmt.allocPrint(b.allocator(), "{d}", .{n}) else "";
-    const source = if (line.text.len > 65536) "[Line exceeds the diff display limit]" else if (!std.unicode.utf8ValidateSlice(line.text)) "[Non-UTF-8 diff line]" else line.text;
-    // A committed frame can outlive the next repository result installation.
-    // Keep code bytes in the frame, never in the retired diff arena.
-    const owned = try b.allocator().dupe(u8, source);
-    const expanded = try editor.display.Line.build(b.allocator(), owned, self.editor_options.tab_width);
-    const bytes = expanded.bytes;
-    const lexed = try editor.syntax.lex(b.allocator(), bytes, editor.syntax.languageForPath(path), .{});
-    const code = try b.custom(Code, .{ .text = bytes, .spans = lexed.spans, .theme = self.editor_options.theme, .font = self.editor_options.font_size }, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
-    return b.row(.{ .height = .{ .px = self.editor_options.font_size + 8 }, .flex_shrink = 0, .align_items = .stretch, .gap = 8, .background = if (changed) fill else null, .overflow = .hidden }, &.{ try b.div(.{ .width = .{ .px = 3 }, .background = if (changed) tint else null, .flex_shrink = 0 }, &.{}), try b.column(.{ .width = .{ .px = 38 }, .flex_shrink = 0, .justify_content = .center, .align_items = .end }, &.{try b.styled(try v.text(b, number, tint, 12), .{ .text = .{ .size = 12, .mono = true, .color = tint } })}), try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.border_subtle }, &.{}), code });
+    const code = try @import("code_line.zig").element(b, line.text, path, self.editor_options.font_size, self.editor_options.font_size * self.editor_options.line_height, self.editor_options.theme, &.{});
+    return b.row(.{ .height = .{ .px = self.editor_options.font_size * self.editor_options.line_height }, .flex_shrink = 0, .align_items = .stretch, .gap = 8, .background = if (changed) fill else null, .overflow = .hidden }, &.{ try b.div(.{ .width = .{ .px = 3 }, .background = if (changed) tint else null, .flex_shrink = 0 }, &.{}), try b.column(.{ .width = .{ .px = 38 }, .flex_shrink = 0, .justify_content = .center, .align_items = .end }, &.{try b.styled(try v.text(b, number, tint, 12), .{ .text = .{ .size = 12, .mono = true, .color = tint } })}), try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.border_subtle }, &.{}), code });
 }
-const Code = struct {
-    text: []const u8,
-    spans: []const editor.syntax.Span,
-    theme: editor.Theme,
-    font: f32,
-    pub const LayoutState = void;
-    pub const PrepaintState = void;
-    pub fn requestLayout(self: *Code, cx: *ui.LayoutCx) !ui.LayoutResult(void) {
-        return .{ .size = .{ .width = cx.available.width, .height = self.font + 8 }, .state = {} };
-    }
-    pub fn prepaint(_: *Code, _: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {}
-    pub fn paint(self: *Code, cx: *ui.PaintCx, bounds: ui.Rect, _: *void, _: *void) !void {
-        var cursor: usize = 0;
-        var x: f32 = bounds.x;
-        const size = try cx.measurer.text(cx.measurer.context, "M", .{ .size = self.font, .mono = true });
-        const y = bounds.y + @max(0, bounds.height - size.height) / 2;
-        for (self.spans) |span| {
-            if (span.start > cursor) x += try self.run(cx, self.text[cursor..span.start], self.theme.foreground, x, y, bounds);
-            x += try self.run(cx, self.text[span.start..span.end], self.theme.tokens[@backingInt(span.kind)], x, y, bounds);
-            cursor = span.end;
-            if (x >= bounds.x + bounds.width) break;
-        }
-        if (cursor < self.text.len and x < bounds.x + bounds.width) _ = try self.run(cx, self.text[cursor..], self.theme.foreground, x, y, bounds);
-    }
-    fn run(self: *Code, cx: *ui.PaintCx, bytes: []const u8, color: ui.Color, x: f32, y: f32, bounds: ui.Rect) !f32 {
-        const style: ui.TextStyle = .{ .size = self.font, .mono = true, .color = color };
-        const measured = try cx.measurer.text(cx.measurer.context, bytes, style);
-        try cx.painter.drawText(.{ .bounds = .{ .x = x, .y = y, .width = @max(0, bounds.x + bounds.width - x), .height = measured.height }, .text = bytes, .style = style });
-        return measured.width;
-    }
-};

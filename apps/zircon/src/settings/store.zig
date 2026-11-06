@@ -1,16 +1,24 @@
 //! One persisted settings identity shared by editor/settings windows. Candidate
 //! validation and atomic disk publication precede the effective-state swap.
 const std = @import("std");
+const typography = @import("zircon_ui").typography;
 pub const Values = struct {
+    key_bindings: @import("../key_bindings.zig").Overrides = .{},
     font_size: f32 = 14,
+    font_family: typography.CodeFont = .lilex,
+    ui_font_family: typography.UiFont = .plex,
+    ui_font_size: f32 = 13,
+    line_height: f32 = 1.6,
+    font_ligatures: bool = false,
     tab_width: u8 = 4,
     reduced_motion: bool = false,
     line_numbers: bool = true,
     git_gutters: bool = true,
+    git_inline_blame: bool = true,
     theme: []const u8 = "zircon.dark",
     icon_theme: []const u8 = "zircon.default",
 };
-pub const Patch = union(enum) { font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, theme: []const u8, icon_theme: []const u8 };
+pub const Patch = union(enum) { font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
 pub const Store = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -47,9 +55,11 @@ pub const Store = struct {
         const arena = next.arena.allocator();
         const key = @tagName(patch);
         const value: std.json.Value = switch (patch) {
-            .font_size => |n| .{ .float = n },
+            .font_size, .ui_font_size, .line_height => |n| .{ .float = n },
             .tab_width => |n| .{ .integer = n },
-            .reduced_motion, .line_numbers, .git_gutters => |b| .{ .bool = b },
+            .reduced_motion, .line_numbers, .git_gutters, .git_inline_blame, .font_ligatures => |b| .{ .bool = b },
+            .font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
+            .ui_font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
             .theme, .icon_theme => |s| .{ .string = try arena.dupe(u8, s) },
         };
         try next.value.object.put(arena, key, value);
@@ -74,16 +84,25 @@ pub const Store = struct {
 fn read(value: std.json.Value) Values {
     var result: Values = .{};
     if (value != .object) return result;
-    if (value.object.get("font_size")) |v| result.font_size = number(v) orelse result.font_size;
+    inline for (.{ "font_size", "ui_font_size", "line_height" }) |key| if (value.object.get(key)) |v| {
+        @field(result, key) = number(v) orelse @field(result, key);
+    };
+    if (value.object.get("font_family")) |v| {
+        result.font_family = parseEnum(typography.CodeFont, v) orelse .lilex;
+    }
+    if (value.object.get("ui_font_family")) |v| {
+        result.ui_font_family = parseEnum(typography.UiFont, v) orelse .plex;
+    }
     if (value.object.get("tab_width")) |v| if (v == .integer and v.integer >= 1 and v.integer <= 16) {
         result.tab_width = @intCast(v.integer);
     };
-    inline for (.{ "reduced_motion", "line_numbers", "git_gutters" }) |key| if (value.object.get(key)) |v| {
+    inline for (.{ "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures" }) |key| if (value.object.get(key)) |v| {
         if (v == .bool) @field(result, key) = v.bool;
     };
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
         if (v == .string) @field(result, key) = v.string;
     };
+    if (value.object.get("key_bindings")) |v| result.key_bindings = @import("../key_bindings.zig").parse(v) catch unreachable;
     return result;
 }
 fn number(value: std.json.Value) ?f32 {
@@ -95,13 +114,24 @@ fn number(value: std.json.Value) ?f32 {
 }
 fn validate(value: std.json.Value) !void {
     if (value != .object) return error.InvalidSettings;
+    if (value.object.get("key_bindings")) |v| _ = try @import("../key_bindings.zig").parse(v);
     if (value.object.get("schema_version")) |v| if (v != .integer or v.integer != 1) return error.UnsupportedSettingsVersion;
     if (value.object.get("font_size")) |v| {
         const n = number(v) orelse return error.InvalidSettings;
         if (n < 10 or n > 32) return error.InvalidSettings;
     }
+    if (value.object.get("ui_font_size")) |v| {
+        const n = number(v) orelse return error.InvalidSettings;
+        if (n < 10 or n > 20) return error.InvalidSettings;
+    }
+    if (value.object.get("line_height")) |v| {
+        const n = number(v) orelse return error.InvalidSettings;
+        if (n < 1 or n > 2.4) return error.InvalidSettings;
+    }
+    if (value.object.get("font_family")) |v| if (parseEnum(typography.CodeFont, v) == null) return error.InvalidSettings;
+    if (value.object.get("ui_font_family")) |v| if (parseEnum(typography.UiFont, v) == null) return error.InvalidSettings;
     if (value.object.get("tab_width")) |v| if (v != .integer or v.integer < 1 or v.integer > 16) return error.InvalidSettings;
-    inline for (.{ "reduced_motion", "line_numbers", "git_gutters" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
+    inline for (.{ "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
         if (v != .string or v.string.len == 0 or v.string.len > 256 or !std.unicode.utf8ValidateSlice(v.string)) return error.InvalidSettings;
     };
@@ -114,4 +144,10 @@ fn persist(io: std.Io, path: []const u8, bytes: []const u8) !void {
     try atomic.file.writeStreamingAll(io, bytes);
     try atomic.file.sync(io);
     try atomic.replace(io);
+}
+
+fn parseEnum(comptime T: type, value: std.json.Value) ?T {
+    if (value != .string) return null;
+    inline for (std.meta.tags(T)) |tag| if (std.mem.eql(u8, value.string, @tagName(tag))) return tag;
+    return null;
 }

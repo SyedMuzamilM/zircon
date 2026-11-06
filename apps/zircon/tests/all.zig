@@ -1,4 +1,5 @@
 test {
+    _ = @import("workspace_polish_tests.zig");
     _ = @import("experience_tests.zig");
     _ = @import("settings_tests.zig");
     _ = @import("view_tests.zig");

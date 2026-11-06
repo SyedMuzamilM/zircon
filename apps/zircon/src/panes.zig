@@ -112,6 +112,8 @@ fn advance(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
                 editor.synchronize(snapshot);
                 if (self.secondary) |*old| old.editor.deinit();
                 self.secondary = .{ .document = id, .editor = editor };
+                self.split_vertical = false;
+                self.split_reverse = false;
                 self.active_pane = .secondary;
                 self.panel = .editor;
             } else {

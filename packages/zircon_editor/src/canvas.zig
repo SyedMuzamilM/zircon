@@ -155,15 +155,28 @@ const Canvas = struct {
             }
         }
         if (self.blame) |blame| {
+            for (prepared.lines) |line| if (line.row == blame.line and !line.oversized) {
+                const measured = try metrics.text(metrics.context, line.display.bytes, style);
+                const annotation_x = bounds.x + prepared.gutter - self.horizontal + measured.width + 28;
+                const annotation = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(cx.painter.allocator, "{s} · {s}", .{ blame.author, try annotations.date(cx.painter.allocator, blame.timestamp) });
+                if (annotation_x < bounds.x + bounds.width - 24) try cx.painter.drawText(.{ .bounds = .{ .x = annotation_x, .y = line.y + 3, .width = bounds.x + bounds.width - annotation_x - 12, .height = self.line_height }, .text = annotation, .style = .{ .size = self.font_size - 1, .color = self.theme.line_number } });
+            };
             const y = bounds.y + @as(f32, @floatFromInt(blame.line + 1)) * self.line_height - self.scroll;
-            if (y < bounds.y + bounds.height and y + annotations.blame_height > bounds.y) {
-                try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter, .y = y + 2, .width = @max(0, bounds.width - prepared.gutter - 12), .height = annotations.blame_height - 6 }, .color = self.theme.active_line, .radius = 5 });
-                const title = try std.fmt.allocPrint(cx.painter.allocator, "{s}   {s}", .{ blame.author, blame.oid[0..@min(8, blame.oid.len)] });
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter + 14, .y = y + 14, .width = @max(0, bounds.width - prepared.gutter - 40), .height = 24 }, .text = title, .style = .{ .size = 13, .color = self.theme.foreground } });
-                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter + 14, .y = y + 42, .width = @max(0, bounds.width - prepared.gutter - 40), .height = 24 }, .text = blame.summary, .style = .{ .size = 12, .color = self.theme.line_number } });
+            if (blame.expanded and y < bounds.y + bounds.height and y + annotations.blame_height > bounds.y) {
+                const card: ui.Rect = .{ .x = bounds.x + prepared.gutter, .y = y + 4, .width = @max(0, bounds.width - prepared.gutter - 12), .height = annotations.blame_height - 8 };
+                try cx.painter.fillRect(.{ .bounds = card, .color = self.theme.active_line, .radius = 5 });
+                try cx.painter.strokeRect(card, self.theme.scrollbar, 1);
+                const width = @max(0, card.width - 28);
+                const title = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(cx.painter.allocator, "{s} <{s}>", .{ blame.author, blame.email });
+                try cx.painter.drawText(.{ .bounds = .{ .x = card.x + 14, .y = y + 14, .width = @max(0, width - 28), .height = 22 }, .text = title, .style = .{ .size = 13, .color = self.theme.foreground } });
+                try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + bounds.width - 36, .y = y + 14, .width = 16, .height = 22 }, .text = "×", .style = .{ .size = 14, .color = self.theme.line_number } });
+                try drawBlameMessage(cx, metrics.*, .{ .x = card.x + 14, .y = y + 46, .width = width, .height = 112 }, if (blame.uncommitted) "This line has changes that have not been committed." else if (blame.message.len > 0) blame.message else blame.summary, self.theme.foreground);
+                const footer = if (blame.uncommitted) "Working tree" else try std.fmt.allocPrint(cx.painter.allocator, "{s} · {s}", .{ try annotations.date(cx.painter.allocator, blame.timestamp), blame.oid[0..@min(8, blame.oid.len)] });
+                try cx.painter.drawText(.{ .bounds = .{ .x = card.x + 14, .y = y + 174, .width = @max(0, width - 100), .height = 20 }, .text = footer, .style = .{ .size = 12, .color = self.theme.line_number } });
+                if (!blame.uncommitted) try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + bounds.width - 108, .y = y + 174, .width = 90, .height = 20 }, .text = "Copy SHA", .style = .{ .size = 12, .color = self.theme.caret } });
             }
         }
-        const content = @as(f32, @floatFromInt(self.snapshot.lineCount())) * self.line_height + if (self.blame != null) annotations.blame_height else @as(f32, 0);
+        const content = @as(f32, @floatFromInt(self.snapshot.lineCount())) * self.line_height + if (self.blame != null and self.blame.?.expanded) annotations.blame_height else @as(f32, 0);
         if (content > bounds.height and bounds.height > 0) {
             const height = @max(24, bounds.height * bounds.height / content);
             const y = bounds.y + (bounds.height - height) * self.scroll / @max(1, content - bounds.height);
@@ -180,4 +193,24 @@ fn drawRun(cx: *ui.PaintCx, line: RenderLine, theme: @import("theme.zig").Theme,
     var actual = style;
     actual.color = theme.tokens[@backingInt(kind)];
     try cx.painter.drawText(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y + 3, .width = @max(1, @abs(right - left) + 2), .height = style.size * 1.6 }, .text = line.display.bytes[begin..finish], .style = actual });
+}
+
+fn drawBlameMessage(cx: *ui.PaintCx, metrics: Canvas.LayoutState, bounds: ui.Rect, message: []const u8, color: ui.Color) !void {
+    const style: ui.TextStyle = .{ .size = 12, .color = color };
+    var remaining = std.mem.trim(u8, message, "\r\n");
+    var row: usize = 0;
+    while (remaining.len > 0 and row < 6) : (row += 1) {
+        const newline = std.mem.indexOfScalar(u8, remaining, '\n') orelse remaining.len;
+        var end = @min(newline, metrics.index(remaining[0..newline], style, bounds.width));
+        if (end == 0 and newline > 0) {
+            end = 1;
+            while (end < newline and remaining[end] & 0xc0 == 0x80) end += 1;
+        }
+        if (end < newline) if (std.mem.lastIndexOfScalar(u8, remaining[0..end], ' ')) |space| {
+            if (space > 0) end = space;
+        };
+        try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x, .y = bounds.y + @as(f32, @floatFromInt(row)) * 18, .width = bounds.width, .height = 18 }, .text = remaining[0..end], .style = style });
+        remaining = if (end == newline and end < remaining.len) remaining[end + 1 ..] else remaining[end..];
+        remaining = std.mem.trimStart(u8, remaining, " ");
+    }
 }

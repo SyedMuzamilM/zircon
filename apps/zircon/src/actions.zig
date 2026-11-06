@@ -10,13 +10,18 @@ const Shell = model.Shell;
 const Command = @import("commands.zig").Command;
 pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) !void {
     self.window = window;
+    if ((try cx.app.window(window)).surface) |surface| self.system_dark = surface.systemDark();
     if (self.settings == null) try self.loadSettings(cx, null);
     _ = try cx.observe(self.settings.?, Shell.onSettings);
     try self.onSettings(cx, self.settings.?);
     if (self.fields == null) {
         const query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
-        const project_query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        var project_input = try ui.controls.TextInput.init(self.allocator, "");
+        project_input.leading_icon = .search;
+        project_input.placeholder = "Search project files and open buffers…";
+        const project_query = try cx.createChild(ui.controls.TextInput, project_input);
         const replacement = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
+        const destination = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         const path = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         var commit_input = try ui.controls.TextInput.init(self.allocator, "");
         commit_input.placeholder = "Commit message…";
@@ -24,7 +29,7 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
             commit_input.deinit(self.allocator);
             return err;
         };
-        self.fields = .{ .query = query, .project_query = project_query, .replacement = replacement, .path = path, .commit = commit };
+        self.fields = .{ .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
     }
     try self.styleInputs(cx);
     try @import("project_index.zig").start(self, cx);
@@ -245,14 +250,41 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         defer snap.deinit();
         const x = e.data.pointer_down.position.x - e.bounds.x;
         const gutter = if (selected.editor.show_line_numbers) @import("zircon_editor").gutterWidth(snap.lineCount(), selected.editor.font_size) else 20;
+        if (selected.editor.inline_blame) |blame| if (!blame.expanded and blame.revision == snap.revision()) {
+            const y = e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset;
+            if (selected.editor.rowAt(y, snap.revision()) == blame.line) {
+                const range = try snap.lineRange(blame.line);
+                const bytes = try snap.copy(self.allocator, range);
+                defer self.allocator.free(bytes);
+                const metrics = try e.textMetrics();
+                const width = try metrics.text(metrics.context, bytes, .{ .size = selected.editor.font_size, .mono = true });
+                if (x >= gutter + width.width - selected.editor.horizontal + 20) {
+                    try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = blame.line + 1 } });
+                    e.preventDefault();
+                    cx.notify();
+                    return true;
+                }
+            }
+        };
         if (x >= 0 and x < gutter - 8) {
             const line = @min(snap.lineCount() - 1, selected.editor.rowAt(e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset, snap.revision()));
-            if (selected.editor.inline_blame != null and selected.editor.inline_blame.?.line == line) selected.editor.hideBlame() else try @import("services/git.zig").start(self, cx, .{ .blame = line + 1 });
+            if (selected.editor.inline_blame != null and selected.editor.inline_blame.?.line == line and selected.editor.inline_blame.?.expanded) selected.editor.hideBlame() else try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = line + 1 } });
             e.preventDefault();
             cx.notify();
             return true;
         }
     }
+    if (e.data == .pointer_down and e.data.pointer_down.button == .primary) if (selected.editor.inline_blame) |blame| {
+        const y = e.data.pointer_down.position.y - e.bounds.y + selected.editor.scroll.offset;
+        const top = selected.editor.rowY(blame.line + 1, record.doc.revision()) - (if (blame.expanded) editing.blame_height else 0);
+        if (blame.expanded and blame.revision == record.doc.revision() and y >= top and y < top + editing.blame_height) {
+            const x = e.data.pointer_down.position.x - e.bounds.x;
+            if (y >= top + 168 and x > e.bounds.width - 120 and !blame.uncommitted) try e.writeClipboard(blame.oid) else if (y < top + 38 and x > e.bounds.width - 50) selected.editor.hideBlame();
+            e.preventDefault();
+            cx.notify();
+            return true;
+        }
+    };
     var outcome = try selected.editor.handle(&record.doc, e);
     if (outcome.change != null or outcome.reset) {
         self.allocator.free(self.status);
@@ -266,6 +298,29 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 }
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     switch (which) {
+        .open_project => {
+            self.overlay = .open_project;
+            self.open_kind = .local_folder;
+            try setField(cx, self.fields.?.path, "", "Folder path or Git repository URL");
+        },
+        .browse_project => {
+            if (try (try cx.app.window(self.window.?)).surface.?.choosePath(self.allocator, .folder)) |path| {
+                defer self.allocator.free(path);
+                try setField(cx, self.fields.?.path, path, "Folder path");
+            }
+        },
+        .submit_project => {
+            const path = try field(cx, self.fields.?.path, self.allocator);
+            defer self.allocator.free(path);
+            const requested = std.mem.trim(u8, path, " \t");
+            if (requested.len == 0) return error.InvalidPath;
+            if (self.open_kind == .clone) {
+                const destination = try field(cx, self.fields.?.destination, self.allocator);
+                defer self.allocator.free(destination);
+                if (std.mem.trim(u8, destination, " \t").len == 0) return error.InvalidPath;
+                try @import("projects.zig").clone(self, cx, requested, destination);
+            } else _ = try @import("projects.zig").open(self, cx, requested, self.open_kind);
+        },
         .workspace_menu => self.menu_open = true,
         .project_files => {
             self.left_panel = .project;
@@ -332,9 +387,9 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .install_bundled_extension => try @import("services/extensions.zig").installBundled(self, cx),
         .project_search => {
             self.panel = .search;
-            self.overlay = .project_search;
-            self.overlay_index = 0;
-            try setField(cx, self.fields.?.project_query, "", "Search all project files and unsaved buffers…");
+            self.tool_tabs.search = true;
+            self.overlay = .none;
+            self.search_focus_request +%= 1;
         },
         .run_project_search => try @import("services/search.zig").start(self, cx),
 
@@ -354,12 +409,24 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .find => try show(self, cx, .find),
         .replace => try show(self, cx, .replace),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
-        .split => {
-            if (self.secondary) |*pane| {
+        .split_menu => self.split_menu_open = !self.split_menu_open,
+        .git_blame => {
+            const current = try active(self);
+            if (current.editor.inline_blame != null and current.editor.inline_blame.?.expanded) current.editor.hideBlame() else {
+                const record = try self.workspace.getConst(current.id);
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                const point = try snapshot.pointAt(current.editor.primary().head);
+                try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = point.line + 1 } });
+            }
+        },
+        .split_left, .split_right, .split_up, .split_down, .close_split, .split => {
+            if (self.secondary != null and (which == .split or which == .close_split)) {
+                const pane = &self.secondary.?;
                 pane.editor.deinit();
                 self.secondary = null;
                 self.active_pane = .primary;
-            } else {
+            } else if (which != .close_split and self.secondary == null) {
                 const current = try active(self);
                 var other = try editing.Editor.init(self.allocator);
                 errdefer other.deinit();
@@ -370,6 +437,13 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 other.synchronize(snapshot);
                 self.secondary = .{ .document = current.id, .editor = other };
             }
+            if (which != .split and which != .close_split) {
+                self.split_vertical = which == .split_up or which == .split_down;
+                self.split_reverse = which == .split_left or which == .split_up;
+                self.split_ratio = 0.5;
+                self.active_pane = .secondary;
+            }
+            self.panel = .editor;
         },
         .save => {
             const index = try saveTarget(self);
@@ -386,7 +460,15 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 if (self.image) |*asset| asset.deinit(self.allocator);
                 self.image = null;
                 self.panel = .editor;
-            } else if (self.panel != .editor and self.panel != .markdown) self.panel = .editor else if (self.tabs.items.len > 0) try requestTabClose(self, cx, self.active);
+            } else if (self.panel != .editor and self.panel != .markdown) {
+                switch (self.panel) {
+                    .search => self.tool_tabs.search = false,
+                    .git_diff => self.tool_tabs.git_diff = false,
+                    .extensions => self.tool_tabs.extensions = false,
+                    else => {},
+                }
+                self.panel = .editor;
+            } else if (self.tabs.items.len > 0) try requestTabClose(self, cx, self.active);
         },
         .quit => try cx.app.requestCloseWindow(self.window.?),
         .dismiss => {
@@ -492,10 +574,18 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
     }
 }
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data == .focus and !e.data.focus) self.dragging = .none;
+    if (e.data == .appearance) {
+        if (self.system_dark == e.data.appearance) return;
+        self.system_dark = e.data.appearance;
+        if (self.settings) |settings| try self.onSettings(cx, settings);
+        return;
+    }
     if (e.data != .key_down) return;
     const key = e.data.key_down;
-    if (self.menu_open and key.key == .escape) {
+    if ((self.menu_open or self.split_menu_open) and key.key == .escape) {
         self.menu_open = false;
+        self.split_menu_open = false;
         e.preventDefault();
         e.stopPropagation();
         cx.notify();
@@ -508,6 +598,16 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         e.stopPropagation();
         cx.notify();
         return;
+    }
+    if (self.overlay == .none and key.key == .escape and self.tabs.items.len > 0) {
+        const current = try active(self);
+        if (current.editor.inline_blame != null and current.editor.inline_blame.?.expanded) {
+            current.editor.hideBlame();
+            e.preventDefault();
+            e.stopPropagation();
+            cx.notify();
+            return;
+        }
     }
     if (self.overlay == .none and self.language.completions != null and (key.key == .escape or key.key == .enter)) {
         if (key.key == .enter) @import("services/language.zig").accept(self, cx, 0) catch |err| try self.reportError(err) else self.language.clearCompletion();
@@ -527,6 +627,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         }
         if (key.key == .enter) {
             const which: Command = switch (self.overlay) {
+                .open_project => .submit_project,
                 .open_path, .save_as, .extension_path => .submit_path,
                 .find, .replace => if (key.modifiers.shift) .find_previous else .find_next,
                 .project_search => .run_project_search,
@@ -547,8 +648,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         }
         return;
     }
-    const map: ui.Keymap(Command) = .{ .bindings = &@import("commands.zig").bindings };
-    if (map.resolve(e.data)) |which| {
+    if (self.key_bindings.resolve(e.data)) |which| {
         execute(self, cx, which, e) catch |err| try self.reportError(err);
         e.preventDefault();
         e.stopPropagation();
@@ -597,7 +697,8 @@ fn activateSelected(self: *Shell, cx: *ui.Context(Shell)) !void {
 }
 pub fn drag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: u8) !void {
     switch (e.data) {
-        .pointer_down => {
+        .pointer_down => |pointer| {
+            if (pointer.button != .primary) return;
             self.dragging = if (kind == 0) .sidebar else .split;
             e.capturePointer();
         },
@@ -605,11 +706,12 @@ pub fn drag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: 
             if (self.dragging == .none) return;
             const size = try e.windowSize();
             if (self.dragging == .sidebar) {
-                const width = std.math.clamp(pointer.position.x, 180, @min(480, @max(180, size.width * 0.4)));
+                const width = std.math.clamp(pointer.position.x, 120, @min(480, @max(120, size.width * 0.4)));
                 if (self.left_panel == .project) self.sidebar_width = width else self.git_sidebar_width = width;
             } else {
                 const start = if (self.sidebar_visible) @min(self.panelWidth(), @max(140, size.width * 0.4)) + 5 else 0;
-                self.split_ratio = std.math.clamp((pointer.position.x - start) / @max(1, size.width - start), 0.2, 0.8);
+                const ratio = if (self.split_vertical) (pointer.position.y - 66) / @max(1, size.height - 90) else (pointer.position.x - start) / @max(1, size.width - start);
+                self.split_ratio = std.math.clamp(if (self.split_reverse) 1 - ratio else ratio, 0.2, 0.8);
             }
         },
         .pointer_up => {

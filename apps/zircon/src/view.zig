@@ -22,13 +22,14 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     var body_children: std.ArrayList(ui.Element) = .empty;
     if (sidebar_visible) {
         try body_children.append(b.allocator(), try sidebar(self, b, sidebar_width, viewport.height));
-        try body_children.append(b.allocator(), try divider(b, colors, 0));
+        try body_children.append(b.allocator(), try divider(b, colors, 0, false));
     }
     try body_children.append(b.allocator(), try editorArea(self, b, editor_width));
     const main = try b.key(.{ .string = "main" }, try b.row(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, body_children.items));
     const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
+    if (self.split_menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").splitMenu(self, b));
     if (self.menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").menu(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlay(self, b));
     if (self.overlay == .none) if (self.language.completions) |message| {
@@ -71,20 +72,22 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const preview_visible = self.panel == .markdown and self.preview != null and std.meta.eql(self.preview.?.document, self.tabs.items[self.active].document);
         const split_visible = self.secondary != null or preview_visible;
         const available = @max(1, width - if (split_visible) @as(f32, 5) else 0);
-        const primary_width = if (split_visible) available * std.math.clamp(self.split_ratio, 0.2, 0.8) else available;
+        const vertical = self.secondary != null and self.split_vertical and !preview_visible;
+        const primary_width = if (split_visible and !vertical) available * std.math.clamp(self.split_ratio, 0.2, 0.8) else width;
+        const primary_height: ui.Length = if (vertical) .{ .px = @max(1, b.viewport().height - toolbar_height - tab_height - status_height - 5) * self.split_ratio } else .auto;
         const tab = &self.tabs.items[@min(self.active, self.tabs.items.len - 1)];
         const primary_record = try self.workspace.getConst(tab.document);
         var primary = try tab.editor.render(&primary_record.doc, b);
         primary = try b.styled(primary, .{ .width = .{ .px = primary_width }, .flex_grow = 1, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden });
         primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 0), Shell.onEditor) });
         primary = try b.requestFocus(try b.autofocus(primary), if (self.active_pane == .primary) self.editor_focus_request else 0);
-        try panes.append(b.allocator(), try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, primary_record), primary })));
+        try panes.append(b.allocator(), try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, primary_record), primary })));
         if (preview_visible) {
-            try panes.append(b.allocator(), try divider(b, colors, 1));
+            try panes.append(b.allocator(), try divider(b, colors, 1, false));
             const preview = try b.listen(try b.key(.{ .string = "markdown-preview" }, try self.preview.?.view.render(b)), .{ .focusable = true, .on_input = b.onInput(Shell.onPreview) });
             try panes.append(b.allocator(), try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 8 }, .align_items = .center, .gap = 8, .background = colors.document }, &.{ try b.styled(try label(b, colors, "Markdown preview", colors.muted, 12), .{ .flex_grow = 1, .text = .{ .size = 12, .color = colors.muted } }), try commandButton(b, colors, .back_to_editor, "Close", false) }), preview }));
         } else if (self.secondary) |*secondary| {
-            try panes.append(b.allocator(), try divider(b, colors, 1));
+            try panes.append(b.allocator(), try divider(b, colors, 1, vertical));
             const record = try self.workspace.getConst(secondary.document);
             var secondary_canvas = try secondary.editor.render(&record.doc, b);
             secondary_canvas = try b.styled(secondary_canvas, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
@@ -92,7 +95,8 @@ fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             secondary_canvas = try b.requestFocus(secondary_canvas, if (self.active_pane == .secondary) self.editor_focus_request else 0);
             try panes.append(b.allocator(), try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try fileHeading(self, b, record), secondary_canvas })));
         }
-        try children.append(b.allocator(), try b.key(.{ .string = "panes" }, try b.row(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, panes.items)));
+        if (self.secondary != null and self.split_reverse and !preview_visible) std.mem.swap(ui.Element, &panes.items[0], &panes.items[2]);
+        try children.append(b.allocator(), try b.key(.{ .string = "panes" }, try b.div(.{ .direction = if (vertical) .column else .row, .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, panes.items)));
         const active_id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else tab.document;
         for (self.language.documents.items) |document| if (std.meta.eql(document.id, active_id)) {
             const message = document.diagnostics orelse break;
@@ -119,8 +123,8 @@ fn emptyEditor(b: *ui.Ui, colors: Palette) !ui.Element {
     });
 }
 
-fn divider(b: *ui.Ui, colors: Palette, kind: u8) !ui.Element {
-    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.column(.{ .width = .{ .px = 5 }, .flex_shrink = 0, .align_items = .center, .background = colors.document }, &.{try b.div(.{ .width = .{ .px = 1 }, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
+fn divider(b: *ui.Ui, colors: Palette, kind: u8, horizontal: bool) !ui.Element {
+    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.border_subtle, .hover_background = colors.accent }, &.{})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
 }
 
 fn statusBar(self: *const Shell, b: *ui.Ui) !ui.Element {
@@ -128,11 +132,13 @@ fn statusBar(self: *const Shell, b: *ui.Ui) !ui.Element {
 }
 
 fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
+    if (self.overlay == .open_project) return @import("views/open_project.zig").render(self, b);
     const colors = self.colors;
     const fields = self.fields.?;
     const width = @min(@as(f32, 580), @max(@as(f32, 260), b.viewport().width - 48));
     var children: std.ArrayList(ui.Element) = .empty;
     const title: []const u8 = switch (self.overlay) {
+        .open_project => unreachable,
         .palette => "Commands",
         .quick_open => "Go to file",
         .open_path => "Open file",
@@ -150,6 +156,7 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
     });
     try children.append(b.allocator(), title_row);
     switch (self.overlay) {
+        .open_project => unreachable,
         .palette, .quick_open => {
             try children.append(b.allocator(), try inputField(b, fields.query, "query", true));
             const query = try fieldText(b, fields.query);
@@ -159,10 +166,10 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
                 const start = resultStart(filtered.len, self.overlay_index, limit);
                 for (filtered[start..@min(start + limit, filtered.len)], start..) |index, visible| {
                     const entry = catalogue.commands[index];
-                    const text = if (entry.shortcut.len > 0) try std.fmt.allocPrint(b.allocator(), "{s}    {s}", .{ entry.label, entry.shortcut }) else entry.label;
-                    try children.append(b.allocator(), try paletteCommand(b, colors, entry.command, text, visible == self.overlay_index));
+                    try children.append(b.allocator(), try @import("views/components.zig").menuRow(b, colors, entry.command, entry.label, try self.key_bindings.shortcut(b.allocator(), entry.command), visible == self.overlay_index));
                 }
                 if (filtered.len == 0) try children.append(b.allocator(), try label(b, colors, "No matching commands.", colors.muted, 12));
+                try children.append(b.allocator(), try label(b, colors, "↑ ↓ to navigate    Enter to run", colors.muted, 11));
             } else {
                 const filtered = try filteredFiles(self, b, query);
                 const limit = resultCapacity(self, b);
@@ -203,7 +210,7 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
     }
     if (self.status.len > 0 and self.status_is_error) try children.append(b.allocator(), try label(b, colors, self.status, colors.warning, 12));
     const panel_height = @min(try overlayHeight(self, b), @max(120, b.viewport().height - 100));
-    const panel = try b.key(.{ .string = "dialog" }, try b.column(.{ .width = .{ .px = width }, .height = .{ .px = panel_height }, .gap = 12, .padding = ui.Insets.all(18), .background = colors.panel, .radius = 9, .overflow = .hidden }, children.items));
+    const panel = try b.key(.{ .string = "dialog" }, try b.column(.{ .width = .{ .px = width }, .height = .{ .px = panel_height }, .gap = 8, .padding = ui.Insets.all(12), .background = colors.panel, .radius = 5, .overflow = .hidden }, children.items));
     const shade: ui.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0.45 };
     return b.modal(try b.key(.{ .string = @tagName(self.overlay) }, try b.stack(.{ .padding = .{ .top = @min(@as(f32, 78), b.viewport().height * 0.13), .bottom = 20 }, .align_items = .center, .justify_content = .start, .background = shade, .overflow = .hidden }, &.{panel})));
 }
@@ -211,10 +218,11 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
 fn overlayHeight(self: *const Shell, b: *ui.Ui) !f32 {
     const error_height: f32 = if (self.status.len > 0 and self.status_is_error) 30 else 0;
     return error_height + switch (self.overlay) {
+        .open_project => 432,
         .palette, .quick_open => blk: {
             const query = try fieldText(b, self.fields.?.query);
             const count = if (self.overlay == .palette) (try filteredCommands(b, query)).len else (try filteredFiles(self, b, query)).len;
-            break :blk 36 + 26 + 12 + 38 + 12 + @as(f32, @floatFromInt(@max(@as(usize, 1), @min(count, resultCapacity(self, b))))) * 42;
+            break :blk 36 + 26 + 12 + 38 + 12 + @as(f32, @floatFromInt(@max(@as(usize, 1), @min(count, resultCapacity(self, b))))) * 38;
         },
         .open_path, .save_as, .extension_path => 204,
         .find => 196,
@@ -231,7 +239,7 @@ fn resultStart(count: usize, selected: usize, limit: usize) usize {
 fn resultCapacity(self: *const Shell, b: *const ui.Ui) usize {
     const reserved: f32 = if (self.status.len > 0 and self.status_is_error) 254 else 224;
     const available = @max(42, b.viewport().height - reserved);
-    return @min(result_limit, @as(usize, @intFromFloat(@floor(available / 42))));
+    return @min(result_limit, @as(usize, @intFromFloat(@floor(available / 38))));
 }
 
 fn pendingTitle(self: *const Shell, b: *ui.Ui) ![]const u8 {
@@ -253,9 +261,6 @@ fn label(b: *ui.Ui, _: Palette, value: []const u8, color: ui.Color, size: f32) !
 }
 pub fn commandButton(b: *ui.Ui, colors: Palette, action: Command, text: []const u8, primary: bool) !ui.Element {
     return @import("views/components.zig").actionButton(b, colors, action, text, primary);
-}
-fn paletteCommand(b: *ui.Ui, colors: Palette, action: Command, text: []const u8, selected: bool) !ui.Element {
-    return b.key(.{ .number = @backingInt(action) }, try b.button(.{ .label = text, .on_click = try b.onClickWith(action, Shell.onCommand), .style = resultStyle(colors, selected) }));
 }
 fn resultStyle(colors: Palette, selected: bool) ui.Style {
     return .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 10, .right = 10, .top = 7 }, .radius = 4, .background = if (selected) colors.selected else colors.panel, .hover_background = colors.hover, .text = .{ .size = 12, .color = colors.text }, .overflow = .hidden };

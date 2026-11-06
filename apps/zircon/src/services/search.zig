@@ -114,6 +114,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.search.task = task;
     self.search.busy = true;
     self.panel = .search;
+    self.tool_tabs.search = true;
     self.overlay = .none;
     self.search.scroll.offset = 0;
     cx.notify();

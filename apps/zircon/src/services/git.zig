@@ -7,7 +7,9 @@ const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
 const Shell = @import("../shell.zig").Shell;
 const a = std.heap.page_allocator;
-pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: usize };
+const BlameRequest = struct { line: usize, expanded: bool = true };
+pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: BlameRequest };
+const BlameTarget = struct { document: workspace.DocumentId, revision: u64, line: usize };
 pub const Model = struct {
     active_document: ?workspace.DocumentId = null,
     status: ?git.Status = null,
@@ -16,6 +18,10 @@ pub const Model = struct {
     selected_path: []u8 = &.{},
     selected_commit: []u8 = &.{},
     busy: bool = false,
+    blame_target: ?BlameTarget = null,
+    blame_changed_at: f64 = 0,
+    blame_requested: bool = false,
+    pending_blame: ?struct { document: workspace.DocumentId, revision: u64, request: BlameRequest } = null,
     repository: bool = false,
     generation: u64 = 0,
     status_generation: u64 = 0,
@@ -44,6 +50,9 @@ const Result = struct {
     commits_ready: bool = false,
     diff: ?git.Diff = null,
     blame: ?git.Blame = null,
+    blame_message: []u8 = &.{},
+    blame_expanded: bool = false,
+    quiet_blame: bool = false,
     document: ?workspace.DocumentId = null,
     revision: u64 = 0,
     changes: []git.LineChange = &.{},
@@ -54,6 +63,7 @@ const Result = struct {
         git.deinitHistory(a, self.commits);
         if (self.diff) |*v| v.deinit();
         if (self.blame) |*v| v.deinit();
+        a.free(self.blame_message);
         a.free(self.changes);
         a.free(self.error_text);
     }
@@ -76,7 +86,9 @@ const Job = struct {
         var repo = (try git.Repository.discover(a, self.io, self.root)) orelse return Box.create(a, result);
         defer repo.deinit();
         result.found = true;
+        result.quiet_blame = self.operation == .blame and !self.operation.blame.expanded;
         self.perform(&repo, &result) catch |err| {
+            if (result.quiet_blame) return Box.create(a, result);
             result.error_text = try std.fmt.allocPrint(a, "Git: {s}\n{s}", .{ @errorName(err), repo.lastError() });
             if (result.status == null) result.status = repo.status(a) catch null;
         };
@@ -102,12 +114,15 @@ const Job = struct {
                 }
                 if (self.operation == .stage_all) try repo.stage(paths.items) else try repo.unstage(paths.items);
             },
-            .blame => |line| if (self.path) |absolute| {
+            .blame => |request| if (self.path) |absolute| {
                 const path = try repo.relativePath(a, absolute);
                 defer a.free(path);
                 const bytes = if (self.snapshot) |snapshot| try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() }) else null;
                 defer if (bytes) |value| a.free(value);
-                result.blame = try repo.blame(a, path, line, bytes);
+                result.blame = try repo.blame(a, path, request.line, bytes);
+                result.blame_expanded = request.expanded;
+                if (request.expanded and !result.blame.?.uncommitted) result.blame_message = try repo.commitMessage(a, result.blame.?.oid);
+                return;
             },
         }
         if (self.comparison) |comparison| result.diff = try repo.diff(a, comparison.path, comparison.staged);
@@ -141,7 +156,18 @@ const Job = struct {
     }
 };
 pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
+    if (operation == .blame) {
+        if (self.tabs.items.len == 0) return error.NoDocument;
+        const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
+        if ((try self.workspace.getConst(id)).path == null) return error.UnsavedBlame;
+        if (!self.git.busy and !self.git.repository) return error.NoBlameRepository;
+    }
     if (self.git.busy) {
+        if (operation == .blame and self.tabs.items.len > 0) {
+            const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
+            self.git.pending_blame = .{ .document = id, .revision = (try self.workspace.getConst(id)).doc.revision(), .request = operation.blame };
+            return;
+        }
         if (operation == .refresh) {
             self.git.needs_refresh = true;
             return;
@@ -207,10 +233,16 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.diff = null;
         self.git.diff_scroll.offset = 0;
     }
-    a.free(self.git.error_text);
-    self.git.error_text = value.error_text;
-    value.error_text = &.{};
-    if (value.changes_ready) if (value.document) |id| if (self.workspace.getConst(id)) |record| {
+    if (!value.quiet_blame) {
+        a.free(self.git.error_text);
+        self.git.error_text = value.error_text;
+        value.error_text = &.{};
+    }
+    if (!self.inline_blame_enabled and !value.blame_expanded) if (value.blame) |*blame| {
+        blame.deinit();
+        value.blame = null;
+    };
+    if (value.changes_ready or value.blame != null) if (value.document) |id| if (self.workspace.getConst(id)) |record| {
         if (record.doc.revision() == value.revision) {
             for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
                 try installEditor(&tab.editor, &value);
@@ -219,6 +251,14 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         }
     } else |_| {};
     cx.notify();
+    if (self.git.pending_blame) |pending| {
+        self.git.pending_blame = null;
+        const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else return;
+        if (std.meta.eql(id, pending.document) and (try self.workspace.getConst(id)).doc.revision() == pending.revision) {
+            try start(self, cx, .{ .blame = pending.request });
+            return;
+        }
+    }
     if (self.git.needs_refresh) {
         self.git.needs_refresh = false;
         try start(self, cx, .refresh);
@@ -231,11 +271,39 @@ fn installEditor(editor: *@import("zircon_editor").Editor, result: *const Result
         .modified => .modified,
         .deleted => .deleted,
     }, .start = change.start, .end = change.end };
-    if (result.blame) |blame| editor.setBlame(.{ .line = blame.line - 1, .revision = result.revision, .author = blame.author, .summary = blame.summary, .oid = blame.oid, .timestamp = blame.timestamp }) catch |err| {
+    if (result.blame) |blame| editor.setBlame(.{ .line = blame.line - 1, .revision = result.revision, .author = blame.author, .summary = blame.summary, .oid = blame.oid, .timestamp = blame.timestamp, .email = blame.email, .message = result.blame_message, .uncommitted = blame.uncommitted, .expanded = result.blame_expanded }) catch |err| {
         editor.allocator.free(changes);
         return err;
     };
-    editor.allocator.free(editor.git_changes);
-    editor.git_changes = changes;
-    editor.git_revision = result.revision;
+    if (result.changes_ready) {
+        editor.allocator.free(editor.git_changes);
+        editor.git_changes = changes;
+        editor.git_revision = result.revision;
+    } else editor.allocator.free(changes);
+}
+
+/// Delay automatic blame until the current line settles. Results still bind to
+/// the original document revision, so typing cannot install obsolete authorship.
+pub fn pollBlame(self: *Shell, cx: *ui.Context(Shell)) !void {
+    if (!self.inline_blame_enabled or !self.git.repository or self.panel != .editor or self.overlay != .none or self.tabs.items.len == 0) return;
+    const pane = if (self.active_pane == .secondary and self.secondary != null) &self.secondary.? else null;
+    const id = if (pane) |value| value.document else self.tabs.items[self.active].document;
+    const state = if (pane) |value| &value.editor else &self.tabs.items[self.active].editor;
+    if (state.inline_blame) |blame| if (blame.expanded) return;
+    const record = try self.workspace.getConst(id);
+    if (record.path == null) return;
+    var snapshot = record.doc.snapshot();
+    defer snapshot.deinit();
+    const line = (try snapshot.pointAt(@min(state.primary().head, snapshot.byteLen()))).line;
+    const target: BlameTarget = .{ .document = id, .revision = snapshot.revision(), .line = line };
+    const now = if (self.window) |h| (try cx.app.window(h)).time else return;
+    if (self.git.blame_target == null or !std.meta.eql(self.git.blame_target.?, target)) {
+        self.git.blame_target = target;
+        self.git.blame_changed_at = now;
+        self.git.blame_requested = false;
+    }
+    if (self.git.blame_requested or self.git.busy or now - self.git.blame_changed_at < 0.3) return;
+    self.git.blame_requested = true;
+    if (state.inline_blame) |blame| if (blame.revision == snapshot.revision() and blame.line == line) return;
+    try start(self, cx, .{ .blame = .{ .line = line + 1, .expanded = false } });
 }

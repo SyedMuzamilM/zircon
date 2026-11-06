@@ -401,6 +401,7 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     const subject = try git(root, &.{ "log", "-1", "--format=%s" });
     defer t.allocator.free(subject);
     try t.expectEqualStrings("Change value\n", subject);
+    try command(root, &.{ "commit", "--amend", "-m", "Change value", "-m", "Keep the fixture change documented in the commit body." });
     try send(&app, h, .git_history);
     try settle(&app);
     try app.update(owner, Ops.gitCommit, .{});
@@ -430,6 +431,37 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try settle(&app);
     try t.expect(try app.read(owner, Ops.blame, .{}));
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-inline-blame.png");
+    var copy_label = false;
+    var author_label = false;
+    var body_label = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
+        if (std.mem.eql(u8, item.text, "Copy SHA")) copy_label = true;
+        if (std.mem.indexOf(u8, item.text, "Keep the fixture change") != null) body_label = true;
+        if (std.mem.indexOf(u8, item.text, "fixture@zircon.invalid") != null) author_label = true;
+    };
+    try t.expect(copy_label and author_label and body_label);
+    const copy_point: ui.Point = .{ .x = canvas.x + canvas.width - 60, .y = canvas.y + 2 * 22.4 + 180 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = copy_point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = copy_point } });
+    var clipboard: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .c } }, ._surface = (try app.window(h)).surface };
+    const copied = try clipboard.readClipboard(t.allocator);
+    defer t.allocator.free(copied);
+    const oid = try git(root, &.{ "rev-parse", "HEAD" });
+    defer t.allocator.free(oid);
+    try t.expectEqualStrings(std.mem.trim(u8, oid, "\n"), copied);
+    try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
+    _ = try app.step(0);
+    try t.expect(!try app.read(owner, Ops.blame, .{}));
+    const unsaved: ui.Point = .{ .x = canvas.x + 6, .y = canvas.y + 6 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = unsaved } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = unsaved } });
+    try settle(&app);
+    var uncommitted = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
+        if (std.mem.eql(u8, item.text, "Uncommitted changes")) uncommitted = true;
+        try t.expect(!std.mem.eql(u8, item.text, "Copy SHA"));
+    };
+    try t.expect(uncommitted);
 }
 test "extension controls activate real themes icons and syntax" {
     var tmp = t.tmpDir(.{});
@@ -491,6 +523,19 @@ test "project search captures unsaved buffers and opens the real source selectio
         break;
     };
     try t.expect(opened);
+    // Navigating to a match keeps the search tab and its query/results alive.
+    try click(&app, h, "Project search");
+    _ = try app.step(0);
+    try t.expectEqual(@as(usize, 2), try app.read(owner, Ops.matches, .{}));
+    const restored = &(try app.window(h)).frames.committed;
+    var match_label: ?[]u8 = null;
+    for (restored.nodes.items) |node| if (node.kind == .button and std.mem.indexOf(u8, node.kind.button.label, "one.zig    1 matches") != null) {
+        match_label = try t.allocator.dupe(u8, node.kind.button.label);
+        break;
+    };
+    try t.expect(match_label != null);
+    defer t.allocator.free(match_label.?);
+    try click(&app, h, match_label.?);
     try app.dispatch(h, .{ .text = "edited" });
     _ = try app.step(0);
     var source: []u8 = undefined;
@@ -505,4 +550,46 @@ fn insideTabs(frame: anytype, start: u32) bool {
         if (frame.nodes.items[index].key) |key| if (key == .string and std.mem.eql(u8, key.string, "tabs")) return true;
     }
     return false;
+}
+
+test "automatic blame waits for the current line and keeps source geometry unchanged" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try command(root, &.{ "init", "-q" });
+    try command(root, &.{ "config", "user.name", "Blame author" });
+    try command(root, &.{ "config", "user.email", "author@zircon.invalid" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 1;\n" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Initial author" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try settle(&app);
+    _ = try app.step(0.1);
+    try t.expect(!try app.read(owner, Ops.blame, .{}));
+    _ = try app.step(0.5);
+    _ = try app.step(1);
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (try app.tasksPending()) {
+        _ = try app.step(1);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.JourneyTimeout;
+        std.Io.sleep(t.io, .fromMilliseconds(1), .awake) catch {};
+    }
+    _ = try app.step(1);
+    const Check = struct {
+        fn compact(self: *const zircon.Shell) bool {
+            const state = &self.tabs.items[self.active].editor;
+            const blame = state.inline_blame orelse return false;
+            return !blame.expanded and std.mem.eql(u8, blame.author, "Blame author") and state.rowY(1, blame.revision) == state.line_height;
+        }
+    };
+    try t.expect(try app.read(owner, Check.compact, .{}));
+    var annotation = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.indexOf(u8, item.text, "Blame author ·") != null) {
+        annotation = true;
+    };
+    try t.expect(annotation);
 }

@@ -6,6 +6,7 @@ const t = std.testing;
 const native = ui.testing.native;
 const objc = native.objc;
 test {
+    _ = @import("workspace_polish_tests.zig");
     _ = @import("experience_tests.zig");
 }
 fn bytes(self: *const zircon.Shell, a: std.mem.Allocator, out: *[]u8) !void {
@@ -95,7 +96,7 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
 
     try nativeKey(window, 0, "a", 1 << 20);
     _ = try app.step(1);
-    objc.send(void, view, "insertText:replacementRange:", .{ objc.string("const answer = 42;\n"), Range{ .location = std.math.maxInt(usize), .length = 0 } });
+    objc.send(void, view, "insertText:replacementRange:", .{ objc.string("const answer = 42;\n"), Range{ .location = @as(usize, std.math.maxInt(isize)), .length = 0 } });
     _ = try app.step(2);
     var actual: []u8 = undefined;
     try app.read(owner, bytes, .{ t.allocator, &actual });
@@ -153,3 +154,77 @@ test "native editor edits finds replaces splits saves and protects dirty close" 
     try t.expectError(error.WindowNotFound, app.window(h));
 }
 const Range = extern struct { location: usize, length: usize };
+
+test "native search and palette typing refresh replacement ranges between keystrokes" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root_path = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root_path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "sample.zig", .data = "const std = @import(\"std\");\n\npub fn main() void {\n    std.debug.print(\"Hello, Zircon!\\n\", .{});\n}\n" });
+    const shell = try zircon.Shell.init(t.allocator, t.io, root_path, "sample.zig");
+    const h = try app.openWindow(zircon.Shell, .{ .title = "Zircon field regression", .visible = false }, shell);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(4);
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const nsapp = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const windows = objc.send(objc.Id, nsapp, "windows", .{});
+    var window: objc.Id = null;
+    for (0..objc.send(usize, windows, "count", .{})) |i| {
+        const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{i});
+        if (std.mem.eql(u8, "Zircon field regression", objc.fromString(objc.send(objc.Id, candidate, "title", .{})))) window = candidate;
+    }
+    if (window == null) return error.TestWindowNotFound;
+    inline for (.{ zircon.Command.project_search, zircon.Command.palette, zircon.Command.open_path, zircon.Command.find, zircon.Command.replace }) |action| {
+        try command(&app, owner, action);
+        _ = try app.step(4);
+        try nativeKey(window, 0, "a", 0);
+        _ = try app.step(4);
+        try nativeKey(window, 1, "s", 0);
+        _ = try app.step(4);
+        if (action == .palette) try (try app.window(h)).snapshot("/tmp/zircon-command-menu.png");
+        try t.expectEqualStrings("as", (try app.window(h)).frames.committed.text_input.?.text);
+        const view = objc.send(objc.Id, window, "contentView", .{});
+        const NativeRange = extern struct { location: usize, length: usize };
+        objc.send(void, view, "insertText:replacementRange:", .{ objc.string("é🌍"), NativeRange{ .location = @as(usize, std.math.maxInt(isize)), .length = 0 } });
+        _ = try app.step(4);
+        try t.expectEqualStrings("asé🌍", (try app.window(h)).frames.committed.text_input.?.text);
+        try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
+        _ = try app.step(4);
+    }
+    try command(&app, owner, .split_down);
+    _ = try app.step(4);
+    try (try app.window(h)).snapshot("/tmp/zircon-split-down.png");
+    try command(&app, owner, .split_menu);
+    _ = try app.step(4);
+    try (try app.window(h)).snapshot("/tmp/zircon-split-menu.png");
+    const Theme = struct {
+        fn apply(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), id: []const u8) !void {
+            try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .theme = id }});
+        }
+        fn light(self: *const zircon.Shell) bool {
+            return self.colors.document.r > 0.8;
+        }
+    };
+    try app.update(owner, Theme.apply, .{"zircon.system"});
+    const old_appearance = objc.retain(objc.send(objc.Id, nsapp, "appearance", .{}));
+    defer {
+        objc.send(void, nsapp, "setAppearance:", .{old_appearance});
+        objc.release(old_appearance);
+    }
+    const aqua = objc.send(objc.Id, objc.class("NSAppearance"), "appearanceNamed:", .{objc.string("NSAppearanceNameAqua")});
+    objc.send(void, nsapp, "setAppearance:", .{aqua});
+    const view = objc.send(objc.Id, window, "contentView", .{});
+    objc.send(void, view, "viewDidChangeEffectiveAppearance", .{});
+    for (0..4) |_| try native.pump(0);
+    _ = try app.step(4);
+    try t.expect(try app.read(owner, Theme.light, .{}));
+    try (try app.window(h)).snapshot("/tmp/zircon-split-menu-light.png");
+    try app.update(owner, Theme.apply, .{"zircon.dark"});
+    _ = try app.step(4);
+    const appearance = objc.send(objc.Id, window, "appearance", .{});
+    try t.expectEqualStrings("NSAppearanceNameDarkAqua", objc.fromString(objc.send(objc.Id, appearance, "name", .{})));
+}

@@ -7,10 +7,10 @@ const model = @import("model.zig");
 const Shell = @import("../shell.zig").Shell;
 const v = @import("../views/components.zig");
 const Category = enum { general, appearance, editor, version_control };
-const Change = enum { font_down, font_up, tab_two, tab_four, tab_eight, dark, light, default_icons, motion, numbers, gutters };
-const Picker = enum { none, theme, icons };
+const Change = enum { lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
+const Picker = enum { none, theme, icons, code_font, ui_font };
 const Contribution = struct { id: [256]u8 = @splat(0), len: u16, icons: bool };
-const Row = enum { theme, icons, font, tabs, numbers, gutters, motion };
+const Row = enum { theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion };
 const row_height: f32 = 88;
 pub const View = struct {
     allocator: std.mem.Allocator,
@@ -22,10 +22,13 @@ pub const View = struct {
     scroll: ui.controls.Scroll = .{},
     picker: Picker = .none,
     picker_y: f32 = 0,
+    system_dark: bool = true,
+    follows_system: bool = false,
     picker_scroll: ui.controls.Scroll = .{},
     error_value: ?anyerror = null,
     pub fn bootstrap(self: *View, cx: *ui.Context(View), window: ui.WindowHandle) !void {
         self.window = window;
+        if ((try cx.app.window(window)).surface) |surface| self.system_dark = surface.systemDark();
         var input = try ui.controls.TextInput.init(self.allocator, "");
         input.placeholder = "Search settings…";
         input.leading_icon = .search;
@@ -46,7 +49,15 @@ pub const View = struct {
         var snapshot: ?ext.Snapshot = null;
         if (self.workspace) |workspace| try cx.read(workspace, Shell.copyExtensions, .{&snapshot});
         defer if (snapshot) |*value| value.deinit();
-        if (self.query) |query| try cx.update(query, ui.controls.TextInput.setAppearance, .{v.inputAppearance(palette(values, snapshot))});
+        const follows = std.mem.eql(u8, values.theme, "zircon.system");
+        if (self.window) |handle| if ((try cx.app.window(handle)).surface) |surface| {
+            if (follows and !self.follows_system) self.system_dark = surface.systemDark();
+            const background = palette(values, snapshot, self.system_dark).document;
+            const dark = background.r * 0.2126 + background.g * 0.7152 + background.b * 0.0722 < 0.5;
+            surface.setAppearance(if (follows) null else dark);
+        };
+        self.follows_system = follows;
+        if (self.query) |query| try cx.update(query, ui.controls.TextInput.setAppearance, .{v.inputAppearance(palette(values, snapshot, self.system_dark))});
         cx.notify();
     }
     fn onQuery(self: *View, cx: *ui.Context(View), _: ui.Entity(ui.controls.TextInput)) void {
@@ -60,7 +71,7 @@ pub const View = struct {
         var generation: ?ext.Snapshot = null;
         if (self.workspace) |handle| try b.watch(handle, Shell.copyExtensions, .{&generation});
         defer if (generation) |*value| value.deinit();
-        const c = palette(values, generation);
+        const c = palette(values, generation, self.system_dark);
         var query: []u8 = &.{};
         if (self.query) |handle| try b.watch(handle, ui.controls.TextInput.copy, .{ b.allocator(), &query });
         var path: ?[]u8 = null;
@@ -115,6 +126,12 @@ pub const View = struct {
         cx.notify();
     }
     fn onGlobal(self: *View, e: *ui.Event(ui.Input), cx: *ui.Context(View)) !void {
+        if (e.data == .appearance) {
+            if (self.system_dark == e.data.appearance) return;
+            self.system_dark = e.data.appearance;
+            try self.onSettings(cx, self.settings);
+            return;
+        }
         if (e.data != .key_down) return;
         if (e.data.key_down.key == .escape and self.picker != .none) {
             self.picker = .none;
@@ -188,17 +205,29 @@ pub const View = struct {
         var values: model.Values = undefined;
         try cx.read(self.settings, model.Settings.copy, .{ arena.allocator(), &values });
         try self.apply(cx, switch (which) {
+            .lilex => .{ .font_family = .lilex },
+            .menlo => .{ .font_family = .menlo },
+            .monaco => .{ .font_family = .monaco },
+            .plex => .{ .ui_font_family = .plex },
+            .system => .{ .ui_font_family = .system },
+            .ui_down => .{ .ui_font_size = @max(10, values.ui_font_size - 1) },
+            .ui_up => .{ .ui_font_size = @min(20, values.ui_font_size + 1) },
+            .height_down => .{ .line_height = @max(1, values.line_height - 0.1) },
+            .height_up => .{ .line_height = @min(2.4, values.line_height + 0.1) },
+            .ligatures => .{ .font_ligatures = !values.font_ligatures },
             .font_down => .{ .font_size = @max(10, values.font_size - 1) },
             .font_up => .{ .font_size = @min(32, values.font_size + 1) },
             .tab_two => .{ .tab_width = 2 },
             .tab_four => .{ .tab_width = 4 },
             .tab_eight => .{ .tab_width = 8 },
+            .automatic => .{ .theme = "zircon.system" },
             .dark => .{ .theme = "zircon.dark" },
             .light => .{ .theme = "zircon.light" },
             .default_icons => .{ .icon_theme = "zircon.default" },
             .motion => .{ .reduced_motion = !values.reduced_motion },
             .numbers => .{ .line_numbers = !values.line_numbers },
             .gutters => .{ .git_gutters = !values.git_gutters },
+            .blame => .{ .git_inline_blame = !values.git_inline_blame },
         });
     }
 };
@@ -212,19 +241,25 @@ fn categoryName(category: Category) []const u8 {
 }
 fn contains(category: Category, row: Row) bool {
     return category == .general or switch (row) {
-        .theme, .icons, .motion => category == .appearance,
-        .font, .tabs, .numbers => category == .editor,
-        .gutters => category == .version_control,
+        .theme, .icons, .ui_font_family, .ui_font_size, .motion => category == .appearance,
+        .font_family, .font, .line_height, .ligatures, .tabs, .numbers => category == .editor,
+        .gutters, .blame => category == .version_control,
     };
 }
 fn rowSearch(row: Row) []const u8 {
     return switch (row) {
         .theme => "Color theme appearance colors",
         .icons => "File icon theme appearance",
+        .font_family => "Editor font family Lilex Menlo Monaco typography",
+        .ui_font_family => "Interface font family IBM Plex Sans System typography",
+        .ui_font_size => "Interface font size typography",
+        .line_height => "Line height spacing editor typography",
+        .ligatures => "Font ligatures editor typography",
         .font => "Font size editor",
         .tabs => "Tab width size indentation editor",
         .numbers => "Line numbers editor",
         .gutters => "Git change markers gutters version control",
+        .blame => "Git inline blame author version control",
         .motion => "Reduced motion animations accessibility general",
     };
 }
@@ -234,32 +269,44 @@ fn choiceStyle(c: v.Palette) ui.Style {
     return style;
 }
 fn changeButton(b: *ui.Ui, c: v.Palette, change: Change, label: []const u8) !ui.Element {
-    return b.button(.{ .label = label, .on_click = try b.onClickWith(change, View.change), .style = choiceStyle(c) });
+    return b.button(.{ .label = label, .children = &.{try v.text(b, if (change == .ui_down or change == .height_down) "−" else if (change == .ui_up or change == .height_up) "+" else label, c.text, 13)}, .on_click = try b.onClickWith(change, View.change), .style = choiceStyle(c) });
 }
 fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snapshot, row: Row) !ui.Element {
     _ = self;
     const title: []const u8 = switch (row) {
         .theme => "Color theme",
         .icons => "File icon theme",
+        .font_family => "Editor font",
+        .ui_font_family => "Interface font",
+        .ui_font_size => "Interface font size",
+        .line_height => "Line height",
+        .ligatures => "Font ligatures",
         .font => "Font size",
         .tabs => "Tab width",
         .numbers => "Line numbers",
         .gutters => "Git change markers",
+        .blame => "Inline Git blame",
         .motion => "Reduced motion",
     };
     const help: []const u8 = switch (row) {
         .theme => "Choose the colors used throughout the editor.",
         .icons => "Choose icons for files and folders in the project panel.",
-        .font => "Size of text in editor panes. Applies to newly opened files.",
+        .font_family => "Lilex is bundled. Menlo and Monaco use macOS fonts.",
+        .ui_font_family => "Typeface used in tabs, sidebars, controls and settings.",
+        .ui_font_size => "Scale interface text independently from editor text.",
+        .line_height => "Vertical space per line, as a multiple of the font size.",
+        .ligatures => "Combine supported programming symbols into ligatures.",
+        .font => "Size of text in editor panes and newly opened files.",
         .tabs => "Number of spaces per indentation stop.",
         .numbers => "Show source line numbers in the editor gutter.",
         .gutters => "Mark added, changed and deleted lines beside the source.",
+        .blame => "Show the author of the current line after a short delay.",
         .motion => "Reduce decorative animations across the workspace.",
     };
     var controls: std.ArrayList(ui.Element) = .empty;
     switch (row) {
         .theme, .icons => {
-            var name: []const u8 = if (row == .theme) (if (std.mem.eql(u8, values.theme, "zircon.light")) "One Light" else "One Dark") else "Zircon";
+            var name: []const u8 = if (row == .theme) (if (std.mem.eql(u8, values.theme, "zircon.system")) "System" else if (std.mem.eql(u8, values.theme, "zircon.light")) "One Light" else "One Dark") else "Lucide";
             if (snapshot) |generation| {
                 if (row == .theme) {
                     if (generation.resolveTheme(values.theme)) |theme| name = theme.name;
@@ -269,6 +316,22 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
             }
             try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .theme) Picker.theme else Picker.icons, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 10, .right = 8 }, .align_items = .center, .justify_content = .space_between, .radius = 3, .background = c.sidebar, .hover_background = c.hover } }));
         },
+        .font_family, .ui_font_family => {
+            const name: []const u8 = if (row == .font_family) switch (values.font_family) {
+                .lilex => "Lilex",
+                .menlo => "Menlo",
+                .monaco => "Monaco",
+            } else switch (values.ui_font_family) {
+                .plex => "IBM Plex Sans",
+                .system => "System",
+            };
+            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .font_family) Picker.code_font else Picker.ui_font, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .justify_content = .space_between, .background = c.element, .hover_background = c.hover, .radius = 3 } }));
+        },
+        .ui_font_size, .line_height => {
+            const is_ui = row == .ui_font_size;
+            const number = if (is_ui) try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{values.ui_font_size}) else try std.fmt.allocPrint(b.allocator(), "{d:.1}", .{values.line_height});
+            try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, if (is_ui) .ui_down else .height_down, if (is_ui) "Decrease interface font size" else "Decrease line height"), try v.text(b, number, c.text, 13), try changeButton(b, c, if (is_ui) .ui_up else .height_up, if (is_ui) "Increase interface font size" else "Increase line height") });
+        },
         .font => try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, .font_down, "−"), try b.styled(try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{values.font_size}), c.text, 13), .{ .min_width = .{ .px = 32 }, .text = .{ .size = 13, .color = c.text } }), try changeButton(b, c, .font_up, "+") }),
         .tabs => {
             inline for (.{ .{ Change.tab_two, "2", 2 }, .{ Change.tab_four, "4", 4 }, .{ Change.tab_eight, "8", 8 } }) |choice| {
@@ -277,15 +340,19 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 try controls.append(b.allocator(), try b.button(.{ .label = choice[1], .on_click = try b.onClickWith(choice[0], View.change), .style = style }));
             }
         },
-        .numbers, .gutters, .motion => {
+        .numbers, .gutters, .blame, .motion, .ligatures => {
             const enabled = switch (row) {
+                .ligatures => values.font_ligatures,
                 .numbers => values.line_numbers,
                 .gutters => values.git_gutters,
+                .blame => values.git_inline_blame,
                 else => values.reduced_motion,
             };
             const change: Change = switch (row) {
+                .ligatures => .ligatures,
                 .numbers => .numbers,
                 .gutters => .gutters,
+                .blame => .blame,
                 else => .motion,
             };
             try controls.append(b.allocator(), try b.button(.{ .label = title, .children = &.{try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 })}, .on_click = try b.onClickWith(change, View.change), .style = .{ .width = .{ .px = 38 }, .height = .{ .px = 28 }, .align_items = .center, .justify_content = .center, .radius = 3, .hover_background = c.hover, .flex_shrink = 0 } }));
@@ -296,8 +363,14 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
 fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, generation: ?ext.Snapshot) !ui.Element {
     _ = values;
     var choices: std.ArrayList(ui.Element) = .empty;
-    if (self.picker == .theme) try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .dark, "One Dark"), try changeButton(b, c, .light, "One Light") }) else try choices.append(b.allocator(), try changeButton(b, c, .default_icons, "Zircon"));
-    if (generation) |snapshot| for (snapshot.installed()) |entry| {
+    switch (self.picker) {
+        .theme => try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .automatic, "System"), try changeButton(b, c, .dark, "One Dark"), try changeButton(b, c, .light, "One Light") }),
+        .icons => try choices.append(b.allocator(), try changeButton(b, c, .default_icons, "Lucide")),
+        .code_font => try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .lilex, "Lilex"), try changeButton(b, c, .menlo, "Menlo"), try changeButton(b, c, .monaco, "Monaco") }),
+        .ui_font => try choices.appendSlice(b.allocator(), &.{ try changeButton(b, c, .plex, "IBM Plex Sans"), try changeButton(b, c, .system, "System") }),
+        .none => {},
+    }
+    if (self.picker == .theme or self.picker == .icons) if (generation) |snapshot| for (snapshot.installed()) |entry| {
         if (!entry.enabled) continue;
         if (self.picker == .theme) {
             for (entry.themes) |theme| try choices.append(b.allocator(), try contributionButton(b, c, theme.id, theme.name, false));
@@ -331,8 +404,8 @@ const Switch = struct {
     }
 };
 
-fn palette(values: model.Values, generation: ?ext.Snapshot) v.Palette {
-    var c: v.Palette = if (std.mem.eql(u8, values.theme, "zircon.light")) v.Palette.light else .{};
+fn palette(values: model.Values, generation: ?ext.Snapshot, system_dark: bool) v.Palette {
+    var c: v.Palette = if (@import("../theme.zig").isLight(values.theme, system_dark)) v.Palette.light else .{};
     if (generation) |snapshot| if (snapshot.resolveTheme(values.theme)) |theme| {
         inline for (.{ "document", "chrome", "sidebar", "panel", "line", "text", "muted", "accent", "selected", "warning", "primary" }) |name| @field(c, name) = @import("../services/extensions.zig").color(@field(theme.colors, name));
         c.hover = c.selected;

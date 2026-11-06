@@ -11,9 +11,9 @@ pub const Tab = struct { document: workspace.DocumentId, editor: editor.Editor }
 pub const Pane = struct { document: workspace.DocumentId, editor: editor.Editor };
 pub const TreeRow = struct { name: []u8, path: []u8, directory: bool, depth: u16 = 0, expanded: bool = false };
 pub const IndexedFile = struct { path: []u8, label: []u8 };
-pub const Overlay = enum { none, palette, quick_open, open_path, save_as, extension_path, project_search, find, replace, dirty };
+pub const Overlay = enum { none, open_project, palette, quick_open, open_path, save_as, extension_path, project_search, find, replace, dirty };
 pub const CloseTarget = union(enum) { tab: usize, window };
-pub const Fields = struct { query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
+pub const Fields = struct { query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     workspace: workspace.Workspace,
@@ -26,6 +26,17 @@ pub const Shell = struct {
     sidebar_width: f32 = 250,
     git_sidebar_width: f32 = 320,
     menu_open: bool = false,
+    split_menu_open: bool = false,
+    inline_blame_enabled: bool = true,
+    system_dark: bool = true,
+    follows_system: bool = false,
+    key_bindings: @import("key_bindings.zig").Overrides = .{},
+    split_vertical: bool = false,
+    split_reverse: bool = false,
+    open_kind: @import("projects.zig").Kind = .local_folder,
+    cloning: bool = false,
+    search_focus_request: u64 = 0,
+    tool_tabs: struct { search: bool = false, git_diff: bool = false, extensions: bool = false } = .{},
     split_ratio: f32 = 0.5,
     tree: std.ArrayList(TreeRow) = .empty,
     file_index: std.ArrayList(IndexedFile) = .empty,
@@ -44,7 +55,7 @@ pub const Shell = struct {
     settings: ?ui.Entity(@import("settings/model.zig").Settings) = null,
     settings_window: ?ui.WindowHandle = null,
     colors: @import("theme.zig").Palette = .{},
-    editor_options: struct { font_size: f32 = 14, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
+    editor_options: struct { font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: @import("services/git.zig").Model = .{},
     search: @import("services/search.zig").Model = .{},
     language: @import("services/language.zig").Model = .{},
@@ -131,6 +142,13 @@ pub const Shell = struct {
         defer arena.deinit();
         var values: preferences.Values = undefined;
         try cx.read(settings, preferences.Settings.copy, .{ arena.allocator(), &values });
+        self.key_bindings = values.key_bindings;
+        self.inline_blame_enabled = values.git_inline_blame;
+        if (!self.inline_blame_enabled) {
+            for (self.tabs.items) |*tab| if (tab.editor.inline_blame != null and !tab.editor.inline_blame.?.expanded) tab.editor.hideBlame();
+            if (self.secondary) |*pane| if (pane.editor.inline_blame != null and !pane.editor.inline_blame.?.expanded) pane.editor.hideBlame();
+            self.git.blame_target = null;
+        }
         const icon_theme = try self.allocator.dupe(u8, values.icon_theme);
         errdefer self.allocator.free(icon_theme);
         var icons: @import("services/icons.zig").Cache = .{};
@@ -141,11 +159,17 @@ pub const Shell = struct {
         for (self.tabs.items) |tab| _ = try self.workspace.getConst(tab.document);
         if (self.secondary) |pane| _ = try self.workspace.getConst(pane.document);
         try cx.app.setReducedMotion(values.reduced_motion);
-        const light = std.mem.eql(u8, values.theme, "zircon.light");
+        try cx.app.setTypography(.{ .code_font = values.font_family, .ui_font = values.ui_font_family, .ui_size = values.ui_font_size, .ligatures = values.font_ligatures });
+        const follows_system = std.mem.eql(u8, values.theme, "zircon.system");
+        if (follows_system and !self.follows_system) if (self.window) |handle| if ((try cx.app.window(handle)).surface) |surface| {
+            self.system_dark = surface.systemDark();
+        };
+        self.follows_system = follows_system;
+        const light = @import("theme.zig").isLight(values.theme, self.system_dark);
         self.colors = if (light) @import("theme.zig").Palette.light else .{};
         for (self.tabs.items) |*tab| {
             tab.editor.font_size = values.font_size;
-            tab.editor.line_height = values.font_size + 8;
+            tab.editor.line_height = values.font_size * values.line_height;
             tab.editor.tab_width = values.tab_width;
             tab.editor.show_line_numbers = values.line_numbers;
             tab.editor.theme = if (light) editor.Theme.light else .{};
@@ -153,7 +177,7 @@ pub const Shell = struct {
         }
         if (self.secondary) |*pane| {
             pane.editor.font_size = values.font_size;
-            pane.editor.line_height = values.font_size + 8;
+            pane.editor.line_height = values.font_size * values.line_height;
             pane.editor.tab_width = values.tab_width;
             pane.editor.show_line_numbers = values.line_numbers;
             pane.editor.theme = if (light) editor.Theme.light else .{};
@@ -165,6 +189,11 @@ pub const Shell = struct {
         self.icons = icons;
         self.editor_options.theme = if (light) editor.Theme.light else .{};
         @import("services/extensions.zig").applyTheme(self, values.theme);
+        if (self.window) |handle| if ((try cx.app.window(handle)).surface) |surface| {
+            const background = self.colors.document;
+            const dark = background.r * 0.2126 + background.g * 0.7152 + background.b * 0.0722 < 0.5;
+            surface.setAppearance(if (follows_system) null else dark);
+        };
         if (self.preview) |*preview| preview.view.colors = self.previewColors();
         for (self.tabs.items) |*tab| {
             const record = self.workspace.getConst(tab.document) catch unreachable;
@@ -182,13 +211,13 @@ pub const Shell = struct {
             defer snapshot.deinit();
             pane.editor.synchronize(snapshot);
         }
-        self.editor_options = .{ .font_size = values.font_size, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        self.editor_options = .{ .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
         try self.styleInputs(cx);
         cx.notify();
     }
     pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
         const appearance = @import("views/components.zig").inputAppearance(self.colors);
-        if (self.fields) |fields| inline for (.{ "query", "project_query", "replacement", "path", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
+        if (self.fields) |fields| inline for (.{ "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
     }
     pub fn panelWidth(self: *const Shell) f32 {
         return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;
@@ -196,7 +225,7 @@ pub const Shell = struct {
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
         const options = self.editor_options;
         state.font_size = options.font_size;
-        state.line_height = options.font_size + 8;
+        state.line_height = options.font_size * options.line_height;
         state.tab_width = options.tab_width;
         state.show_line_numbers = options.line_numbers;
         state.show_git_gutters = options.git_gutters;
@@ -213,11 +242,46 @@ pub const Shell = struct {
         try actions.newFile(self);
     }
     pub fn onCommand(self: *Shell, e: *ui.Event(ui.Click), cx: *ui.Context(Shell), which: Command) !void {
+        self.rememberPanel();
         self.menu_open = false;
+        if (which != .split_menu) self.split_menu_open = false;
         if (self.overlay == .palette) self.overlay = .none;
         actions.execute(self, cx, which, null) catch |err| try self.reportError(err);
+        self.rememberPanel();
         if (self.overlay == .none) self.editor_focus_request +%= 1;
         e.preventDefault();
+        cx.notify();
+    }
+    pub const Tool = enum { search, git_diff, extensions };
+    pub fn rememberPanel(self: *Shell) void {
+        switch (self.panel) {
+            .search => self.tool_tabs.search = true,
+            .git_diff => self.tool_tabs.git_diff = true,
+            .extensions => self.tool_tabs.extensions = true,
+            else => {},
+        }
+    }
+    pub fn onToolTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), tool: Tool) void {
+        self.rememberPanel();
+        self.panel = switch (tool) {
+            .search => .search,
+            .git_diff => .git_diff,
+            .extensions => .extensions,
+        };
+        self.overlay = .none;
+        cx.notify();
+    }
+    pub fn onCloseTool(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), tool: Tool) void {
+        switch (tool) {
+            .search => self.tool_tabs.search = false,
+            .git_diff => self.tool_tabs.git_diff = false,
+            .extensions => self.tool_tabs.extensions = false,
+        }
+        if ((tool == .search and self.panel == .search) or (tool == .git_diff and self.panel == .git_diff) or (tool == .extensions and self.panel == .extensions)) self.panel = .editor;
+        cx.notify();
+    }
+    pub fn onOpenKind(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), kind: @import("projects.zig").Kind) void {
+        self.open_kind = kind;
         cx.notify();
     }
     pub fn onRoot(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
@@ -226,6 +290,7 @@ pub const Shell = struct {
     pub fn onMenuInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data == .pointer_down and e.phase == .target) {
             self.menu_open = false;
+            self.split_menu_open = false;
             e.preventDefault();
             cx.notify();
         }
@@ -290,6 +355,7 @@ pub const Shell = struct {
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
             self.panel = .git_diff;
+            self.rememberPanel();
             @import("services/git.zig").start(self, cx, .{ .diff = .{ .path = path, .staged = status.entries[index].staged and !status.entries[index].unstaged } }) catch |err| try self.reportError(err);
         };
         cx.notify();
@@ -300,24 +366,31 @@ pub const Shell = struct {
         std.heap.page_allocator.free(self.git.selected_commit);
         self.git.selected_commit = oid;
         self.panel = .git_diff;
+        self.rememberPanel();
         @import("services/git.zig").start(self, cx, .{ .history = oid }) catch |err| try self.reportError(err);
         cx.notify();
     }
     pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
-        const height = if (self.git.diff) |diff| @import("views/git_diff.zig").contentHeight(diff, self.editor_options.font_size + 8) else 0;
+        const height = if (self.git.diff) |diff| @import("views/git_diff.zig").contentHeight(diff, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
         cx.notify();
     }
     pub fn onSearchResult(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), payload: @import("views/search.zig").Target) !void {
+        if (self.search.results == null or self.search.results.?.generation != payload.generation) return;
         @import("services/search.zig").activate(self, cx, payload.group, payload.match) catch |err| {
             try self.reportError(err);
             cx.notify();
         };
     }
     pub fn pollLanguage(self: *Shell, cx: *ui.Context(Shell)) !void {
+        if (self.window) |handle| _ = cx.app.window(handle) catch |err| switch (err) {
+            error.WindowNotFound => return,
+            else => return err,
+        };
         try @import("services/language.zig").poll(self, cx);
+        try @import("services/git.zig").pollBlame(self, cx);
         if (self.git.repository) {
             const current: ?workspace.DocumentId = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else null;
             if (!std.meta.eql(current, self.git.active_document)) try @import("services/git.zig").start(self, cx, .refresh);
@@ -358,11 +431,7 @@ pub const Shell = struct {
     }
     pub fn onSearchScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
-        var height: f32 = 0;
-        if (self.search.results) |results| for (results.groups) |group| {
-            height += 42;
-            for (group.excerpts) |excerpt| height += (@as(f32, @floatFromInt(std.mem.count(u8, excerpt.bytes, "\n") + 1))) * 22 + 16;
-        };
+        const height = if (self.search.results) |results| @import("views/search.zig").contentHeight(results, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.search.scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
         cx.notify();

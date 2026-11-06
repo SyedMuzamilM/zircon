@@ -12,7 +12,7 @@ test "inline blame geometry reserves space and ignores obsolete revisions" {
     defer snapshot.deinit();
     try state.setBlame(.{ .line = 1, .revision = snapshot.revision(), .author = "Author", .summary = "Summary", .oid = "01234567", .timestamp = 0 });
     const y = state.rowY(2, snapshot.revision());
-    try t.expectApproxEqAbs(@as(f32, 2 * 22 + 88), y, 0.01);
+    try t.expectApproxEqAbs(@as(f32, 2 * 22 + 208), y, 0.01);
     try t.expectEqual(@as(usize, 2), state.rowAt(y + 1, snapshot.revision()));
     try t.expectEqual(@as(usize, 1), state.rowAt(2 * 22 + 20, snapshot.revision()));
     state.last_viewport.height = 22;

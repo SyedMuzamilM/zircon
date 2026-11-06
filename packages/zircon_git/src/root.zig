@@ -18,6 +18,17 @@ pub const deinitHistory = history_module.deinitHistory;
 pub const Blame = history_module.Blame;
 pub const Baseline = enum { head, index };
 var temp_counter = std.atomic.Value(u64).init(1);
+/// Clone runs in the caller's worker. Restrict remote-helper syntax at this
+/// external boundary; arguments are never interpreted by a shell.
+pub fn cloneRepository(a: std.mem.Allocator, io: std.Io, source: []const u8, destination: []const u8) !void {
+    if (source.len == 0 or std.mem.indexOfAny(u8, source, "\x00\r\n") != null or !std.unicode.utf8ValidateSlice(source)) return error.InvalidRepositoryUrl;
+    if (!std.fs.path.isAbsolute(source) and !std.mem.startsWith(u8, source, "https://") and !std.mem.startsWith(u8, source, "ssh://") and !std.mem.startsWith(u8, source, "git@")) return error.UnsupportedRepositoryUrl;
+    if (!std.fs.path.isAbsolute(destination) or std.mem.indexOfScalar(u8, destination, 0) != null) return error.InvalidPath;
+    const parent = std.fs.path.dirname(destination) orelse return error.InvalidPath;
+    const result = try process.run(a, io, parent, &.{ "-c", "protocol.ext.allow=never", "clone", "--no-hardlinks", "--", source, destination });
+    defer process.release(a, result);
+    if (!process.success(result)) return error.GitCloneFailed;
+}
 pub const Repository = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -208,6 +219,10 @@ pub const Repository = struct {
         const output = try self.command(a, args.items);
         defer a.free(output);
         return history_module.parseBlame(a, output);
+    }
+    pub fn commitMessage(self: *Repository, a: std.mem.Allocator, oid: []const u8) ![]u8 {
+        if (!history_module.validOid(oid)) return error.InvalidGitHistory;
+        return self.command(a, &.{ "show", "-s", "--format=%B", oid, "--" });
     }
     /// Convert an absolute project path to a Git-relative path without allowing
     /// traversal. Callers passing symlinks must use the workspace canonical path.
