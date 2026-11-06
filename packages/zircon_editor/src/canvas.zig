@@ -28,13 +28,15 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
     for (changes) |*change| if (change.expanded) {
         change.removed = try b.allocator().dupe(u8, change.removed);
     };
-    const value: Canvas = .{ .snapshot = snapshot, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .selections = selections, .scroll = state.scroll.offset, .horizontal = state.horizontal, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search = try b.allocator().dupe(u8, state.search_query) };
+    const value: Canvas = .{ .snapshot = snapshot, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .selections = selections, .scroll = state.scroll.offset, .horizontal = state.horizontal, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search = try b.allocator().dupe(u8, state.search_query) };
     return b.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
 const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22 };
 const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32 };
 const Canvas = struct {
     snapshot: text.Snapshot,
+    block_cursor: bool,
+    cursor: usize,
     profile: ?@import("profile.zig").Profile,
     blame: ?annotations.Blame,
     git_changes: []const annotations.GitChange,
@@ -82,18 +84,20 @@ const Canvas = struct {
             }
         }
         if (cx.focused and self.selections.len > 0) {
-            try cx.requestFrameAfter(0.5 - @mod(cx.time, 0.5));
-            const selected = self.selections[0].range();
-            var begin = selected.start -| 2048;
-            var end = @min(self.snapshot.byteLen(), selected.end +| 2048);
-            if (self.marked) |marked| {
-                begin = @min(begin, marked.start);
-                end = @max(end, marked.end);
+            if (!self.block_cursor) {
+                try cx.requestFrameAfter(0.5 - @mod(cx.time, 0.5));
+                const selected = self.selections[0].range();
+                var begin = selected.start -| 2048;
+                var end = @min(self.snapshot.byteLen(), selected.end +| 2048);
+                if (self.marked) |marked| {
+                    begin = @min(begin, marked.start);
+                    end = @max(end, marked.end);
+                }
+                while (!self.snapshot.isBoundary(begin)) begin -= 1;
+                while (!self.snapshot.isBoundary(end)) end += 1;
+                const surrounding = try self.snapshot.copy(cx.allocator, .{ .start = begin, .end = end });
+                try cx.setTextInput(.{ .text = surrounding, .revision = self.snapshot.revision(), .selection = .{ .start = selected.start - begin, .end = selected.end - begin }, .marked = if (self.marked) |marked| .{ .start = marked.start - begin, .end = marked.end - begin } else null, .caret = caret, .base_byte = begin, .base_utf16 = try self.snapshot.utf16Offset(begin) });
             }
-            while (!self.snapshot.isBoundary(begin)) begin -= 1;
-            while (!self.snapshot.isBoundary(end)) end += 1;
-            const surrounding = try self.snapshot.copy(cx.allocator, .{ .start = begin, .end = end });
-            try cx.setTextInput(.{ .text = surrounding, .revision = self.snapshot.revision(), .selection = .{ .start = selected.start - begin, .end = selected.end - begin }, .marked = if (self.marked) |marked| .{ .start = marked.start - begin, .end = marked.end - begin } else null, .caret = caret, .base_byte = begin, .base_utf16 = try self.snapshot.utf16Offset(begin) });
         }
         return .{ .lines = lines, .caret = caret, .gutter = gutter };
     }
@@ -102,7 +106,7 @@ const Canvas = struct {
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
         const style: ui.TextStyle = .{ .size = self.font_size, .mono = true, .color = self.theme.foreground };
-        const primary_row = if (self.selections.len > 0) (try self.snapshot.pointAt(self.selections[0].head)).line else 0;
+        const primary_row = if (self.selections.len > 0) (try self.snapshot.pointAt(if (self.block_cursor) self.cursor else self.selections[0].head)).line else 0;
         for (prepared.lines) |line| {
             if (line.row == primary_row) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
             for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end) {
@@ -119,12 +123,12 @@ const Canvas = struct {
             if (!line.oversized) {
                 for (self.selections) |item| {
                     const range = item.range();
-                    if (range.start == range.end or range.end < line.range.start or range.start > line.range.end) continue;
+                    if (range.start == range.end or range.end <= line.range.start or range.start > line.range.end) continue;
                     const start = @max(range.start, line.range.start) - line.range.start;
                     const end = @min(range.end, line.range.end) - line.range.start;
                     const left = line.display.caret(metrics.*, style, start);
-                    const right = line.display.caret(metrics.*, style, end);
-                    try cx.painter.fillRect(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y + 1, .width = @max(if (range.end > line.range.end) self.font_size * 0.6 else 0, @abs(right - left)), .height = self.line_height - 2 }, .color = if (cx.focused) self.theme.selection else self.theme.inactive_selection });
+                    const right = if (range.end > line.range.end) @max(left, bounds.x + bounds.width - x) else line.display.caret(metrics.*, style, end);
+                    try cx.painter.fillRect(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y, .width = @abs(right - left), .height = self.line_height }, .color = if (cx.focused) self.theme.selection else self.theme.inactive_selection });
                 }
                 if (self.search.len > 0 and std.mem.indexOfScalar(u8, self.search, '\n') == null) {
                     var at: usize = 0;
@@ -148,9 +152,20 @@ const Canvas = struct {
                 const right = line.display.caret(metrics.*, style, @min(marked.end, line.range.end) - line.range.start);
                 try cx.painter.fillRect(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y + self.line_height - 3, .width = @max(1, @abs(right - left)), .height = 1 }, .color = self.theme.caret });
             };
-            if (cx.focused and @mod(cx.time, 1.0) < 0.5 and !line.oversized) for (self.selections) |item| if ((try self.snapshot.pointAt(item.head)).line == line.row) {
-                const caret_x = x + line.display.caret(metrics.*, style, @min(item.head - line.range.start, line.original.len));
-                try cx.painter.fillRect(.{ .bounds = .{ .x = caret_x, .y = line.y + 3, .width = 1.5, .height = self.line_height - 4 }, .color = self.theme.caret });
+            if (cx.focused and (self.block_cursor or @mod(cx.time, 1.0) < 0.5) and !line.oversized) for (self.selections, 0..) |item, index| {
+                if (self.block_cursor and index > 0) continue;
+                const head = if (self.block_cursor) self.cursor else item.head;
+                if ((try self.snapshot.pointAt(head)).line != line.row) continue;
+                const offset = @min(head - line.range.start, line.original.len);
+                const left = line.display.caret(metrics.*, style, offset);
+                const next = @min(line.original.len, (try self.snapshot.nextBoundary(head)) - line.range.start);
+                const width = if (self.block_cursor) (if (offset < line.original.len and line.original[offset] == '\t') self.font_size * 0.6 else @max(self.font_size * 0.6, line.display.caret(metrics.*, style, next) - left)) else @as(f32, 1.5);
+                try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y + (if (self.block_cursor) @as(f32, 0) else 3), .width = width, .height = if (self.block_cursor) self.line_height else self.line_height - 4 }, .color = self.theme.caret });
+                if (self.block_cursor and next > offset) {
+                    var inverted = self.theme;
+                    inverted.tokens[@backingInt(syntax.Kind.plain)] = self.theme.background;
+                    try drawRun(cx, line, inverted, metrics.*, style, x, offset, next, .plain);
+                }
             };
             cx.painter.popClip();
             try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (line.row == primary_row) self.theme.active_line else self.theme.background });

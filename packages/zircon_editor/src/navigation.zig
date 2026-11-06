@@ -68,7 +68,7 @@ pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
 fn wordCharacter(byte: u8) bool {
     return std.ascii.isAlphanumeric(byte) or byte == '_' or byte >= 0x80;
 }
-fn wordBoundary(snapshot: text.Snapshot, from: usize, forward: bool) !usize {
+pub fn wordBoundary(snapshot: text.Snapshot, from: usize, forward: bool) !usize {
     var at = from;
     if (forward) {
         while (at < snapshot.byteLen() and wordCharacter(try snapshot.byteAt(at))) at = try snapshot.nextBoundary(at);
@@ -104,7 +104,7 @@ pub fn wordRange(snapshot: text.Snapshot, at: usize) !text.Range {
 /// Reveals the primary caret horizontally after navigation/editing. Metric
 /// allocation failure leaves the previous scroll value and document untouched.
 pub fn revealHorizontal(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input)) !void {
-    const point = try snapshot.pointAt(self.primary().head);
+    const point = try snapshot.pointAt(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head);
     const range = try snapshot.lineRange(point.line);
     if (range.end - range.start > 64 * 1024) return;
     var arena = std.heap.ArenaAllocator.init(self.allocator);

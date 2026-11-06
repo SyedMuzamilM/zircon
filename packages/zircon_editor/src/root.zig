@@ -18,3 +18,5 @@ pub const Profile = @import("profile.zig").Profile;
 
 pub const annotations = @import("annotations.zig");
 pub const blame_view = @import("blame_view.zig");
+
+pub const vim = @import("vim.zig");

@@ -5,6 +5,8 @@ pub const Command = union(enum) {
     insert: []const u8,
     delete_backward,
     delete_forward,
+    delete_to: Move,
+    delete_line,
     move: Move,
     select_all,
     undo,

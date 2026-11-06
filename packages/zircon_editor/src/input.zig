@@ -10,6 +10,7 @@ const navigation = @import("navigation.zig");
 pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !Outcome {
     try self.validate();
     self.last_viewport = .{ .width = e.bounds.width, .height = e.bounds.height };
+    if (try @import("vim.zig").handle(self, document, e)) |result| return result;
     var snapshot = document.snapshot();
     defer snapshot.deinit();
     switch (e.data) {
@@ -68,7 +69,26 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             return .{ .handled = true };
         },
         .key_down => |key| {
-            const command = key.modifiers.command or key.modifiers.control;
+            if (key.modifiers.control and !key.modifiers.command) {
+                const result = try self.execute(document, switch (key.key) {
+                    .a => .{ .move = .{ .direction = .home, .extend = key.modifiers.shift } },
+                    .e => .{ .move = .{ .direction = .end, .extend = key.modifiers.shift } },
+                    .b => .{ .move = .{ .direction = .left, .extend = key.modifiers.shift } },
+                    .f => .{ .move = .{ .direction = .right, .extend = key.modifiers.shift } },
+                    .p => .{ .move = .{ .direction = .up, .extend = key.modifiers.shift } },
+                    .n => .{ .move = .{ .direction = .down, .extend = key.modifiers.shift } },
+                    .h => .delete_backward,
+                    .d => .delete_forward,
+                    .w => .{ .delete_to = .{ .direction = .left, .word = true } },
+                    .u => .{ .delete_to = .{ .direction = .home } },
+                    .k => .{ .delete_to = .{ .direction = .end } },
+                    .j, .m => .newline,
+                    else => return .{},
+                });
+                if (result.handled) e.preventDefault();
+                return result;
+            }
+            const command = key.modifiers.command;
             // Candidate navigation and acceptance belong to the input method
             // while marked text exists. Escape explicitly cancels our group.
             if (self.marked != null and !command and key.key != .escape) return .{};
@@ -79,6 +99,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             }
             var result: Outcome = .{};
             if (command) switch (key.key) {
+                .backspace, .delete => result = try self.execute(document, .{ .delete_to = .{ .direction = if (key.key == .backspace) .home else .end } }),
                 .a => result = try self.execute(document, .select_all),
                 .z => result = try self.execute(document, if (key.modifiers.shift) .redo else .undo),
                 .y => result = try self.execute(document, .redo),
@@ -139,8 +160,8 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
                     .page_down => .page_down,
                     else => unreachable,
                 }, .extend = key.modifiers.shift, .word = key.modifiers.alt } }),
-                .backspace => result = try self.execute(document, .delete_backward),
-                .delete => result = try self.execute(document, .delete_forward),
+                .backspace => result = try self.execute(document, if (key.modifiers.alt) .{ .delete_to = .{ .direction = .left, .word = true } } else .delete_backward),
+                .delete => result = try self.execute(document, if (key.modifiers.alt) .{ .delete_to = .{ .direction = .right, .word = true } } else .delete_forward),
                 .enter => result = try self.execute(document, .newline),
                 .tab => result = try self.execute(document, if (key.modifiers.shift) .outdent else .indent),
                 .escape => {
@@ -179,6 +200,12 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             } else if (pointer.modifiers.shift) {
                 self.selections.items.items[0].head = at;
             } else self.selections.single(.{ .anchor = at, .head = at });
+            if (self.vim.enabled and self.vim.mode != .insert) {
+                self.vim.mode = .normal;
+                self.vim.cursor = self.primary().head;
+                self.vim.anchor = self.primary().anchor;
+                self.vim.reset();
+            }
             self.dragging = true;
             self.preferred_x = null;
             self.typing_group = 0;
@@ -190,6 +217,11 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
         .pointer_move => |pointer| {
             if (!self.dragging) return .{};
             self.selections.items.items[0].head = try navigation.position(self, snapshot, e, pointer.position);
+            if (self.vim.enabled and self.vim.mode != .insert) {
+                self.vim.cursor = self.primary().head;
+                self.vim.anchor = self.primary().anchor;
+                self.vim.mode = .visual;
+            }
             e.preventDefault();
             return .{ .handled = true };
         },
@@ -206,6 +238,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             return .{ .handled = true };
         },
         .focus => |focused| {
+            if (!focused) self.vim.reset();
             if (!focused) self.dragging = false;
             return .{ .handled = true };
         },

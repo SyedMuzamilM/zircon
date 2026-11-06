@@ -409,3 +409,268 @@ test "expanded removed rows map to current source across start middle and EOF hu
     try t.expectEqual(@as(usize, 3), columns.start);
     try t.expectEqual(@as(usize, 5), columns.end);
 }
+
+test "macOS command and option delete respect line and word boundaries" {
+    var document = try text.Document.init(t.allocator, "first\nalpha beta gamma\nlast");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.selections.single(.{ .anchor = 16, .head = 16 });
+    var event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .backspace, .modifiers = .{ .command = true } } } };
+    var outcome = try state.handle(&document, &event);
+    release(&outcome);
+    try expectText(&document, "first\n gamma\nlast");
+    outcome = try state.execute(&document, .undo);
+    release(&outcome);
+    state.selections.single(.{ .anchor = 16, .head = 16 });
+    event = .{ .data = .{ .key_down = .{ .key = .backspace, .modifiers = .{ .alt = true } } } };
+    outcome = try state.handle(&document, &event);
+    release(&outcome);
+    try expectText(&document, "first\nalpha  gamma\nlast");
+}
+
+fn vimKeys(state: *editor.Editor, document: *text.Document, bytes: []const u8) !void {
+    for (bytes) |byte| {
+        var event: ui.Event(ui.Input) = .{ .data = .{ .text = &.{byte} } };
+        var result = try state.handle(document, &event);
+        defer release(&result);
+        try t.expect(event.prevented);
+    }
+}
+fn vimEscape(state: *editor.Editor, document: *text.Document) !void {
+    var event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .escape } } };
+    var result = try state.handle(document, &event);
+    defer release(&result);
+}
+test "Vim counts operators register paste and history use document transactions" {
+    var document = try text.Document.init(t.allocator, "one two three\nfour five\nsix seven\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    try vimKeys(&state, &document, "2w");
+    try t.expectEqual(@as(usize, 8), state.primary().head);
+    try vimKeys(&state, &document, "0dw");
+    try expectText(&document, "two three\nfour five\nsix seven\n");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "one two three\nfour five\nsix seven\n");
+    try vimKeys(&state, &document, "gg2dd");
+    try expectText(&document, "six seven\n");
+    try vimKeys(&state, &document, "P");
+    try expectText(&document, "one two three\nfour five\nsix seven\n");
+    try vimKeys(&state, &document, "ggciw");
+    try t.expectEqual(.insert, state.vim.mode);
+    try vimKeys(&state, &document, "new");
+    try vimEscape(&state, &document);
+    try expectText(&document, "new two three\nfour five\nsix seven\n");
+    try t.expectEqual(.normal, state.vim.mode);
+    try vimKeys(&state, &document, "Q");
+    try expectText(&document, "new two three\nfour five\nsix seven\n");
+}
+test "Vim visual reversal linewise and block operations select inclusive characters" {
+    var document = try text.Document.init(t.allocator, "abcd\nefgh\nijkl\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    try vimKeys(&state, &document, "lvllhhh");
+    try t.expectEqual(.visual, state.vim.mode);
+    try t.expectEqual(@as(usize, 0), state.primary().range().start);
+    try t.expectEqual(@as(usize, 2), state.primary().range().end);
+    try vimEscape(&state, &document);
+    try vimKeys(&state, &document, "ggVjy");
+    try t.expectEqualStrings("abcd\nefgh\n", state.vim.register);
+    var event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .v, .modifiers = .{ .control = true } } } };
+    var result = try state.handle(&document, &event);
+    release(&result);
+    try vimKeys(&state, &document, "jl");
+    try t.expectEqual(@as(usize, 2), state.selections.items.items.len);
+    try vimKeys(&state, &document, "d");
+    try expectText(&document, "cd\ngh\nijkl\n");
+}
+test "Vim native stale edits cannot insert in Normal and Insert preserves composition" {
+    var document = try text.Document.init(t.allocator, "abc");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    var event: ui.Event(ui.Input) = .{ .data = .{ .edit = .{ .revision = 999, .range = .{ .start = 90, .end = 90 }, .text = "l", .selection = .{ .start = 1, .end = 1 } } } };
+    var result = try state.handle(&document, &event);
+    release(&result);
+    try expectText(&document, "abc");
+    try t.expectEqual(@as(usize, 1), state.primary().head);
+    try vimKeys(&state, &document, "i");
+    event = .{ .data = .{ .edit = .{ .revision = document.revision(), .range = .{ .start = 1, .end = 1 }, .text = "日", .selection = .{ .start = 3, .end = 3 }, .composing = true } } };
+    result = try state.handle(&document, &event);
+    release(&result);
+    try expectText(&document, "a日bc");
+    try vimEscape(&state, &document);
+    try t.expectEqual(.normal, state.vim.mode);
+}
+
+test "multiline selections fill continuous rows and Normal mode suppresses native insertion" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "abc\n\nxyz");
+    var state = try editor.Editor.init(t.allocator);
+    state.selections.single(.{ .anchor = 1, .head = 6 });
+    const color = state.theme.selection;
+    const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+        state.deinit();
+        document.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var bands: [3]ui.Rect = undefined;
+    var count: usize = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (std.meta.eql(item.color, color)) {
+        if (count < bands.len) bands[count] = item.rect;
+        count += 1;
+    };
+    try t.expectEqual(@as(usize, 3), count);
+    try t.expectApproxEqAbs(bands[0].y + bands[0].height, bands[1].y, 0.01);
+    try t.expectApproxEqAbs(bands[1].y + bands[1].height, bands[2].y, 0.01);
+    try t.expect(bands[1].width > 500);
+    const Mode = struct {
+        fn set(self: *View, cx: *ui.Context(View), enabled: bool) void {
+            self.state.setVim(enabled);
+            cx.notify();
+        }
+    };
+    const owner = try app.windowEntity(View, h);
+    try app.update(owner, Mode.set, .{true});
+    _ = try app.step(0);
+    try t.expect((try app.window(h)).frames.committed.text_input == null);
+    try app.dispatch(h, .{ .text = "i" });
+    _ = try app.step(0);
+    try t.expect((try app.window(h)).frames.committed.text_input != null);
+}
+test "Vim change and open line undo together with typed text and final-line deletion stays linewise" {
+    var document = try text.Document.init(t.allocator, "one two\nlast");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    try vimKeys(&state, &document, "cwnew");
+    try vimEscape(&state, &document);
+    try expectText(&document, "new two\nlast");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "one two\nlast");
+    try vimKeys(&state, &document, "Gdd");
+    try expectText(&document, "one two");
+    try t.expectEqualStrings("last\n", state.vim.register);
+    try vimKeys(&state, &document, "u");
+    try vimKeys(&state, &document, "ggccchanged");
+    try vimEscape(&state, &document);
+    try expectText(&document, "changed\nlast");
+    try vimKeys(&state, &document, "uohello");
+    try vimEscape(&state, &document);
+    try expectText(&document, "one two\nhello\nlast");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "one two\nlast");
+}
+
+test "Vim dot repeats word operations and inserted text in one undo transaction" {
+    var document = try text.Document.init(t.allocator, "one two three\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    try vimKeys(&state, &document, "cwnew");
+    try vimEscape(&state, &document);
+    try vimKeys(&state, &document, "w.");
+    try expectText(&document, "new new three\n");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "new two three\n");
+    try vimKeys(&state, &document, "ggdw.");
+    try expectText(&document, "three\n");
+    try vimKeys(&state, &document, "i");
+    var event: ui.Event(ui.Input) = .{ .data = .{ .text = "日" } };
+    var result = try state.handle(&document, &event);
+    release(&result);
+    try vimEscape(&state, &document);
+    try vimKeys(&state, &document, "l.");
+    try expectText(&document, "日日three\n");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "日three\n");
+}
+
+test "Vim block registers paste by row and block insertion edits every selected line" {
+    var document = try text.Document.init(t.allocator, "abcd\nefgh\nijkl\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    var event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .v, .modifiers = .{ .control = true } } } };
+    var result = try state.handle(&document, &event);
+    release(&result);
+    try vimKeys(&state, &document, "jly");
+    try t.expectEqualStrings("ab\nef", state.vim.register);
+    try vimKeys(&state, &document, "$p");
+    try expectText(&document, "abcdab\nefghef\nijkl\n");
+    try vimKeys(&state, &document, "ugg");
+    event = .{ .data = .{ .key_down = .{ .key = .v, .modifiers = .{ .control = true } } } };
+    result = try state.handle(&document, &event);
+    release(&result);
+    try vimKeys(&state, &document, "jI>");
+    try vimEscape(&state, &document);
+    try expectText(&document, ">abcd\n>efgh\nijkl\n");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "abcd\nefgh\nijkl\n");
+}
+test "Vim search repeats literals and word motion follows shaped tab columns" {
+    var document = try text.Document.init(t.allocator, "one two one\n\tabc\n1234567\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    try vimKeys(&state, &document, "*");
+    try t.expectEqual(@as(usize, 8), state.primary().head);
+    try vimKeys(&state, &document, "n");
+    try t.expectEqual(@as(usize, 0), state.primary().head);
+    try vimKeys(&state, &document, "jlj");
+    var s = document.snapshot();
+    defer s.deinit();
+    try t.expectEqual(@as(usize, 4), (try s.pointAt(state.primary().head)).byte_column);
+}
+
+test "modal input remains valid across empty Unicode CRLF and mixed command sequences" {
+    for ([_][]const u8{ "", "a", "\n\n", "a\r\nb\r\n", "日🙂\n\ttext\nlast" }) |source| {
+        var document = try text.Document.init(t.allocator, source);
+        defer document.deinit();
+        var state = try editor.Editor.init(t.allocator);
+        defer state.deinit();
+        state.setVim(true);
+        var random = std.Random.DefaultPrng.init(0x76123);
+        const keys = "hjklweb0^$%{}HMLggGvVdcyxXpPuJraioOAIfFtT><123*#nN. ";
+        for (0..350) |i| {
+            if (i % 13 == 0) try vimEscape(&state, &document) else {
+                const key = keys[random.random().uintLessThan(usize, keys.len)];
+                try vimKeys(&state, &document, &.{key});
+            }
+            var s = document.snapshot();
+            defer s.deinit();
+            try t.expect(state.selections.items.items.len > 0);
+            for (state.selections.items.items) |item| try s.validateRange(item.range());
+            try t.expect(s.isBoundary(@min(state.vim.cursor, s.byteLen())));
+        }
+    }
+}
+
+test "macOS line deletion consumes CRLF at boundaries and merges multicursor ranges" {
+    var document = try text.Document.init(t.allocator, "one\r\ntwo\r\nlast");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.selections.single(.{ .anchor = 5, .head = 5 });
+    var result = try state.execute(&document, .{ .delete_to = .{ .direction = .home } });
+    release(&result);
+    try expectText(&document, "onetwo\r\nlast");
+    result = try state.execute(&document, .undo);
+    release(&result);
+    state.selections.single(.{ .anchor = 6, .head = 6 });
+    try state.selections.items.append(t.allocator, .{ .anchor = 8, .head = 8 });
+    result = try state.execute(&document, .{ .delete_to = .{ .direction = .home } });
+    release(&result);
+    try expectText(&document, "one\r\n\r\nlast");
+}

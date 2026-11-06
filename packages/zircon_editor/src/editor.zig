@@ -6,11 +6,12 @@ const ui = @import("zircon_ui");
 const selection = @import("selections.zig");
 const commands = @import("commands.zig");
 const syntax = @import("syntax.zig");
-pub const Outcome = struct { handled: bool = false, change: ?text.Change = null, reset: bool = false };
+pub const Outcome = struct { request_find: bool = false, handled: bool = false, change: ?text.Change = null, reset: bool = false };
 const SelectionHistory = struct { state: u64, items: []selection.Selection };
 var next_group = std.atomic.Value(u64).init(1);
 pub const Editor = struct {
     allocator: std.mem.Allocator,
+    vim: @import("vim.zig").State = .{},
     selections: selection.Set,
     scroll: ui.controls.Scroll = .{},
     horizontal: f32 = 0,
@@ -45,6 +46,7 @@ pub const Editor = struct {
         return .{ .allocator = a, .selections = try selection.Set.init(a), .syntax_cache = .init(a) };
     }
     pub fn deinit(self: *Editor) void {
+        self.vim.deinit(self.allocator);
         self.allocator.free(self.git_changes);
         self.allocator.free(self.git_baseline);
         if (self.inline_blame) |*blame| blame.deinit(self.allocator);
@@ -55,6 +57,9 @@ pub const Editor = struct {
         self.allocator.free(self.search_query);
         self.* = undefined;
     }
+    pub fn setVim(self: *Editor, enabled: bool) void {
+        @import("vim.zig").enable(self, enabled);
+    }
     pub fn render(self: *const Editor, document: *const text.Document, builder: *ui.Ui) !ui.Element {
         try self.validate();
         return @import("canvas.zig").render(self, document, builder);
@@ -64,6 +69,7 @@ pub const Editor = struct {
     }
     pub fn synchronize(self: *Editor, snapshot: text.Snapshot) void {
         self.selections.synchronize(snapshot);
+        @import("vim.zig").synchronize(self, snapshot);
         self.syntax_cache.profile = self.language_profile;
         if (self.language == .plain) self.syntax_cache.clear() else if (self.syntax_cache.revision != snapshot.revision() or self.syntax_cache.language != self.language) {
             self.syntax_cache.clear();
@@ -75,6 +81,9 @@ pub const Editor = struct {
         };
     }
     pub fn mapChange(self: *Editor, change: *const text.Change) void {
+        self.vim.recording.active = false;
+        self.vim.cursor = change.map(self.vim.cursor, .after);
+        self.vim.anchor = change.map(self.vim.anchor, .after);
         for (self.selections.items.items) |*item| {
             item.anchor = change.map(item.anchor, .after);
             item.head = change.map(item.head, .after);
@@ -139,6 +148,7 @@ pub const Editor = struct {
         errdefer self.allocator.free(after_selections);
         try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
         var change = try document.apply(document.revision(), edits, group);
+        @import("vim_repeat.zig").changed(self, &change, edits);
         for (edits, 0..) |edit, i| {
             const end = change.map(edit.range.end, .after);
             after_selections[i] = .{ .anchor = end, .head = end };
@@ -187,6 +197,44 @@ pub const Editor = struct {
             .move => |request| {
                 try @import("navigation.zig").move(self, snapshot, request);
                 self.typing_group = 0;
+            },
+            .delete_to => |request| {
+                self.selections.normalize();
+                var arena = std.heap.ArenaAllocator.init(self.allocator);
+                defer arena.deinit();
+                const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
+                var count: usize = 0;
+                for (self.selections.items.items) |item| {
+                    var range = item.range();
+                    if (item.empty()) {
+                        const row = (try snapshot.pointAt(item.head)).line;
+                        const at = switch (request.direction) {
+                            .home => (try snapshot.lineRange(row)).start,
+                            .end => (try snapshot.lineRange(row)).end,
+                            .left => try @import("navigation.zig").wordBoundary(snapshot, item.head, false),
+                            .right => try @import("navigation.zig").wordBoundary(snapshot, item.head, true),
+                            else => item.head,
+                        };
+                        range = .{ .start = @min(at, item.head), .end = @max(at, item.head) };
+                        if (at == item.head and request.direction == .home and row > 0) range.start = (try snapshot.lineRange(row - 1)).end;
+                        if (at == item.head and request.direction == .end and row + 1 < snapshot.lineCount()) range.end = try snapshot.lineStart(row + 1);
+                    }
+                    if (count > 0 and edits[count - 1].range.end >= range.start) {
+                        edits[count - 1].range.end = @max(edits[count - 1].range.end, range.end);
+                    } else {
+                        edits[count] = .{ .range = range, .text = "" };
+                        count += 1;
+                    }
+                }
+                self.typing_group = 0;
+                return self.applyEdits(document, edits[0..count], 0);
+            },
+            .delete_line => {
+                const row = (try snapshot.pointAt(self.primary().head)).line;
+                var range = try snapshot.lineRangeIncludingEnding(row);
+                if (range.end == snapshot.byteLen() and row > 0 and (range.start == range.end or (try snapshot.byteAt(range.end - 1)) != '\n')) range.start = (try snapshot.lineRange(row - 1)).end;
+                self.typing_group = 0;
+                return self.applyEdits(document, &.{.{ .range = range, .text = "" }}, 0);
             },
             .delete_backward, .delete_forward => {
                 self.selections.normalize();
@@ -289,7 +337,7 @@ pub const Editor = struct {
         return self.applyEdits(document, edits, 0);
     }
     pub fn reveal(self: *Editor, snapshot: text.Snapshot) void {
-        const row = (snapshot.pointAt(self.primary().head) catch return).line;
+        const row = (snapshot.pointAt(if (self.vim.enabled and self.vim.visual()) self.vim.cursor else self.primary().head) catch return).line;
         const start = self.rowY(row, snapshot.revision());
         self.scroll.reveal(start, start + self.line_height, self.contentHeight(snapshot), self.last_viewport.height);
     }
@@ -308,13 +356,18 @@ pub const Editor = struct {
         errdefer self.allocator.free(owned);
         var snapshot = document.snapshot();
         defer snapshot.deinit();
-        const start = if (backward) self.primary().range().start else self.primary().range().end;
+        const modal = self.vim.enabled and self.vim.mode != .insert;
+        const start = if (modal and self.primary().empty()) (if (backward) try snapshot.previousBoundary(self.primary().head) else try snapshot.nextBoundary(self.primary().head)) else if (backward) self.primary().range().start else self.primary().range().end;
         const direction: text.Direction = if (backward) .backward else .forward;
         const found = (try snapshot.find(query, start, direction, self.search_case_sensitive)) orelse (try snapshot.find(query, if (backward) snapshot.byteLen() else 0, direction, self.search_case_sensitive));
         self.allocator.free(self.search_query);
         self.search_query = owned;
         if (found) |range| {
-            self.selections.single(.{ .anchor = range.start, .head = range.end });
+            self.selections.single(.{ .anchor = range.start, .head = if (modal) range.start else range.end });
+            if (modal) {
+                self.vim.cursor = range.start;
+                self.vim.mode = .normal;
+            }
             self.typing_group = 0;
             self.reveal(snapshot);
             return true;
