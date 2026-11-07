@@ -30,6 +30,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **EXT-06: Branch/stash and project/recent-project menus.**
   Scope: menus from branch/project controls, branch creation, stash access, recent projects. Done: operate on real current project/repository identities; unavailable operations explain why; recent selection opens the right path. Preserve existing dirty-buffer guards.
+  Progress: `5700514` fixes stable segmented branch/stash tabs, search focus and native resize feedback. Joined Stage All/Publish controls and rounded real Git counts are verified in [Git UI evidence](reviews/editor-program-2026-11-07/git-ui-evidence/README.md). Remaining acceptance stays open.
 
 - [ ] **EXT-07: Agentic layout switching.**
   Scope: requested editor/agent workspace placement. Done: switch layouts without losing conversation, terminal sessions, document focus, tabs or drafts; persisted preferences match behavior.
@@ -71,6 +72,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **TEXT-05: Durable recovery and session restoration.**
   Depends: BASE-01; EXT-05 accepted pane model for layout integration. Scope: workspace recovery storage and session metadata. Done: forced termination restores dirty/untitled bytes, saved-file identities, useful selections/layout and recent project context; writes are atomic/versioned; corrupt records are recoverable; explicit discard removes the right backup. Account for recovery checkpoint interval and avoid treating backup as a disk save.
+  Progress: `8ea2d7e` delivers atomic immutable checkpoints, tombstones, corruption retention, session locks and restore preserving the original DiskStamp. [21 package checks pass](reviews/editor-program-2026-11-07/recovery-storage-evidence/README.md); app integration and real SIGKILL/restart proof are pending.
 
 - [ ] **TEXT-06: Watch external file changes and resolve conflicts.**
   Depends: TEXT-07; BASE-04 for UI integration. Scope: filesystem event service, workspace/index and conflict UI. Done: external edit/atomic rename/delete/create updates clean files and tree; dirty text is preserved with compare/reload/overwrite/save-as; dropped-event rescan and own-save filtering work; bursts coalesce; LSP/search/preview/recovery receive resulting changes. Integrate async reads through TEXT-04 when available.
@@ -143,7 +145,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
   Depends: TEXT-06/07, SEARCH-01; EXT-06 menu integration. Scope: new folder, rename/move/delete, copy path, Finder reveal, Git/diagnostic decorations. Done: operate on current identities, preserve open dirty files, update LSP URI/recovery/index, expose keyboard/context actions and deliberate destructive confirmation. Use LANG-06 resource-edit policy where shared.
 
 - [ ] **UX-02: Location history, MRU/tab overflow and fuzzy discovery.**
-  Depends: EXT-05/06/08. Scope: navigation state, palette/file finder and tab groups. Done: real location back/forward restores caret/scroll; MRU and overflow find hidden tabs; duplicate names show paths; fuzzy ranking/match highlights/recency are consistent; command availability and effective shortcuts reflect focused context. Provide history interface early for LANG-04.
+  Depends: EXT-05/06/08. Scope: navigation state, palette/file finder and tab groups. Done: real location back/forward restores caret/scroll; MRU and overflow find hidden tabs; duplicate names show paths; fuzzy ranking/match highlights/recency are consistent; command availability and effective shortcuts reflect focused context. Provide history interface early for LANG-04. Add the shared below-tab file breadcrumb/action toolbar from the November 7 reference, with active-pane path and real current-symbol data when available.
 
 - [ ] **UX-03: Live settings and contextual keybindings.**
   Depends: EXT-02/03/05. Scope: settings reload/diagnostics, chords/contexts and keymap UI. Done: valid JSON applies live; invalid fields retain last valid effective values with locations; overrides/unbinding/chords/context precedence are visible; text fields, Vim and terminal keys route to the focused target. Preserve installed choices and configured light/dark theme pairs.
@@ -160,6 +162,9 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 - [ ] **UX-07: Text and control rendering across themes/scales.**
   Depends: EXT-01/02/08, TEXT-03; BASE-03 for performance checks. Scope: contrast, fallback glyphs, ligatures, emoji, scale/resize and geometry. Done: check ordinary-density/Retina displays, supported scales, CJK/combining text, long labels and light/dark; hit/caret/selection geometry agree; color emoji is implemented or its limitation remains explicit. Recheck font-family changes against wrapping/cache generations.
 
+- [ ] **UX-08: Animated actionable extension recommendations.**
+  Depends: EXT-02/03, BASE-04. Scope: bottom notification stack and persisted suppression. Done: opening a supported file without language support can recommend an available extension; Install, Don't Show Again, dismiss and Learn More act on the correct recommendation; installation progress/errors remain visible; entry/exit respects reduced motion. No automatic installation or external link opening. Reference and ordered work are in [the November 7 interaction slices](reviews/editor-program-2026-11-07/git-diff-next.md).
+
 - [ ] **DEV-01: Build/test tasks on the accepted terminal interface.**
   Depends: EXT-04, BASE-04, UX-02. Scope: task config, variables/cwd/env, rerun, output navigation. Done: build/test executes in the selected project, interrupt/exit status work, task output opens file/line, task history survives relevant layout switches and failures remain inspectable. Reuse terminal sessions rather than creating another process UI.
 
@@ -175,7 +180,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
   Depends: GIT-01/02, UX-02; EXT-06 menu integration. Scope: per-file log, pagination, commit/parent comparisons and permalinks. Done: no 100-commit dead end; correct file/commit patch opens and returns to source; remote link only appears when resolvable; rename-history policy is explicit.
 
 - [ ] **GIT-08: Side-by-side diff with source navigation.**
-  Depends: GIT-04, EXT-05, PERF-01. Scope: comparison projection and layout. Done: unified/split modes agree on source lines/hunks, insert/delete/long lines and narrow panes map correctly, staging actions keep identity, large patches remain usable. Direct editing of combined excerpts is WORK-02.
+  Depends: GIT-04, EXT-05, PERF-01. Scope: comparison projection and layout. Done: unified/split modes agree on source lines/hunks, insert/delete/long lines and narrow panes map correctly, staging actions keep identity, large patches remain usable. Direct editing of combined excerpts is WORK-02. Include per-file and global collapse/expand, rounded file headers with current-file Open File actions, and the below-tab hunk/staging/commit toolbar from the November 7 user screenshots.
 
 - [ ] **GIT-09: Remaining safe repository management.**
   Depends: GIT-02..04, GIT-06; EXT-06. Scope: restore/discard preview, branch delete, stash drop, local tags and operation recovery. Done: destructive actions explain saved/unsaved impact and confirm target identity; conflicts retain recoverable state; remote/tag publication is explicit; unsupported Git operations remain discoverable through terminal guidance.
