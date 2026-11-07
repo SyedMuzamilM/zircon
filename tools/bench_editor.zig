@@ -50,6 +50,7 @@ const Ops = struct {
         if (self.git.busy or self.language.syntax_waiting) return false;
         for (self.language.syntax_documents.items) |doc| if (doc.pending) return false;
         if (services) {
+            if (!self.git.repository or self.git.needs_refresh) return false;
             if (self.language.documents.items.len == 0) return false;
             for (self.language.sessions.items) |session| if (session.client == null or !session.client.?.ready()) return false;
             for (self.language.documents.items) |doc| {
@@ -58,6 +59,7 @@ const Ops = struct {
             }
             for (self.tabs.items) |tab| {
                 const record = self.workspace.getConst(tab.document) catch return false;
+                if (tab.editor.git_revision != record.doc.revision()) return false;
                 if (tab.editor.grammar_revision == null or tab.editor.grammar_revision.? != record.doc.revision()) return false;
             }
         }
