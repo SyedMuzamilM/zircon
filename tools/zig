@@ -16,6 +16,7 @@ case "${1-}" in
         if [ "$(uname -s)" = Darwin ]; then
             for zircon_arg do
                 case "$zircon_arg" in
+                    --) break ;;
                     --zig-lib|--zig-lib=*|--zig-lib-dir|--zig-lib-dir=*)
                         printf '%s\n' 'tools/zig owns the private standard library; conflicting library overrides are not allowed.' >&2
                         exit 1

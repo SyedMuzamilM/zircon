@@ -38,6 +38,7 @@ Run the deterministic regression:
 
 ```sh
 ./tools/zig run tools/verify_spawn_isolation.zig -lc
+python3 -B tools/test_zig_stdlib_overlay.py
 ```
 
 It deliberately opens two unrelated pipe handles without close-on-exec, modeling
