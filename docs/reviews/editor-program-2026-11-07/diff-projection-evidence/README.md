@@ -7,3 +7,5 @@ OpenCode's three findings were fixed before this slice was recorded. Transport-l
 The new projection model test uses a real temporary Git repository and verifies two file groups, counts, split/unified rows, collapse height and offsets. No editable excerpt mapping, hunk staging, commit toolbar action, or persistent parser worker is claimed yet.
 
 OpenCode follow-up status ownership fix is source-backed; the retained tests cover stale and recovery error ownership, while a dedicated current-revision time-ordering fixture remains open.
+
+The follow-up search/scroll pass changes project search from Enter-only to text/backspace/delete-triggered starts. Search jobs remain cancellable and generation-bound, and existing result activation opens the real source or buffer. Git wheel handling now runs on the diff listener's capture path so hover/file controls cannot consume scrolling. Portable tests remain77/81 with four skips; the native chain passes106/106.

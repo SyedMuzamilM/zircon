@@ -674,12 +674,20 @@ pub const Shell = struct {
         cx.notify();
     }
     pub fn onSearchQuery(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
-        if (e.data != .key_down or e.data.key_down.key != .enter) return;
+        const should_start = switch (e.data) {
+            .text => true,
+            .key_down => |key| key.key == .enter or key.key == .backspace or key.key == .delete,
+            else => false,
+        };
+        if (!should_start) return;
         @import("services/search.zig").start(self, cx) catch |err| try self.reportError(err);
-        e.preventDefault();
-        e.stopPropagation();
+        if (e.data == .key_down and e.data.key_down.key == .enter) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
         cx.notify();
     }
+
     pub fn reportError(self: *Shell, err: anyerror) !void {
         try self.setStatus(try self.allocator.dupe(u8, @import("errors.zig").message(err)));
         self.status_is_error = true;

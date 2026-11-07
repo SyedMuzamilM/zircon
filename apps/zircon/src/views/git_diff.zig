@@ -131,7 +131,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         if (diff.text.len == 0) try lines.append(b.allocator(), try message(b, c, "No changes in this comparison."));
     } else try lines.append(b.allocator(), try message(b, c, "Select a changed file or choose View diff."));
     var diff_lines = try b.listen(try b.key(.{ .string = "git-diff-lines" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = if (first) |origin| @max(0, top - origin) else 0, .overflow = .hidden }, lines.items)), .{ .on_input = b.onInput(Shell.onGitScroll) });
-    if (self.git.projection != null) diff_lines = try b.listen(diff_lines, .{ .on_input = b.onInput(controls.input) });
+    if (self.git.projection != null) diff_lines = try b.listen(diff_lines, .{ .on_capture = b.onInput(controls.input) });
     try rows.append(b.allocator(), diff_lines);
     return b.key(.{ .string = "git-diff" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = c.document, .overflow = .hidden }, rows.items));
 }

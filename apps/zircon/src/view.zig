@@ -244,7 +244,8 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
             });
         },
         .project_search => {
-            try children.appendSlice(b.allocator(), &.{ try inputField(b, fields.project_query, "query", true), try commandButton(b, colors, .run_project_search, "Search", true) });
+            const input = try inputField(b, fields.project_query, "query", true);
+            try children.appendSlice(b.allocator(), &.{ try b.listen(input, .{ .on_input = b.onInput(Shell.onSearchQuery) }), try commandButton(b, colors, .run_project_search, "Search", true) });
         },
         .find, .replace => {
             try children.append(b.allocator(), try inputField(b, fields.query, "query", true));
