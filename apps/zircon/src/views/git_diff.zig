@@ -6,6 +6,7 @@ const git = @import("zircon_git");
 const Shell = @import("../shell.zig").Shell;
 const Command = @import("../commands.zig").Command;
 const v = @import("components.zig");
+const controls = @import("git_diff_controls.zig");
 const file_height: f32 = 38;
 const context_height: f32 = 26;
 
@@ -39,6 +40,15 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const line_height = font * self.editor_options.line_height;
     var rows: std.ArrayList(ui.Element) = .empty;
     var tools: std.ArrayList(ui.Element) = .empty;
+    if (self.git.projection != null) {
+        try tools.appendSlice(b.allocator(), &.{
+            try v.iconButton(b, c, .git_collapse_all, "Expand or collapse all files", .chevron_down, false),
+            try v.iconButton(b, c, .git_unified_view, "Unified diff", .diff, self.git.diff_view.mode == .unified),
+            try v.iconButton(b, c, .git_split_view, "Split diff", .split, self.git.diff_view.mode == .split),
+            try v.iconButton(b, c, .git_previous_change, "Previous hunk", .arrow_up, false),
+            try v.iconButton(b, c, .git_next_change, "Next hunk", .arrow_down, false),
+        });
+    }
     if (self.git.selected_commit.len > 0) {
         try tools.appendSlice(b.allocator(), &.{ try v.icon(b, .commit, c.muted, 16), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (self.git.stash_view) "Stash" else "Commit", self.git.selected_commit[0..@min(7, self.git.selected_commit.len)] }), c.text, 12) });
     } else if (self.git.selected_path.len > 0 and !self.git.combined) {
@@ -73,17 +83,33 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             if (!std.mem.eql(u8, previous, hunk.path)) {
                 if (visible(position, file_height, top, bottom)) {
                     if (first == null) first = position;
-                    try lines.append(b.allocator(), try fileHeader(self, b, c, hunk.path));
+                    const file_index = if (self.git.projection) |projection| blk: {
+                        var index: usize = 0;
+                        for (projection.files, 0..) |file, i| if (std.mem.eql(u8, file.path, hunk.path)) {
+                            index = i;
+                            break;
+                        };
+                        break :blk index;
+                    } else 0;
+                    if (self.git.projection) |projection| try lines.append(b.allocator(), try controls.header(self, b, projection.files[file_index], file_index)) else try lines.append(b.allocator(), try fileHeader(self, b, c, hunk.path));
                 }
                 position += file_height;
             }
             previous = hunk.path;
-            if (visible(position, context_height, top, bottom)) {
+            const collapsed = if (self.git.projection) |projection| blk: {
+                var value = false;
+                for (projection.files) |file| {
+                    if (std.mem.eql(u8, file.path, hunk.path)) value = self.git.diff_view.collapsed.contains(file.path);
+                }
+                break :blk value;
+            } else false;
+            if (!collapsed and visible(position, context_height, top, bottom)) {
                 if (first == null) first = position;
                 try lines.append(b.allocator(), try b.row(.{ .height = .{ .px = context_height }, .align_items = .center, .padding = .{ .left = 60 }, .flex_shrink = 0, .background = c.sidebar }, &.{try v.text(b, hunk.header, c.muted, 11)}));
             }
             position += context_height;
             for (hunk.lines, 0..) |line, index| {
+                if (collapsed) break;
                 if (position >= bottom) break;
                 if (visible(position, line_height, top, bottom)) {
                     if (first == null) first = position;
@@ -104,7 +130,9 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         }
         if (diff.text.len == 0) try lines.append(b.allocator(), try message(b, c, "No changes in this comparison."));
     } else try lines.append(b.allocator(), try message(b, c, "Select a changed file or choose View diff."));
-    try rows.append(b.allocator(), try b.listen(try b.key(.{ .string = "git-diff-lines" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = if (first) |origin| @max(0, top - origin) else 0, .overflow = .hidden }, lines.items)), .{ .on_input = b.onInput(Shell.onGitScroll) }));
+    var diff_lines = try b.listen(try b.key(.{ .string = "git-diff-lines" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = if (first) |origin| @max(0, top - origin) else 0, .overflow = .hidden }, lines.items)), .{ .on_input = b.onInput(Shell.onGitScroll) });
+    if (self.git.projection != null) diff_lines = try b.listen(diff_lines, .{ .on_input = b.onInput(controls.input) });
+    try rows.append(b.allocator(), diff_lines);
     return b.key(.{ .string = "git-diff" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = c.document, .overflow = .hidden }, rows.items));
 }
 fn visible(y: f32, height: f32, top: f32, bottom: f32) bool {

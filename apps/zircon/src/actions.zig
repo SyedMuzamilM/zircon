@@ -584,6 +584,12 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.showTool(.git_diff);
             try @import("services/git.zig").start(self, cx, .all_diff);
         },
+        .git_collapse_all, .git_unified_view, .git_split_view => try @import("views/git_diff_controls.zig").command(self, cx, which),
+        .git_prepare_commit => {
+            self.sidebar_visible = true;
+            self.left_panel = .git_changes;
+            self.git.commit_focus +%= 1;
+        },
         .git_stage => try @import("services/git.zig").start(self, cx, .{ .stage = self.git.selected_path }),
         .git_unstage => try @import("services/git.zig").start(self, cx, .{ .unstage = self.git.selected_path }),
         .git_stage_all => try @import("services/git.zig").start(self, cx, .stage_all),
@@ -602,7 +608,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try @import("services/git.zig").start(self, cx, .{ .diff = .{ .path = self.git.selected_path, .staged = which == .git_staged_diff } });
         },
         .git_open_file => {
-            const absolute = try std.fs.path.join(self.allocator, &.{ self.workspace.root_path, self.git.selected_path });
+            const absolute = try std.fs.path.join(self.allocator, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, self.git.selected_path });
             defer self.allocator.free(absolute);
             try self.openPath(absolute);
         },
@@ -661,6 +667,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .toggle_soft_wrap => try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{@import("settings/model.zig").Patch{ .soft_wrap = if (self.editor_options.soft_wrap == .none) .editor_width else .none }}),
         .git_next_change, .git_previous_change, .git_toggle_hunk => {
+            if (self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .git_diff) {
+                try @import("views/git_diff_controls.zig").navigate(self, cx, which);
+                return;
+            }
             const current = try active(self);
             const record = try self.workspace.getConst(current.id);
             var snapshot = record.doc.snapshot();

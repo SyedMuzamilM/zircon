@@ -1,0 +1,8 @@
+    Finished `release` profile [optimized] target(s) in 0.50s
+Build Summary: 5/5 steps succeeded; 77/81 tests passed (4 skipped)
+test-app success
++- run test 77 pass, 4 skip (81 total) 15s MaxRSS:360M
+   +- compile test debug native success 5s MaxRSS:746M
+   |  +- options cached
+   +- run cargo success 570ms
+

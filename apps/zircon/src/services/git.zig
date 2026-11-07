@@ -11,6 +11,11 @@ const BlameRequest = struct { line: usize, expanded: bool = true, document: ?wor
 pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: BlameRequest, network: git.Network, switch_branch: struct { name: []const u8, create: bool = false, track: bool = false }, stash_save: bool, stash_apply: struct { oid: []const u8, pop: bool }, stash_show: []const u8 };
 const BlameTarget = struct { document: workspace.DocumentId, revision: u64, line: usize };
 pub const Model = struct {
+    projection: ?@import("../models/diff_layout.zig").Projection = null,
+    diff_view: @import("../models/diff_layout.zig").State = .{},
+    commit_focus: u64 = 0,
+    diff_generation: u64 = 0,
+    root_path: []u8 = &.{},
     active_document: ?workspace.DocumentId = null,
     status: ?git.Status = null,
     commits: []git.Commit = &.{},
@@ -44,7 +49,10 @@ pub const Model = struct {
     staged_diff: bool = false,
     error_text: []u8 = &.{},
     pub fn deinit(self: *Model) void {
+        a.free(self.root_path);
         self.tree.deinit(a);
+        self.diff_view.deinit(a);
+        if (self.projection) |*projection| projection.deinit();
         if (self.status) |*value| value.deinit();
         git.deinitHistory(a, self.commits);
         if (self.diff) |*value| value.deinit();
@@ -58,6 +66,8 @@ pub const Model = struct {
     }
 };
 const Result = struct {
+    root_path: []u8 = &.{},
+    projection: ?@import("../models/diff_layout.zig").Projection = null,
     found: bool = false,
     generation: u64,
     status: ?git.Status = null,
@@ -77,6 +87,8 @@ const Result = struct {
     baseline: []u8 = &.{},
     error_text: []u8 = &.{},
     pub fn deinit(self: *Result) void {
+        a.free(self.root_path);
+        if (self.projection) |*projection| projection.deinit();
         if (self.status) |*v| v.deinit();
         if (self.references) |*refs| refs.deinit();
         git.deinitHistory(a, self.commits);
@@ -107,6 +119,7 @@ const Job = struct {
         var repo = (try git.Repository.discover(a, self.io, self.root)) orelse return Box.create(a, result);
         defer repo.deinit();
         result.found = true;
+        result.root_path = try a.dupe(u8, repo.root);
         result.quiet_blame = self.operation == .blame and !self.operation.blame.expanded;
         self.perform(&repo, &result) catch |err| {
             if (result.quiet_blame) return Box.create(a, result);
@@ -115,6 +128,7 @@ const Job = struct {
             if (result.references == null) result.references = repo.references(a) catch null;
         };
         try cancel.check();
+        if (result.diff) |diff| result.projection = try @import("../models/diff_layout.zig").Projection.init(a, diff);
         return Box.create(a, result);
     }
     fn perform(self: *Job, repo: *git.Repository, result: *Result) !void {
@@ -284,6 +298,11 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     var value = box.take();
     defer value.deinit();
     self.git.repository = value.found;
+    if (value.found) {
+        a.free(self.git.root_path);
+        self.git.root_path = value.root_path;
+        value.root_path = &.{};
+    }
     if (value.references) |refs| {
         if (self.git.references) |*old| old.deinit();
         self.git.references = refs;
@@ -313,6 +332,12 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.commits = &.{};
     }
     if (value.diff) |diff| {
+        if (self.git.projection) |*old| old.deinit();
+        self.git.projection = value.projection;
+        value.projection = null;
+        self.git.diff_view.active_hunk = null;
+        self.git.diff_view.hover_file = null;
+        self.git.diff_generation +%= 1;
         if (self.git.diff) |*old| old.deinit();
         self.git.diff = diff;
         value.diff = null;

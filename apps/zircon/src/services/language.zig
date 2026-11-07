@@ -341,7 +341,7 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
 
 fn resolved(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
     const box = raw catch |err| {
-        try self.reportError(err);
+        syntaxTransportFailed(self, cx, err);
         cx.notify();
         return;
     };
@@ -420,7 +420,11 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
     const document = result.stamp.document orelse return;
     if (!std.meta.eql(tracked.id, document) or tracked.epoch != result.stamp.epoch) return;
     tracked.pending = false;
-    const record = self.workspace.getConst(document) catch return;
+    const record = self.workspace.getConst(document) catch {
+        tracked.pending = false;
+        tracked.retry_at = 0;
+        return;
+    };
     if (record.doc.revision() != result.stamp.revision) {
         try pollSyntax(self, cx);
         return;
@@ -446,11 +450,24 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
 fn syntaxFailed(self: *Shell, cx: *ui.Context(Shell), tracked: *SyntaxDocument, message: []const u8) !void {
     const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
     tracked.retry_at = now + if (tracked.attempts <= 1) @as(f64, 0.25) else @as(f64, 0.5);
-    try self.setStatus(try self.allocator.dupe(u8, message));
-    self.status_is_error = true;
-    self.status_origin = .{ .syntax = tracked.id };
+    if (!(self.status_is_error and self.status_origin == .general)) {
+        try self.setStatus(try self.allocator.dupe(u8, message));
+        self.status_is_error = true;
+        self.status_origin = .{ .syntax = tracked.id };
+    }
     try pollSyntax(self, cx);
     cx.notify();
+}
+fn syntaxTransportFailed(self: *Shell, cx: *ui.Context(Shell), err: anyerror) void {
+    const now = if (self.window) |handle| blk: {
+        const window = cx.app.window(handle) catch break :blk 0;
+        break :blk window.time;
+    } else 0;
+    for (self.language.syntax_documents.items) |*tracked| if (tracked.pending) {
+        tracked.pending = false;
+        if (tracked.attempts < 3) tracked.retry_at = now;
+    };
+    if (!(self.status_is_error and self.status_origin == .general)) self.reportError(err) catch {};
 }
 fn clearSyntaxError(self: *Shell, document: ws.DocumentId) void {
     switch (self.status_origin) {

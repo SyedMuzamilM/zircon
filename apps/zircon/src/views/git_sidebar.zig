@@ -64,7 +64,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         var commit_style = v.buttonStyle(c, commit_ready);
         if (!commit_ready) commit_style.background = c.hover;
         var commit: std.ArrayList(ui.Element) = .empty;
-        if (self.fields) |fields| try commit.append(b.allocator(), try b.key(.{ .string = "commit-message" }, try b.styled(try b.view(fields.commit), .{ .height = .{ .px = 48 }, .flex_shrink = 0 })));
+        if (self.fields) |fields| try commit.append(b.allocator(), try b.requestFocus(try b.key(.{ .string = "commit-message" }, try b.styled(try b.view(fields.commit), .{ .height = .{ .px = 48 }, .flex_shrink = 0 })), self.git.commit_focus));
         try commit.append(b.allocator(), try b.row(.{ .align_items = .center }, &.{ try v.icon(b, .commit, c.muted, 15), try b.div(.{ .flex_grow = 1 }, &.{}), try b.button(.{ .label = "Commit staged changes", .children = &.{try v.text(b, "Commit staged", if (commit_ready) c.on_primary else c.muted, 12)}, .on_click = if (commit_ready) try b.onClickWith(Command.git_commit, Shell.onCommand) else null, .style = commit_style }) }));
         try children.append(b.allocator(), try b.column(.{ .height = .{ .px = 112 }, .flex_shrink = 0, .padding = ui.Insets.all(8), .gap = 12, .background = c.document }, commit.items));
         if (self.git.commits.len > 0) {
@@ -160,7 +160,7 @@ fn changeBadges(b: *ui.Ui, c: v.Palette, entry: git.Entry) !ui.Element {
     var badges: std.ArrayList(ui.Element) = .empty;
     if (entry.stats) |stats| {
         if (stats.binary) return badge(b, "Binary", c.muted);
-        if (stats.added > 0 or stats.deleted == 0) try badges.append(b.allocator(), try badge(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{stats.added}), c.added));
+        if (stats.added > 0) try badges.append(b.allocator(), try badge(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{stats.added}), c.added));
         if (stats.deleted > 0) try badges.append(b.allocator(), try badge(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{stats.deleted}), c.deleted));
     } else try badges.append(b.allocator(), try badge(b, "…", c.muted));
     return b.row(.{ .gap = 3, .align_items = .center, .flex_shrink = 0 }, badges.items);

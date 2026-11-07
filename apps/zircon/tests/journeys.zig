@@ -8,4 +8,5 @@ test {
     _ = @import("language_lifecycle_tests.zig");
     _ = @import("grammar_retry_tests.zig");
     _ = @import("git_controls_tests.zig");
+    _ = @import("diff_layout_tests.zig");
 }
