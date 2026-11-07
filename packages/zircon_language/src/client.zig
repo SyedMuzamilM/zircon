@@ -28,6 +28,8 @@ pub const Client = struct {
     stdout_ended: std.atomic.Value(bool) = .init(false),
     shutdown_answer: std.atomic.Value(bool) = .init(false),
     completion_supported: std.atomic.Value(bool) = .init(false),
+    sync_kind: enum { none, full, incremental } = .full,
+    position_encoding: enum { utf8, utf16, utf32 } = .utf16,
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
     outgoing: std.ArrayList([]u8) = .empty,
@@ -105,6 +107,25 @@ pub const Client = struct {
         const bytes = try snapshot.copy(self.allocator, .{ .start = 0, .end = snapshot.byteLen() });
         defer self.allocator.free(bytes);
         try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didChange", .params = .{ .textDocument = .{ .uri = uri, .version = snapshot.revision() }, .contentChanges = [_]struct { text: []const u8 }{.{ .text = bytes }} } });
+        current.* = snapshot.revision();
+    }
+    /// Send one retained edit incrementally when the server negotiated it.
+    /// Multiple mappings fall back to one full snapshot until the caller has a
+    /// complete ordered edit batch. This preserves correctness at the protocol
+    /// boundary while allowing ordinary typing to avoid whole-document copies.
+    pub fn didChangeIncremental(self: *Client, uri: []const u8, snapshot: text.Snapshot, mappings: []const text.Mapping) !void {
+        try self.check();
+        if (self.sync_kind != .incremental or self.position_encoding != .utf16 or mappings.len != 1 or mappings[0].range.start != mappings[0].range.end) return self.didChange(uri, snapshot);
+        const current = self.documents.getPtr(uri) orelse return error.DocumentNotOpen;
+        if (snapshot.revision() <= current.*) return error.StaleDocumentVersion;
+        const mapping = mappings[0];
+        const end_offset = std.math.add(usize, mapping.range.start, mapping.inserted) catch return error.InvalidTextRange;
+        if (end_offset > snapshot.byteLen()) return error.InvalidTextRange;
+        const text_bytes = try snapshot.copy(self.allocator, .{ .start = mapping.range.start, .end = end_offset });
+        defer self.allocator.free(text_bytes);
+        const point = try @import("model.zig").positionAt(snapshot, mapping.range.start);
+        const edit_range: @import("model.zig").Range = .{ .start = point, .end = point };
+        try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didChange", .params = .{ .textDocument = .{ .uri = uri, .version = snapshot.revision() }, .contentChanges = [_]struct { range: @import("model.zig").Range, text: []const u8 }{.{ .range = edit_range, .text = text_bytes }} } });
         current.* = snapshot.revision();
     }
     pub fn didClose(self: *Client, uri: []const u8) !void {
@@ -491,6 +512,28 @@ fn parse(self: *Client, body: []const u8) !void {
     switch (request.kind) {
         .initialize => {
             const capabilities = field(result, "capabilities") orelse return error.InvalidInitializeResult;
+            if (field(capabilities, "textDocumentSync")) |sync| {
+                if (sync == .integer) {
+                    self.sync_kind = switch (sync.integer) {
+                        0 => .none,
+                        2 => .incremental,
+                        else => .full,
+                    };
+                } else if (sync == .object) {
+                    if (field(sync, "change")) |change| {
+                        if (change == .integer) {
+                            self.sync_kind = switch (change.integer) {
+                                0 => .none,
+                                2 => .incremental,
+                                else => .full,
+                            };
+                        }
+                    }
+                }
+            }
+            if (field(capabilities, "positionEncoding")) |encoding| {
+                if (encoding == .string) self.position_encoding = if (std.mem.eql(u8, encoding.string, "utf-8")) .utf8 else if (std.mem.eql(u8, encoding.string, "utf-32")) .utf32 else .utf16;
+            }
             const supported = if (field(capabilities, "completionProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.completion_supported.store(supported, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });

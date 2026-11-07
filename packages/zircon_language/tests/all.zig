@@ -109,6 +109,29 @@ test "malformed and unresponsive owned servers terminate without blocked reader 
     }
 }
 
+test "incremental synchronization negotiates and sends insertion ranges" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try fixturePath(tmp);
+    defer t.allocator.free(path);
+    const client = try language.Client.start(t.allocator, t.io, .{ .command = "python3", .args = &.{ path, "incremental" }, .cwd = "/tmp" });
+    defer client.deinit();
+    try waitReady(client);
+    var doc = try text.Document.init(t.allocator, "abc");
+    defer doc.deinit();
+    var first = doc.snapshot();
+    defer first.deinit();
+    const uri = "file:///tmp/incremental.zig";
+    try client.didOpen(uri, "zig", first);
+    var change = try doc.apply(first.revision(), &.{.{ .range = .{ .start = 1, .end = 1 }, .text = "X" }}, 0);
+    defer change.deinit();
+    var next = doc.snapshot();
+    defer next.deinit();
+    try client.didChangeIncremental(uri, next, change.mappings);
+    try t.expectError(error.StaleDocumentVersion, client.didChangeIncremental(uri, next, change.mappings));
+    try client.didClose(uri);
+}
+
 test "repeated graceful shutdown wakes an idle transport writer" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();

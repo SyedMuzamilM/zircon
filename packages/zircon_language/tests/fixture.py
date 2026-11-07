@@ -39,6 +39,7 @@ def read():
             length = int(line.split(b":", 1)[1].strip())
     return json.loads(sys.stdin.buffer.read(length))
 
+mode = sys.argv[1] if len(sys.argv) > 1 else "full"
 opened = {}
 completions = []
 initialized = False
@@ -52,7 +53,7 @@ while True:
     if method == "initialize":
         sys.stderr.write("fixture stderr " + "x" * 80000 + "\n")
         sys.stderr.flush()
-        send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": {"textDocumentSync": 1, "completionProvider": {}}}})
+        send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": {"textDocumentSync": 2 if mode == "incremental" else 1, "positionEncoding": "utf-16", "completionProvider": {}}}})
     elif method == "initialized":
         assert isinstance(message.get("params"), dict), "initialized params must be a JSON object"
         initialized = True
@@ -68,8 +69,10 @@ while True:
         document = params["textDocument"]
         old = opened[document["uri"]]
         assert document["version"] > old["version"]
+        if mode == "incremental":
+            assert "range" in params["contentChanges"][0]
         old.update(document)
-        old["text"] = params["contentChanges"][0]["text"]
+        old["text"] = params["contentChanges"][0]["text"] if "range" not in params["contentChanges"][0] else old["text"]
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"], "version": document["version"], "diagnostics": []}})
     elif method == "textDocument/completion":
         assert params["position"]["character"] == 3

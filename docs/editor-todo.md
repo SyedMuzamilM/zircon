@@ -107,6 +107,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **LANG-01: Negotiate LSP synchronization and position encoding.**
   Depends: TEXT-07; BASE-03. Scope: language client and change batching. Done: honor None/Full/Incremental and supported encoding, preserve ordered valid versions, bound/coalesce output without losing edits; test a slow server, rapid changes, undo, reopen and Unicode. Measure copied/serialized bytes and queue pressure.
+  Progress: [bounded incremental insertion path](progress/2026-11-07-lsp-incremental.md) now negotiates synchronization/encoding and uses one queued UTF-16 insertion event. Replacements, deletions, multiple mappings, alternate encodings and all remaining consumer migration still fall back or remain open.
 
 - [ ] **LANG-02: Persistent grammar worker lifecycle.**
   Delivered correction: `e08fdc5` isolates language-picker rebindings to the affected document, preserves unrelated clients/diagnostics, and rejects stale grammar/resolver epochs. `1f8f99e` locks shared resolver installation writes. Persistent parsing workers, bounded input cancellation and retry policy remain open.

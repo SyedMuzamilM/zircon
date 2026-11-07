@@ -219,7 +219,9 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (source.byteLen() > 8 * 1024 * 1024) continue;
         if (doc.version) |version| {
             if (version == source.revision()) continue;
-            try client.didChange(doc.uri, source);
+            if (self.documentChangeSince(doc.id, version, source.revision())) |change| {
+                try client.didChangeIncremental(doc.uri, source, change.mappings);
+            } else try client.didChange(doc.uri, source);
             if (doc.diagnostics) |*value| value.deinit();
             doc.diagnostics = null;
         } else try client.didOpen(doc.uri, if (snapshot.languageForPath(self.languagePath(tab.document, path))) |language| language.lsp_id orelse language.id else language_id, source);
