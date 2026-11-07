@@ -157,6 +157,10 @@ pub const Shell = struct {
     pub fn documentChangeOrigin(self: *const Shell, index: usize) ?workspace.ChangeOrigin {
         return if (index < self.document_changes.items.len) self.document_changes.items[index].origin else null;
     }
+    pub fn documentChangeSince(self: *const Shell, id: workspace.DocumentId, before: u64, after: u64) ?*const workspace.DocumentChange {
+        for (self.document_changes.items) |*change| if (std.meta.eql(change.document, id) and change.before == before and change.after == after) return change;
+        return null;
+    }
     pub fn clearDocumentChanges(self: *Shell, cx: *ui.Context(Shell)) void {
         for (self.document_changes.items) |*change| change.deinit();
         self.document_changes.clearRetainingCapacity();
