@@ -108,3 +108,16 @@ test "malformed and unresponsive owned servers terminate without blocked reader 
         client.deinit();
     }
 }
+
+test "repeated graceful shutdown wakes an idle transport writer" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try fixturePath(tmp);
+    defer t.allocator.free(path);
+    for (0..24) |_| {
+        const client = try language.Client.start(t.allocator, t.io, .{ .command = "python3", .args = &.{path}, .cwd = "/tmp" });
+        errdefer client.deinit();
+        try waitReady(client);
+        client.deinit();
+    }
+}

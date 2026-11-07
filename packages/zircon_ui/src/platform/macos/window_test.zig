@@ -37,20 +37,14 @@ test "native window presents and routes queued pointer, text, resize and close e
     try s.snapshot(frame, "/tmp/zircon-native-window.png");
     if (!try s.present(frame)) return error.NoDrawable;
     const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
-    const list = objc.send(objc.Id, app, "windows", .{});
-    const native_window = objc.send(objc.Id, list, "objectAtIndex:", .{@as(usize, 0)});
+    const native_window = findWindow(app, "Zircon native test") orelse return error.TestWindowNotFound;
     const view = objc.send(objc.Id, native_window, "contentView", .{});
     objc.send(void, native_window, "makeKeyWindow", .{});
     _ = objc.send(bool, native_window, "makeFirstResponder:", .{view});
-    const focus_deadline = window.now() + 1;
-    while (!objc.send(bool, native_window, "isKeyWindow", .{}) and window.now() < focus_deadline) try window.pump(0.01);
-    const foreground = objc.send(bool, app, "isActive", .{});
-    if (foreground) try std.testing.expect(objc.send(bool, native_window, "isKeyWindow", .{})) else {
-        // macOS can refuse activation for an unattended test process. Keep
-        // testing the real NSWindow/first-responder route without requiring
-        // control of the user's foreground application.
-    }
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = "/tmp/zircon-native-input-mode.txt", .data = if (foreground) "Queued application events with native foreground focus.\n" else "macOS did not grant foreground activation. Native keys dispatched through NSWindow.sendEvent and its real first responder.\n" });
+    // Application-queued keys follow the key window at delivery time, not the
+    // event's windowNumber. Test this surface through its actual first responder
+    // regardless of the user's foreground focus; queued routing is separate.
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = "/tmp/zircon-native-input-mode.txt", .data = "NSWindow.sendEvent through the real first responder; foreground queue tested separately.\n" });
     const number = objc.send(isize, native_window, "windowNumber", .{});
     const point = objc.send(objc.CGPoint, view, "convertPoint:toView:", .{ objc.CGPoint{ .x = 32, .y = 40 }, @as(objc.Id, null) });
     for ([_]usize{ 1, 2 }) |kind| {
@@ -58,14 +52,14 @@ test "native window presents and routes queued pointer, text, resize and close e
         objc.send(void, app, "postEvent:atStart:", .{ e, false });
     }
     const e = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, @as(usize, 0), window.now(), number, @as(objc.Id, null), objc.string("x"), objc.string("x"), false, @as(u16, 7) });
-    if (foreground) objc.send(void, app, "postEvent:atStart:", .{ e, false }) else objc.send(void, native_window, "sendEvent:", .{e});
+    objc.send(void, native_window, "sendEvent:", .{e});
     const input_deadline = window.now() + 1;
     while (window.now() < input_deadline) {
         if (log.down == 1 and log.up == 1 and log.text == 1) break;
         try window.pump(0.01);
     }
     if (log.down != 1 or log.up != 1 or log.position.x != 32 or log.position.y != 40) return error.PointerDispatchFailed;
-    if (log.keys != 1 or log.text != 1) return error.TextDispatchFailed;
+    try expectTextDispatch(log, app, native_window);
     objc.send(void, native_window, "setContentSize:", .{objc.CGSize{ .width = 600, .height = 400 }});
     for (0..10) |_| try window.pump(0);
     if (s.size().width != 600 or s.size().height != 400 or log.resized == 0) return error.ResizeFailed;
@@ -88,6 +82,64 @@ test "native window rejects invalid dimensions before creating operating system 
     try std.testing.expectError(error.InvalidWindowSize, window.open(std.testing.allocator, .{ .width = 0 }, sink));
     try std.testing.expectError(error.InvalidWindowSize, window.open(std.testing.allocator, .{ .height = std.math.nan(f32) }, sink));
     try std.testing.expectError(error.InvalidUtf8, window.open(std.testing.allocator, .{ .title = "\xff" }, sink));
+}
+
+test "window-bound key events retain their original window after a focus change" {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    var first: EventLog = .{};
+    var second: EventLog = .{};
+    const first_surface = try window.open(std.testing.allocator, .{ .title = "Zircon first routing target", .visible = true }, .{ .context = &first, .event = event });
+    defer first_surface.deinit();
+    const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const first_window = findWindow(app, "Zircon first routing target") orelse return error.TestWindowNotFound;
+    const second_surface = try window.open(std.testing.allocator, .{ .title = "Zircon second routing target", .visible = true }, .{ .context = &second, .event = event });
+    defer second_surface.deinit();
+    const second_window = findWindow(app, "Zircon second routing target") orelse return error.TestWindowNotFound;
+    objc.send(void, first_window, "makeKeyWindow", .{});
+    const key_event = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, @as(usize, 0), window.now(), objc.send(isize, first_window, "windowNumber", .{}), @as(objc.Id, null), objc.string("x"), objc.string("x"), false, @as(u16, 7) });
+    objc.send(void, second_window, "makeKeyWindow", .{});
+    objc.send(void, first_window, "sendEvent:", .{key_event});
+    try expectTextDispatch(first, app, first_window);
+    try std.testing.expectEqual(@as(usize, 0), second.keys);
+    try std.testing.expectEqual(@as(usize, 0), second.text);
+}
+
+test "foreground queued key events follow the current key window" {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    var first: EventLog = .{};
+    var second: EventLog = .{};
+    const first_surface = try window.open(std.testing.allocator, .{ .title = "Zircon queued original", .visible = true }, .{ .context = &first, .event = event });
+    defer first_surface.deinit();
+    const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const first_window = findWindow(app, "Zircon queued original") orelse return error.TestWindowNotFound;
+    const second_surface = try window.open(std.testing.allocator, .{ .title = "Zircon queued current", .visible = true }, .{ .context = &second, .event = event });
+    defer second_surface.deinit();
+    const second_window = findWindow(app, "Zircon queued current") orelse return error.TestWindowNotFound;
+    objc.send(void, first_window, "makeKeyWindow", .{});
+    const deadline = window.now() + 1;
+    while (!objc.send(bool, app, "isActive", .{}) and window.now() < deadline) try window.pump(0.01);
+    if (!objc.send(bool, app, "isActive", .{})) {
+        try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = "/tmp/zircon-native-queued-input-mode.txt", .data = "SKIPPED: foreground queue unavailable, macOS did not activate the test app.\n" });
+        return error.SkipZigTest;
+    }
+    const key_event = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, @as(usize, 0), window.now(), objc.send(isize, first_window, "windowNumber", .{}), @as(objc.Id, null), objc.string("x"), objc.string("x"), false, @as(u16, 7) });
+    objc.send(void, app, "postEvent:atStart:", .{ key_event, false });
+    objc.send(void, second_window, "makeKeyWindow", .{});
+    try std.testing.expectEqual(second_window, objc.send(objc.Id, app, "keyWindow", .{}));
+    const input_deadline = window.now() + 1;
+    while ((second.keys == 0 or second.text == 0) and window.now() < input_deadline) try window.pump(0.01);
+    try expectTextDispatch(second, app, second_window);
+    try std.testing.expectEqual(@as(usize, 0), first.keys);
+    try std.testing.expectEqual(@as(usize, 0), first.text);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = "/tmp/zircon-native-queued-input-mode.txt", .data = "PASSED: foreground NSApplication queue delivered to the current key window after focus changed.\n" });
+}
+
+fn expectTextDispatch(log: EventLog, app: objc.Id, target: objc.Id) !void {
+    if (log.keys == 1 and log.text == 1) return;
+    std.debug.print("native dispatch failed: keys={d}, committed x={d}, app active={}, target key={}, target first responder={}\n", .{ log.keys, log.text, objc.send(bool, app, "isActive", .{}), objc.send(bool, target, "isKeyWindow", .{}), objc.send(objc.Id, target, "firstResponder", .{}) == objc.send(objc.Id, target, "contentView", .{}) });
+    return error.TextDispatchFailed;
 }
 
 const NativeRange = extern struct { location: usize, length: usize };

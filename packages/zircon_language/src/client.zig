@@ -12,6 +12,8 @@ pub const Config = struct { environment: []const [2][]const u8 = &.{}, initializ
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
 const Pending = struct { kind: enum { initialize, completion, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
+    pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0 };
+    counters: Stats = .{},
     allocator: std.mem.Allocator,
     io: std.Io,
     owner: std.Thread.Id,
@@ -52,8 +54,7 @@ pub const Client = struct {
         self.* = .{ .allocator = a, .io = io, .owner = std.Thread.getCurrentId(), .child = child, .wake = config.wake };
         transferred = true;
         errdefer {
-            self.stopping.store(true, .release);
-            self.changed.broadcast(io);
+            self.stopWriter();
             signalKill(&self.child);
             if (self.writer_thread) |thread| thread.join();
             if (self.output_thread) |thread| thread.join();
@@ -180,8 +181,7 @@ pub const Client = struct {
                 self.waitFlag(&self.stdout_ended, 200);
             }
         }
-        self.stopping.store(true, .release);
-        self.changed.broadcast(self.io);
+        self.stopWriter();
         // Kill only this owned server, before joining blocked transport threads.
         // Their bounded I/O checks stop even if a descendant inherited a pipe.
         if (!self.stdout_ended.load(.acquire)) signalKill(&self.child);
@@ -197,6 +197,12 @@ pub const Client = struct {
         const a = self.allocator;
         self.cleanupData();
         a.destroy(self);
+    }
+    fn stopWriter(self: *Client) void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        self.stopping.store(true, .release);
+        self.changed.broadcast(self.io);
     }
     fn waitFlag(self: *Client, flag: *std.atomic.Value(bool), milliseconds: i64) void {
         const deadline = timeout(milliseconds).toDeadline(self.io);
@@ -231,7 +237,15 @@ pub const Client = struct {
         if (bytes.len > 16 * 1024 * 1024 or self.outgoing_bytes > 16 * 1024 * 1024 - bytes.len) return error.OutgoingQueueFull;
         try self.outgoing.append(transport_allocator, bytes);
         self.outgoing_bytes += bytes.len;
+        self.counters.queued_messages +%= 1;
+        self.counters.queued_bytes +%= bytes.len;
+        if (@hasField(@TypeOf(value), "method") and std.mem.eql(u8, value.method, "textDocument/didChange")) self.counters.document_changes +%= 1;
         self.changed.signal(self.io);
+    }
+    pub fn stats(self: *Client) Stats {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        return self.counters;
     }
     fn publish(self: *Client, message_value: model.Message) void {
         var message = message_value;

@@ -66,22 +66,11 @@ test "settings opens across a synchronous native workspace blur notification" {
     try app.closeWindow(child);
     _ = try app.step(2);
     objc.send(void, view, "windowDidBecomeKey:", .{@as(objc.Id, null)});
-    const frame = &(try app.window(main)).frames.committed;
-    var point: ?ui.Point = null;
-    for (frame.nodes.items, 0..) |node, index| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Settings")) {
-        const bounds = frame.bounds[index];
-        point = .{ .x = bounds.x + bounds.width / 2, .y = bounds.y + bounds.height / 2 };
-        break;
-    };
-    try t.expect(point != null);
-    const native_point = objc.send(objc.CGPoint, view, "convertPoint:toView:", .{ objc.CGPoint{ .x = point.?.x, .y = point.?.y }, @as(objc.Id, null) });
-    const number = objc.send(isize, main_window, "windowNumber", .{});
-    for ([_]usize{ 1, 2 }) |kind| {
-        const mouse = objc.send(objc.Id, objc.class("NSEvent"), "mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:", .{ kind, native_point, @as(usize, 0), native.now(), number, @as(objc.Id, null), @as(isize, 0), @as(isize, 1), @as(f32, 1) });
-        objc.send(void, main_window, "sendEvent:", .{mouse});
-    }
     try native.pump(0);
-    _ = try app.step(3);
+    _ = try app.step(2.1);
+    _ = try clickButton(&app, main, main_window, "Workspace menu", 2.2);
+    const native_point = try clickButton(&app, main, main_window, "Settings", 3);
+    const number = objc.send(isize, main_window, "windowNumber", .{});
     const clicked_child = try app.read(owner, Ops.child, .{});
     _ = try app.window(clicked_child);
     try t.expect(!std.meta.eql(clicked_child, child));
@@ -102,4 +91,23 @@ test "settings opens across a synchronous native workspace blur notification" {
     try native.pump(0);
     _ = try app.step(5);
     _ = try app.window(try app.read(owner, Ops.child, .{}));
+}
+
+fn clickButton(app: *ui.App, handle: ui.WindowHandle, window: objc.Id, label: []const u8, time: f64) !objc.CGPoint {
+    const frame = &(try app.window(handle)).frames.committed;
+    for (frame.nodes.items, 0..) |node, index| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, label)) {
+        const bounds = frame.bounds[index];
+        const view = objc.send(objc.Id, window, "contentView", .{});
+        const point = objc.send(objc.CGPoint, view, "convertPoint:toView:", .{ objc.CGPoint{ .x = bounds.x + bounds.width / 2, .y = bounds.y + bounds.height / 2 }, @as(objc.Id, null) });
+        const number = objc.send(isize, window, "windowNumber", .{});
+        for ([_]usize{ 1, 2 }) |kind| {
+            const mouse = objc.send(objc.Id, objc.class("NSEvent"), "mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:", .{ kind, point, @as(usize, 0), native.now(), number, @as(objc.Id, null), @as(isize, 0), @as(isize, 1), @as(f32, 1) });
+            objc.send(void, window, "sendEvent:", .{mouse});
+        }
+        try native.pump(0);
+        _ = try app.step(time);
+        return point;
+    };
+    std.debug.print("settings journey: missing button {s}\n", .{label});
+    return error.TestButtonNotFound;
 }

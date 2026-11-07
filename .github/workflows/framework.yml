@@ -11,4 +11,29 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
-      - run: zig build check
+      - run: ./tools/zig build check
+      - name: Verify Darwin child handle isolation
+        if: runner.os == 'macOS'
+        run: ./tools/zig run tools/verify_spawn_isolation.zig -lc
+  native:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - name: Execute fresh native acceptance suites
+        shell: bash
+        run: |
+          set -o pipefail
+          ./tools/zig run tools/verify_spawn_isolation.zig -lc
+          ./tools/zig build test-native-fresh --summary all 2>&1 | tee native-verification.log
+      - name: Preserve native results and input routing modes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-verification
+          path: |
+            native-verification.log
+            /tmp/zircon-native-input-mode.txt
+            /tmp/zircon-native-queued-input-mode.txt

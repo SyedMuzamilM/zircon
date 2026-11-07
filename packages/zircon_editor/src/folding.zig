@@ -3,6 +3,7 @@ const std = @import("std");
 const text = @import("zircon_text");
 pub const Region = struct { start: usize, end: usize, body: usize, line: usize, last: usize };
 pub const State = struct {
+    scanned_bytes: u64 = 0,
     regions: std.ArrayList(Region) = .empty,
     collapsed: std.ArrayList(text.Range) = .empty,
     revision: ?u64 = null,
@@ -25,6 +26,7 @@ pub const State = struct {
         errdefer regions.deinit(a);
         if (snapshot.byteLen() <= 8 * 1024 * 1024) {
             const source = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
+            self.scanned_bytes +%= source.len;
             defer a.free(source);
             const Line = struct { start: usize, end: usize, row: usize, indent: usize, closer: bool };
             var lines: std.ArrayList(Line) = .empty;

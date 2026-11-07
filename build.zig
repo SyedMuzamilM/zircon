@@ -126,6 +126,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
         });
+        const editor_bench = b.addExecutable(.{ .name = "zircon-editor-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_editor.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_git", .module = git_module } } }) });
+        b.step("build-bench-editor", "Build native input-to-frame submission baseline driver").dependOn(&b.addInstallArtifact(editor_bench, .{}).step);
         const agent_journey = b.addExecutable(.{ .name = "zircon-agent-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_agent_workspace.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
         const agent_journey_run = b.addRunArtifact(agent_journey);
         agent_journey_run.addArgs(&.{ b.option([]const u8, "agent-config", "Read-only installed provider configuration") orelse "/tmp/zircon-agents.json", b.option([]const u8, "agent-output", "Disposable native provider workspace") orelse "/tmp/zircon-agent-native" });
@@ -145,7 +147,8 @@ pub fn build(b: *std.Build) void {
         const ui_review_run = b.addRunArtifact(ui_review);
         ui_review_run.addArgs(&.{ b.option([]const u8, "review-project", "Review fixture project") orelse ".", b.option([]const u8, "review-output", "Review screenshot directory") orelse "/tmp/zircon-ui-review/current" });
         b.step("capture-ui-review", "Capture deterministic native editor review scenarios").dependOn(&ui_review_run.step);
-        const app_native_tests = b.addTest(.{ .root_module = b.createModule(.{
+        const native_filter = b.option([]const u8, "native-test-filter", "Run native editor tests matching this substring");
+        const app_native_tests = b.addTest(.{ .filters = if (native_filter) |filter| b.allocator.dupe([]const u8, &.{filter}) catch @panic("OOM") else &.{}, .root_module = b.createModule(.{
             .root_source_file = b.path("apps/zircon/tests/native_journey.zig"),
             .target = target,
             .optimize = optimize,
@@ -208,9 +211,19 @@ pub fn build(b: *std.Build) void {
         const window_tests = b.addTest(.{ .root_module = native });
         const window_run = b.addRunArtifact(window_tests);
         const native_run = b.addRunArtifact(native_tests);
+        // Native results depend on AppKit focus, the GPU and child processes.
+        // Reuse compiled artifacts, but always execute the acceptance checks.
+        for ([_]*std.Build.Step.Run{ window_run, native_run, app_native_run, settings_native_run, real_language_run }) |execute| execute.has_side_effects = true;
         native_run.step.dependOn(&window_run.step);
         app_native_run.step.dependOn(&native_run.step);
+        b.step("test-native-window", "Fresh standalone AppKit input/window checks").dependOn(&window_run.step);
         b.step("test-native", "Verify native windows, input, CoreText and Metal").dependOn(&native_run.step);
+        b.step("test-native-fresh", "Execute native window, renderer, editor and settings suites sequentially").dependOn(&settings_native_run.step);
+        const rendering_tests = b.addTest(.{ .filters = &.{ "wrapped continuation", "indented wrapped", "inline Git change" }, .root_module = b.createModule(.{ .root_source_file = b.path("packages/zircon_editor/tests/all.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_ui", .module = native_ui } } }) });
+        const rendering_run = b.addRunArtifact(rendering_tests);
+        rendering_run.has_side_effects = true;
+        rendering_run.step.dependOn(&settings_native_run.step);
+        b.step("test-editor-rendering-native", "Verify native continuation indentation and Git gutter backgrounds").dependOn(&rendering_run.step);
     }
     const format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("packages"), b.path("apps"), b.path("examples") }, .check = true });
     b.step("fmt", "Check framework formatting").dependOn(&format.step);

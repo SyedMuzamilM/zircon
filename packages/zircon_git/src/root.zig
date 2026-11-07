@@ -2,6 +2,7 @@
 //! and serializes mutations. Results own their data, never repository buffers.
 const std = @import("std");
 const process = @import("process.zig");
+pub const processStats = process.stats;
 const status_module = @import("status.zig");
 const diff_module = @import("diff.zig");
 const history_module = @import("history.zig");
