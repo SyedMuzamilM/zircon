@@ -156,3 +156,5 @@ The scoped Git UI, cursor, anchored picker, split-action, and grammar retry chan
 ## Parent follow-up
 
 All three findings were fixed locally before the diff projection slice. Transport errors now clear pending grammar jobs and schedule bounded retry; syntax errors preserve a newer general status error; net-zero files omit `+0`. The clean portable result is77 passes with four explicit skips.
+
+The three findings are fixed in the current working tree. Transport failures clear pending and schedule retry. Syntax status replacement now carries the original status sequence for an unchanged revision, so a later general status error is not replaced. Net-zero badges omit `+0`. The existing portable regression set remains green; a direct time-ordering fixture was not retained because its status setup races the worker's first retry, so the sequence guard is source-fixed but its dedicated runtime proof remains open.

@@ -18,6 +18,7 @@ const SyntaxDocument = struct {
     scoped: bool = false,
     attempts: u8 = 0,
     retry_at: f64 = 0,
+    status_sequence: u64 = 0,
 };
 const host = @import("extension_host.zig");
 const Document = struct {
@@ -401,6 +402,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (source.byteLen() > 8 * 1024 * 1024) continue;
         const bytes = try source.copy(self.allocator, .{ .start = 0, .end = source.byteLen() });
         defer self.allocator.free(bytes);
+        if (tracked.attempts == 0) tracked.status_sequence = self.status_sequence;
         try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
         self.language.syntax_jobs +%= 1;
         tracked.pending = true;
@@ -450,7 +452,7 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
 fn syntaxFailed(self: *Shell, cx: *ui.Context(Shell), tracked: *SyntaxDocument, message: []const u8) !void {
     const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
     tracked.retry_at = now + if (tracked.attempts <= 1) @as(f64, 0.25) else @as(f64, 0.5);
-    if (!(self.status_is_error and self.status_origin == .general)) {
+    if (self.status_sequence == tracked.status_sequence and !(self.status_is_error and self.status_origin == .general)) {
         try self.setStatus(try self.allocator.dupe(u8, message));
         self.status_is_error = true;
         self.status_origin = .{ .syntax = tracked.id };

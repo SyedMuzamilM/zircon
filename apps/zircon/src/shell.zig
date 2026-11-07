@@ -94,6 +94,7 @@ pub const Shell = struct {
     status: []u8 = &.{},
     status_is_error: bool = false,
     status_origin: union(enum) { general, syntax: workspace.DocumentId } = .general,
+    status_sequence: u64 = 0,
     dragging: enum { none, sidebar, split } = .none,
     tab_drag: ?@import("panes.zig").Session = null,
     pub fn init(a: std.mem.Allocator, io: std.Io, root_path: []const u8, initial: ?[]const u8) !Shell {
@@ -676,5 +677,6 @@ pub const Shell = struct {
         self.status = owned;
         self.status_is_error = false;
         self.status_origin = .general;
+        self.status_sequence +%= 1;
     }
 };
