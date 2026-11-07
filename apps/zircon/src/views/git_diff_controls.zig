@@ -14,7 +14,7 @@ fn resolve(self: *const Shell, target: Target) ?layout.File {
     const projection = self.git.projection orelse return null;
     return if (target.file < projection.files.len) projection.files[target.file] else null;
 }
-fn select(self: *Shell, file: layout.File) !void {
+pub fn selectFile(self: *Shell, file: layout.File) !void {
     const owned = try a.dupe(u8, file.path);
     a.free(self.git.selected_path);
     self.git.selected_path = owned;
@@ -22,14 +22,14 @@ fn select(self: *Shell, file: layout.File) !void {
 }
 fn toggle(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Target) !void {
     const file = resolve(self, target) orelse return;
-    try select(self, file);
+    try selectFile(self, file);
     try self.git.diff_view.toggle(a, file.path);
     clampScroll(self);
     cx.notify();
 }
 fn open(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Target) !void {
     const file = resolve(self, target) orelse return;
-    try select(self, file);
+    try selectFile(self, file);
     const root = if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path;
     const absolute = try std.fs.path.join(self.allocator, &.{ root, file.path });
     defer self.allocator.free(absolute);
@@ -40,7 +40,7 @@ fn stage(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: T
     const file = resolve(self, target) orelse return;
     if (self.git.selected_commit.len > 0) return;
     const entry = statusFor(self, file.path) orelse return;
-    try select(self, file);
+    try selectFile(self, file);
     try @import("../services/git.zig").start(self, cx, if (entry.staged and !entry.unstaged) .{ .unstage = file.path } else .{ .stage = file.path });
 }
 fn statusFor(self: *const Shell, path: []const u8) ?git.Entry {
@@ -85,7 +85,7 @@ pub fn navigate(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
     const index = if (which == .git_toggle_hunk) active orelse 0 else if (active) |i| (if (which == .git_previous_change) (i + diff.hunks.len - 1) % diff.hunks.len else (i + 1) % diff.hunks.len) else if (which == .git_previous_change) diff.hunks.len - 1 else 0;
     self.git.diff_view.active_hunk = index;
     for (projection.files) |file| if (index >= file.first_hunk and index < file.end_hunk) {
-        try select(self, file);
+        try selectFile(self, file);
         if (which == .git_toggle_hunk or self.git.diff_view.collapsed.contains(file.path)) try self.git.diff_view.toggle(a, file.path);
         break;
     };
@@ -98,6 +98,13 @@ fn clampScroll(self: *Shell) void {
 /// Capture uses the same file heights as rendering, so descendants and blank
 /// header padding have the same hover/active behavior as the visible surface.
 pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data == .scroll) {
+        const height = if (self.git.projection) |projection| projection.contentHeight(&self.git.diff_view, self.editor_options.font_size * self.editor_options.line_height) else 0;
+        self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
+        e.preventDefault();
+        cx.notify();
+        return;
+    }
     if (e.data != .pointer_move and e.data != .pointer_down and e.data != .pointer_leave) return;
     const projection = self.git.projection orelse return;
     const point: ?ui.Point = switch (e.data) {
@@ -113,7 +120,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
             if (y >= top and y < top + height) {
                 if (y < top + layout.file_height) hovered = index;
                 if (e.data == .pointer_down) {
-                    try select(self, file);
+                    try selectFile(self, file);
                     cx.notify();
                 }
                 break;

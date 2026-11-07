@@ -9,3 +9,5 @@ The new projection model test uses a real temporary Git repository and verifies 
 OpenCode follow-up status ownership fix is source-backed; the retained tests cover stale and recovery error ownership, while a dedicated current-revision time-ordering fixture remains open.
 
 The follow-up search/scroll pass changes project search from Enter-only to text/backspace/delete-triggered starts. Search jobs remain cancellable and generation-bound, and existing result activation opens the real source or buffer. Git wheel handling now runs on the diff listener's capture path so hover/file controls cannot consume scrolling. Portable tests remain77/81 with four skips; the native chain passes106/106.
+
+The latest Git pane pass adds per-file buffer tabs, capture-level wheel handling and a 5 px change bar. File tabs select the real projection identity and scroll to that file; Open File continues to open the corresponding Workspace document. Portable tests remain77/81 with four skips. Native rerun passes106/106 after one earlier AppKit text-dispatch flake. Direct typing inside synthetic patch rows is still intentionally unimplemented until source byte-range mapping is added.
