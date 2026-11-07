@@ -23,6 +23,12 @@ A record owns `doc`, an optional canonical `path`, disk fingerprint and optional
 
 `open` resolves paths against the canonical workspace root and deduplicates canonical names, including symlink aliases. It preserves UTF-8 bytes and CRLF endings exactly. Invalid UTF-8 and embedded-NUL binary files return explicit errors. Files larger than64 MiB are refused before loading. The workspace root is a path base, not a filesystem sandbox.
 
+## Committed change events
+
+`Workspace.apply(id, expected_revision, edits, group, origin)` returns one owned `DocumentChange`. It transfers the successful text transaction's mappings without allocating after commit. Call `deinit` once or transfer the event into `ChangeLog.push`. `DocumentChange.take` moves an existing `text.Change`; do not deinitialize that source afterward.
+
+`ChangeLog` owns at most 128 events and 1 MiB of mapping buffers. `push` cannot fail, evicts older entries, and releases events that exceed the byte limit. `get(index)` returns a borrowed event until the next mutation. `clear` releases all entries. Missing history requires snapshot resynchronization. Undo/redo reset events use empty mappings and monotonic before/after revisions.
+
 ## Saving and closing
 
 `save(id, optional_save_as_path)` captures an immutable text snapshot. It prepares the destination path and file data before publishing, creates an atomic sibling file, writes and syncs its data, preserves an existing file's POSIX permissions, checks the disk fingerprint again and publishes atomically. On successful publication, changing record path and saved-state metadata requires no further allocation.

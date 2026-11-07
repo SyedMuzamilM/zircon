@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 pub const leaf_capacity = 4096;
-pub const Summary = struct { bytes: usize = 0, lines: usize = 0, utf16: usize = 0 };
+pub const Summary = struct { bytes: usize = 0, lines: usize = 0, utf16: usize = 0, bare_cr: usize = 0, starts_lf: bool = false, ends_cr: bool = false };
 pub const Node = struct {
     references: usize = 1,
     height: u16,
@@ -40,15 +40,18 @@ pub fn release(a: Allocator, root: ?*Node) void {
     a.destroy(node);
 }
 fn scan(bytes: []const u8) Summary {
-    var result: Summary = .{ .bytes = bytes.len };
-    for (bytes) |byte| {
+    var result: Summary = .{ .bytes = bytes.len, .starts_lf = bytes.len > 0 and bytes[0] == '\n', .ends_cr = bytes.len > 0 and bytes[bytes.len - 1] == '\r' };
+    for (bytes, 0..) |byte, index| {
+        if (byte == '\r' and (index + 1 == bytes.len or bytes[index + 1] != '\n')) result.bare_cr += 1;
         if (byte == '\n') result.lines += 1;
         if (byte & 0xc0 != 0x80) result.utf16 += if (byte >= 0xf0) @as(usize, 2) else 1;
     }
     return result;
 }
 fn add(a: Summary, b: Summary) !Summary {
-    return .{ .bytes = std.math.add(usize, a.bytes, b.bytes) catch return error.DocumentTooLarge, .lines = std.math.add(usize, a.lines, b.lines) catch return error.DocumentTooLarge, .utf16 = std.math.add(usize, a.utf16, b.utf16) catch return error.DocumentTooLarge };
+    if (a.bytes == 0) return b;
+    if (b.bytes == 0) return a;
+    return .{ .bare_cr = a.bare_cr + b.bare_cr - @intFromBool(a.ends_cr and b.starts_lf), .starts_lf = a.starts_lf, .ends_cr = b.ends_cr, .bytes = std.math.add(usize, a.bytes, b.bytes) catch return error.DocumentTooLarge, .lines = std.math.add(usize, a.lines, b.lines) catch return error.DocumentTooLarge, .utf16 = std.math.add(usize, a.utf16, b.utf16) catch return error.DocumentTooLarge };
 }
 fn leaf(a: Allocator, bytes: []const u8) !?*Node {
     if (bytes.len == 0) return null;

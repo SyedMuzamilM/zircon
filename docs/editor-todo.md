@@ -80,7 +80,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **TEXT-07: One committed document-change path for every edit origin.**
   Depends: BASE-01; EXT-05 for pane integration. Scope: document/workspace events and application propagation. Done: local edits, undo/redo, reload, completion, formatting, agents and project edits carry document identity, revisions/content state, origin and mapping policy; views/search/LSP/preview/recovery receive ordered updates. Verify selections, scroll and collapsed ranges after reset/undo as well as ordinary edits.
-  Progress: [initial shared event contract](progress/2026-11-07-document-events.md) is implemented. Workspace events carry copied mappings and typed origins; Shell publishes typing, completion, search replacement and command edits. Remaining consumers and edit origins are open.
+  Progress: [initial shared event contract](progress/2026-11-07-document-events.md) is implemented. Workspace events transfer owned mappings without post-commit allocation. Shell retains bounded history and publishes typing, completion, search replacement, commands and explicit undo/redo resets, including Vim. Remaining consumers and edit origins are open.
 
 - [ ] **TEXT-08: Encoding and line-ending policy.**
   Depends: TEXT-07; TEXT-04 for persistence integration. Scope: decoding metadata, save policy and encoding UI. Done: explicitly handle UTF-8 BOM and UTF-16, preserve chosen LF/CRLF behavior, reject unsupported/bad input visibly and prevent silent lossy conversion. Track broader legacy encodings under PLATFORM-03.
@@ -107,7 +107,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **LANG-01: Negotiate LSP synchronization and position encoding.**
   Depends: TEXT-07; BASE-03. Scope: language client and change batching. Done: honor None/Full/Incremental and supported encoding, preserve ordered valid versions, bound/coalesce output without losing edits; test a slow server, rapid changes, undo, reopen and Unicode. Measure copied/serialized bytes and queue pressure.
-  Progress: [bounded incremental insertion path](progress/2026-11-07-lsp-incremental.md) now negotiates synchronization/encoding and uses one queued UTF-16 insertion event. Replacements, deletions, multiple mappings, alternate encodings and all remaining consumer migration still fall back or remain open.
+  Progress: [negotiated synchronization](progress/2026-11-07-lsp-incremental.md) honors None/Full/Incremental and UTF-16. Exact insertions, deletions, replacements and disjoint batches reconstruct server text; missing history and undo use ranged replacement. Queue-pressure retries preserve versions. Slow-server/coalescing acceptance and broader application integration remain open.
 
 - [ ] **LANG-02: Persistent grammar worker lifecycle.**
   Delivered correction: `e08fdc5` isolates language-picker rebindings to the affected document, preserves unrelated clients/diagnostics, and rejects stale grammar/resolver epochs. `1f8f99e` locks shared resolver installation writes. Persistent parsing workers, bounded input cancellation and retry policy remain open.

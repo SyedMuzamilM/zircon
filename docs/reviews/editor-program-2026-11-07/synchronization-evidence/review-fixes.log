@@ -1,0 +1,75 @@
+    Finished `release` profile [optimized] target(s) in 0.45s
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.448s
+
+OK
+1 UI example matches compiled source
+check
++- run test
+   +- compile test debug native 1 errors
+apps/zircon/tests/shell_tests.zig:104:71: error: no field named 'ctrl' in struct 'platform.interface.Modifiers'
+    try app.dispatch(h, .{ .key_down = .{ .key = .r, .modifiers = .{ .ctrl = true } } });
+                                                                      ^~~~
+packages/zircon_ui/src/platform/interface.zig:16:30: note: struct declared here
+pub const Modifiers = packed struct(u8) { shift: bool = false, control: bool = false, alt: bool = false, command: bool = false, _padding: u4 = 0 };
+                      ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+referenced by:
+    test_0: apps/zircon/tests/all.zig:4:17
+error: 1 compilation errors
+failed command: /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep agent_fixture --dep language_fixture --dep image_fixture -Mroot=apps/zircon/tests/all.zig -Odebug --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep zircon_editor --dep zircon_git --dep zircon_extensions --dep zircon_search --dep zircon_language --dep zircon_markdown --dep zircon_agent -Mzircon=apps/zircon/src/root.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig -Odebug --dep zircon_text -Mzircon_workspace=packages/zircon_workspace/src/root.zig -Magent_fixture=packages/zircon_agent/tests/fixture.py -Mlanguage_fixture=packages/zircon_language/tests/fixture.py -Mimage_fixture=packages/zircon_extensions/tests/fixtures/pixel.png -Odebug --dep zircon_text --dep zircon_ui -Mzircon_editor=packages/zircon_editor/src/root.zig -Odebug -Mzircon_git=packages/zircon_git/src/root.zig -Odebug --dep oxide_manifest -Mzircon_extensions=packages/zircon_extensions/src/root.zig -Odebug --dep zircon_text -Mzircon_search=packages/zircon_search/src/root.zig -Odebug --dep zircon_text -Mzircon_language=packages/zircon_language/src/root.zig -Odebug -Mzircon_markdown=packages/zircon_markdown/src/root.zig -Odebug -Mzircon_agent=packages/zircon_agent/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -Moxide_manifest=packages/zircon_extensions/examples/oxide/extension.json --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/ --listen=-
+
+Build Summary: 39/42 steps succeeded (1 failed); 113/113 tests passed
+check transitive failure
++- run test cached
+|  +- compile test debug native cached 68ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 64ms MaxRSS:31M
++- run test 11 pass (11 total) 371ms MaxRSS:3M
+|  +- compile test debug native success 1s MaxRSS:290M
++- run test 15 pass (15 total) 1s MaxRSS:16M
+|  +- compile test debug native success 2s MaxRSS:348M
++- run test cached
+|  +- compile test debug native cached 66ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 60ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 68ms MaxRSS:31M
++- contracts success
+|  +- compile test debug native success 243ms MaxRSS:100M
+|  |  +- options cached
+|  +- compile test debug native success 264ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 235ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 248ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 223ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 226ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 257ms MaxRSS:100M
+|     +- options (reused)
++- examples-check success
+|  +- compile exe counter-tree debug native cached 66ms MaxRSS:31M
+|  |  +- options (reused)
+|  +- run python3 success 45ms
+|  +- run python3 success 531ms
+|  +- compile exe zircon-counter debug native cached 67ms MaxRSS:32M
+|     +- options cached
++- run test cached
+|  +- compile test debug native cached 67ms MaxRSS:31M
+|     +- options (reused)
++- run test 17 pass (17 total) 4s MaxRSS:37M
+|  +- compile test debug native success 1s MaxRSS:272M
++- run test 25 pass (25 total) 429ms MaxRSS:6M
+|  +- compile test debug native success 1s MaxRSS:326M
++- run test 45 pass (45 total) 1s MaxRSS:13M
+|  +- compile test debug native success 2s MaxRSS:354M
+|     +- options (reused)
++- run test transitive failure
+|  +- compile test debug native 1 errors
+|  |  +- options (reused)
+|  +- run cargo success 545ms
++- zig fmt --check success
+

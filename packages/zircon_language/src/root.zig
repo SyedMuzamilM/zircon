@@ -4,6 +4,7 @@ pub const Client = @import("client.zig").Client;
 pub const Config = @import("client.zig").Config;
 pub const Wake = @import("client.zig").Wake;
 pub const Status = @import("client.zig").Status;
+pub const SynchronizationOptions = @import("synchronization.zig").Options;
 pub const Position = @import("model.zig").Position;
 pub const Range = @import("model.zig").Range;
 pub const Diagnostic = @import("model.zig").Diagnostic;

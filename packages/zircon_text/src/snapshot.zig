@@ -33,6 +33,11 @@ pub const Snapshot = struct {
     pub fn lineCount(self: Snapshot) usize {
         return rope.summary(self.root).lines + 1;
     }
+    /// True when CR introduces a line without a following LF. Protocol clients
+    /// use this to select universal-line coordinates without scanning LF/CRLF text.
+    pub fn hasBareCarriageReturn(self: Snapshot) bool {
+        return rope.summary(self.root).bare_cr != 0;
+    }
     pub fn utf16Len(self: Snapshot) usize {
         return rope.summary(self.root).utf16;
     }

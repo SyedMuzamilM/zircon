@@ -27,12 +27,56 @@ pub fn deinitMessages(a: std.mem.Allocator, messages: []Message) void {
     a.free(messages);
 }
 pub fn positionAt(snapshot: text.Snapshot, offset: usize) !Position {
-    const point = try snapshot.pointAt(offset);
-    const start = try snapshot.lineStart(point.line);
-    return .{ .line = point.line, .character = (try snapshot.utf16Offset(offset)) - (try snapshot.utf16Offset(start)) };
+    if (!snapshot.isBoundary(offset)) return error.InvalidOffset;
+    if (offset > 0 and offset < snapshot.byteLen() and (try snapshot.byteAt(offset - 1)) == '\r' and (try snapshot.byteAt(offset)) == '\n') return error.InvalidPosition;
+    if (!snapshot.hasBareCarriageReturn()) {
+        const point = try snapshot.pointAt(offset);
+        const start = try snapshot.lineStart(point.line);
+        return .{ .line = point.line, .character = (try snapshot.utf16Offset(offset)) - (try snapshot.utf16Offset(start)) };
+    }
+    var result: Position = .{ .line = 0, .character = 0 };
+    var previous_cr = false;
+    var chunks = try snapshot.chunks(.{ .start = 0, .end = offset });
+    while (chunks.next()) |part| for (part) |byte| {
+        if (byte == '\r' or byte == '\n') {
+            if (byte != '\n' or !previous_cr) result.line += 1;
+            result.character = 0;
+        } else if (byte & 0xc0 != 0x80) result.character += if (byte >= 0xf0) @as(usize, 2) else 1;
+        previous_cr = byte == '\r';
+    };
+    return result;
 }
 pub fn offsetAt(snapshot: text.Snapshot, position: Position) !usize {
-    const line = try snapshot.lineRange(position.line);
+    var line: text.Range = undefined;
+    if (!snapshot.hasBareCarriageReturn()) {
+        line = try snapshot.lineRange(position.line);
+    } else {
+        var row: usize = 0;
+        var at: usize = 0;
+        var start: usize = 0;
+        var end: ?usize = null;
+        var previous_cr = false;
+        var chunks = try snapshot.chunks(.{ .start = 0, .end = snapshot.byteLen() });
+        outer: while (chunks.next()) |part| for (part) |byte| {
+            defer at += 1;
+            if (byte == '\n' and previous_cr) {
+                start = at + 1;
+                previous_cr = false;
+                continue;
+            }
+            if (byte == '\r' or byte == '\n') {
+                if (row == position.line) {
+                    end = at;
+                    break :outer;
+                }
+                row += 1;
+                start = at + 1;
+            }
+            previous_cr = byte == '\r';
+        };
+        if (row != position.line) return error.InvalidPosition;
+        line = .{ .start = start, .end = end orelse snapshot.byteLen() };
+    }
     const base = try snapshot.utf16Offset(line.start);
     const absolute = std.math.add(usize, base, position.character) catch return error.InvalidPosition;
     const at = try snapshot.byteOffsetFromUtf16(absolute);

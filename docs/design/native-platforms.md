@@ -44,4 +44,4 @@ Then add PTY transport, dialogs, file paths, IME, accessibility and packaging. C
 
 ## Current evidence
 
-`./tools/zig build test-build -Dtarget=x86_64-linux-gnu` passes 14/14 portable compilation steps. `./tools/zig build test-build -Dtarget=x86_64-windows-gnu` now also passes 14/14 after replacing POSIX-only permission constructors with platform-aware values. No Linux or Windows native window journey has run. Docker Desktop is available locally, but its daemon is not running in this session. No Windows execution environment is linked.
+`./tools/zig build test-build -Dtarget=x86_64-linux-gnu` passes 14/14 portable compilation steps. `./tools/zig build test-build -Dtarget=x86_64-windows-gnu` now also passes 14/14 after replacing POSIX-only permission constructors with platform-aware values. No Linux or Windows native window journey has run. Docker Desktop currently provides a running Linux/aarch64 daemon. An earlier session observed it stopped; that observation is superseded. No Windows execution environment is linked.

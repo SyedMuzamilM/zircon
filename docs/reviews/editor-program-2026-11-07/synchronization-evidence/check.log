@@ -1,0 +1,61 @@
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.452s
+
+OK
+1 UI example matches compiled source
+    Finished `release` profile [optimized] target(s) in 0.38s
+Build Summary: 42/42 steps succeeded; 94/98 tests passed (4 skipped)
+check success
++- run test cached
+|  +- compile test debug native cached 51ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 78ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 67ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 69ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 68ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 77ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 82ms MaxRSS:31M
++- contracts success
+|  +- compile test debug native success 312ms MaxRSS:100M
+|  |  +- options cached
+|  +- compile test debug native success 315ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 295ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 221ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 305ms MaxRSS:103M
+|  |  +- options (reused)
+|  +- compile test debug native success 286ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 295ms MaxRSS:101M
+|     +- options (reused)
++- examples-check success
+|  +- compile exe counter-tree debug native cached 100ms MaxRSS:31M
+|  |  +- options (reused)
+|  +- run python3 success 66ms
+|  +- run python3 success 537ms
+|  +- compile exe zircon-counter debug native cached 60ms MaxRSS:32M
+|     +- options cached
++- run test cached
+|  +- compile test debug native cached 98ms MaxRSS:31M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 49ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 49ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 87ms MaxRSS:31M
+|     +- options (reused)
++- run test 94 pass, 4 skip (98 total) 14s MaxRSS:227M
+|  +- compile test debug native success 5s MaxRSS:789M
+|  |  +- options (reused)
+|  +- run cargo success 452ms
++- zig fmt --check success
+

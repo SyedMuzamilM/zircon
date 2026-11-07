@@ -35,6 +35,76 @@ test "editor input publishes one ordered document change with a typed origin" {
     try t.expectEqual(@as(usize, 0), try app.read(owner, zircon.Shell.documentChangeCount, .{}));
 }
 
+test "command undo and redo publish reset events in document revision order" {
+    const Commands = struct {
+        fn execute(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), command: zircon.Command) !void {
+            var click: ui.Event(ui.Click) = .{ .data = .{} };
+            try self.onCommand(&click, cx, command);
+        }
+        fn check(self: *const zircon.Shell) !void {
+            try t.expectEqual(@as(usize, 3), self.document_changes.len);
+            const typed = self.document_changes.get(0).?;
+            const undone = self.document_changes.get(1).?;
+            const redone = self.document_changes.get(2).?;
+            try t.expectEqual(zircon_workspace.ChangeOrigin.undo, undone.origin);
+            try t.expectEqual(zircon_workspace.ChangeOrigin.redo, redone.origin);
+            try t.expectEqual(typed.after, undone.before);
+            try t.expectEqual(undone.after, redone.before);
+            try t.expectEqual(@as(usize, 0), undone.mappings.len);
+            try t.expectEqual(typed.state, redone.state);
+        }
+    };
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var shell = try zircon.Shell.init(t.allocator, t.io, ".", null);
+    const h = app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, shell) catch |err| {
+        shell.deinit(t.allocator);
+        return err;
+    };
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "hello" });
+    try app.update(owner, Commands.execute, .{.undo});
+    try app.update(owner, Commands.execute, .{.redo});
+    try app.read(owner, Commands.check, .{});
+}
+test "Vim undo and redo publish their actual history origins" {
+    const Commands = struct {
+        fn execute(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), command: zircon.Command) !void {
+            var click: ui.Event(ui.Click) = .{ .data = .{} };
+            try self.onCommand(&click, cx, command);
+        }
+        fn check(self: *const zircon.Shell) !void {
+            try t.expectEqual(@as(usize, 3), self.document_changes.len);
+            const typed = self.document_changes.get(0).?;
+            const undone = self.document_changes.get(1).?;
+            const redone = self.document_changes.get(2).?;
+            try t.expectEqual(zircon_workspace.ChangeOrigin.undo, undone.origin);
+            try t.expectEqual(zircon_workspace.ChangeOrigin.redo, redone.origin);
+            try t.expectEqual(typed.after, undone.before);
+            try t.expectEqual(undone.after, redone.before);
+            try t.expectEqual(@as(usize, 0), undone.mappings.len);
+            try t.expectEqual(typed.state, redone.state);
+        }
+    };
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var shell = try zircon.Shell.init(t.allocator, t.io, ".", null);
+    const h = app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, shell) catch |err| {
+        shell.deinit(t.allocator);
+        return err;
+    };
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "hello" });
+    try app.update(owner, Commands.execute, .{.toggle_vim});
+    try app.dispatch(h, .{ .text = "u" });
+    try app.dispatch(h, .{ .key_down = .{ .key = .r, .modifiers = .{ .control = true } } });
+    try app.read(owner, Commands.check, .{});
+}
+
 const Ops = struct {
     fn add(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
         try self.newFile();

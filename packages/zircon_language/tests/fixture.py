@@ -1,6 +1,7 @@
 """Deterministic stdio LSP subprocess used by Zig integration tests."""
 import json
 import os
+import re
 import sys
 import time
 
@@ -39,7 +40,25 @@ def read():
             length = int(line.split(b":", 1)[1].strip())
     return json.loads(sys.stdin.buffer.read(length))
 
-mode = sys.argv[1] if len(sys.argv) > 1 else "full"
+def offset_at(source, position):
+    # Python splitlines also splits Unicode separators, which LSP does not.
+    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", source)
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines or source.endswith(("\n", "\r")):
+        lines.append("")
+    line = position["line"]
+    assert 0 <= line < len(lines), position
+    content = lines[line].rstrip("\r\n")
+    prefix = "".join(lines[:line])
+    units = 0
+    for index, character in enumerate(content):
+        if units == position["character"]:
+            return len(prefix) + index
+        units += len(character.encode("utf-16-le")) // 2
+    assert units == position["character"], position
+    return len(prefix) + len(content)
+
 opened = {}
 completions = []
 initialized = False
@@ -53,7 +72,18 @@ while True:
     if method == "initialize":
         sys.stderr.write("fixture stderr " + "x" * 80000 + "\n")
         sys.stderr.flush()
-        send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": {"textDocumentSync": 2 if mode == "incremental" else 1, "positionEncoding": "utf-16", "completionProvider": {}}}})
+        assert params["capabilities"]["general"]["positionEncodings"] == ["utf-16"]
+        capabilities = {"positionEncoding": "utf-16", "completionProvider": {}}
+        if mode != "sync-omitted":
+            capabilities["textDocumentSync"] = (
+                {"openClose": True, "change": 2} if mode == "incremental-object"
+                else {"openClose": True, "change": 0} if mode == "sync-none-open"
+                else 0 if mode == "sync-none"
+                else 2 if mode == "incremental" else 1
+            )
+        if mode == "unsupported-encoding":
+            capabilities["positionEncoding"] = "utf-8"
+        send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": capabilities}})
     elif method == "initialized":
         assert isinstance(message.get("params"), dict), "initialized params must be a JSON object"
         initialized = True
@@ -62,6 +92,7 @@ while True:
         send({"jsonrpc": "2.0", "id": "server-1", "method": "workspace/unsupported", "params": {}})
     elif method == "textDocument/didOpen":
         assert initialized
+        assert mode not in ("sync-none", "sync-omitted")
         document = params["textDocument"]
         opened[document["uri"]] = document
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"], "version": document["version"], "diagnostics": [{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}}, "severity": 2, "message": "emoji warning", "source": "fixture"}]}})
@@ -69,10 +100,20 @@ while True:
         document = params["textDocument"]
         old = opened[document["uri"]]
         assert document["version"] > old["version"]
-        if mode == "incremental":
-            assert "range" in params["contentChanges"][0]
+        assert mode not in ("sync-none", "sync-none-open", "sync-omitted")
         old.update(document)
-        old["text"] = params["contentChanges"][0]["text"] if "range" not in params["contentChanges"][0] else old["text"]
+        for change in params["contentChanges"]:
+            if mode in ("incremental", "incremental-object"):
+                assert "range" in change
+                start = offset_at(old["text"], change["range"]["start"])
+                end = offset_at(old["text"], change["range"]["end"])
+                assert start <= end
+                old["text"] = old["text"][:start] + change["text"] + old["text"][end:]
+            else:
+                assert "range" not in change
+                old["text"] = change["text"]
+        if mode in ("incremental", "incremental-object", "verify-full"):
+            send({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 3, "message": "sync:" + json.dumps({"version": old["version"], "text": old["text"], "changes": len(params["contentChanges"])}, ensure_ascii=False)}})
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"], "version": document["version"], "diagnostics": []}})
     elif method == "textDocument/completion":
         assert params["position"]["character"] == 3

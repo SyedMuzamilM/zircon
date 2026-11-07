@@ -342,3 +342,26 @@ test "multi-byte original chunks split only at code points and index every line"
     const pattern = "🙂é\r\n日";
     try t.expectEqual(text.Range{ .start = 3, .end = 14 }, (try snapshot.find(pattern, 0, .forward, true)).?);
 }
+
+test "bare CR detection composes across rope leaves and edits" {
+    const bytes = try t.allocator.alloc(u8, 8192);
+    defer t.allocator.free(bytes);
+    @memset(bytes, 'x');
+    bytes[4095] = '\r';
+    bytes[4096] = '\n';
+    var doc = try text.Document.init(t.allocator, bytes);
+    defer doc.deinit();
+    var first = doc.snapshot();
+    defer first.deinit();
+    try t.expect(!first.hasBareCarriageReturn());
+    var change = try doc.apply(first.revision(), &.{.{ .range = .{ .start = 4096, .end = 4097 }, .text = "" }}, 0);
+    defer change.deinit();
+    var after = doc.snapshot();
+    defer after.deinit();
+    try t.expect(after.hasBareCarriageReturn());
+    _ = try after.debugValidate();
+    _ = try doc.undo();
+    var undone = doc.snapshot();
+    defer undone.deinit();
+    try t.expect(!undone.hasBareCarriageReturn());
+}

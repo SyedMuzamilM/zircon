@@ -6,7 +6,7 @@ const ui = @import("zircon_ui");
 const selection = @import("selections.zig");
 const commands = @import("commands.zig");
 const syntax = @import("syntax.zig");
-pub const Outcome = struct { request_find: bool = false, handled: bool = false, change: ?text.Change = null, reset: bool = false };
+pub const Outcome = struct { request_find: bool = false, handled: bool = false, change: ?text.Change = null, reset: bool = false, history_reset: ?struct { before: u64, action: enum { undo, redo } } = null };
 const SelectionHistory = struct { state: u64, items: []selection.Selection };
 var next_group = std.atomic.Value(u64).init(1);
 pub const Editor = struct {
@@ -322,7 +322,7 @@ pub const Editor = struct {
                     self.synchronize(current);
                     self.reveal(current);
                 }
-                return .{ .handled = true, .reset = changed };
+                return .{ .handled = true, .reset = changed, .history_reset = if (changed) .{ .before = snapshot.revision(), .action = if (command == .undo) .undo else .redo } else null };
             },
             .indent, .outdent => return self.indent(document, snapshot, command == .outdent),
             .newline => return self.newline(document, snapshot),

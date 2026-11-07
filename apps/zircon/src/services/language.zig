@@ -220,7 +220,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (doc.version) |version| {
             if (version == source.revision()) continue;
             if (self.documentChangeSince(doc.id, version, source.revision())) |change| {
-                try client.didChangeIncremental(doc.uri, source, change.mappings);
+                try client.didChangeEdits(doc.uri, change.before, source, change.mappings);
             } else try client.didChange(doc.uri, source);
             if (doc.diagnostics) |*value| value.deinit();
             doc.diagnostics = null;

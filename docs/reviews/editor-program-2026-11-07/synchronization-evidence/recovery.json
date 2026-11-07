@@ -1,0 +1,30 @@
+[
+  {
+    "scenario": "saved-untitled-panes",
+    "result": "passed",
+    "terminated_by": "SIGKILL",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  },
+  {
+    "scenario": "external-rewrite",
+    "result": "passed",
+    "terminated_by": "SIGKILL",
+    "original_file_sha256": "6a02998fc887029bb9f1640553871d8764c1db7c210b18d609734265f3d42533"
+  },
+  {
+    "scenario": "discarded-document",
+    "result": "passed",
+    "terminated_by": "SIGKILL",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  },
+  {
+    "scenario": "close-clean",
+    "result": "passed",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  },
+  {
+    "scenario": "close-discard",
+    "result": "passed",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  }
+]

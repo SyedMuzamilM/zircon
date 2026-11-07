@@ -21,12 +21,53 @@ pub const DocumentChange = struct {
     before: u64,
     after: u64,
     state: u64,
-    mappings: []text.Mapping,
+    mappings: []const text.Mapping,
     allocator: std.mem.Allocator,
+    /// Takes the transaction's existing mapping buffer without allocating.
+    pub fn take(id: DocumentId, origin: ChangeOrigin, change: text.Change) DocumentChange {
+        return .{ .allocator = change.allocator, .document = id, .origin = origin, .before = change.before, .after = change.after, .state = change.state, .mappings = change.mappings };
+    }
     pub fn deinit(self: *DocumentChange) void {
         // The mapping buffer is owned by the workspace/application event.
         self.allocator.free(self.mappings);
         self.* = undefined;
+    }
+};
+/// Bounded recent edit history. Missing entries require consumers to resync
+/// from current text. Insertion takes ownership and cannot fail after an edit.
+pub const ChangeLog = struct {
+    pub const capacity = 128;
+    pub const max_mapping_bytes = 1024 * 1024;
+    entries: [capacity]?DocumentChange = @splat(null),
+    first: usize = 0,
+    len: usize = 0,
+    mapping_bytes: usize = 0,
+    pub fn get(self: *const ChangeLog, index: usize) ?*const DocumentChange {
+        if (index >= self.len) return null;
+        return &self.entries[(self.first + index) % capacity].?;
+    }
+    fn evict(self: *ChangeLog) void {
+        const entry = &self.entries[self.first].?;
+        self.mapping_bytes -= entry.mappings.len * @sizeOf(text.Mapping);
+        entry.deinit();
+        self.entries[self.first] = null;
+        self.first = (self.first + 1) % capacity;
+        self.len -= 1;
+    }
+    pub fn clear(self: *ChangeLog) void {
+        while (self.len > 0) self.evict();
+    }
+    pub fn push(self: *ChangeLog, value: DocumentChange) void {
+        var event = value;
+        const bytes = event.mappings.len * @sizeOf(text.Mapping);
+        if (event.before == event.after or bytes > max_mapping_bytes) {
+            event.deinit();
+            return;
+        }
+        while (self.len == capacity or self.mapping_bytes > max_mapping_bytes - bytes) self.evict();
+        self.entries[(self.first + self.len) % capacity] = event;
+        self.mapping_bytes += bytes;
+        self.len += 1;
     }
 };
 pub const Record = struct {
@@ -90,18 +131,7 @@ pub const Workspace = struct {
     /// subscribers such as recovery, Git, language services and views.
     pub fn apply(workspace: *Workspace, id: DocumentId, expected: u64, edits: []const text.Edit, group: u64, origin: ChangeOrigin) !DocumentChange {
         const record = try workspace.get(id);
-        const change = try record.doc.apply(expected, edits, group);
-        defer {
-            // The event owns a copied mapping list, not the text transaction.
-            var owned = change;
-            owned.deinit();
-        }
-        return try workspace.copyChange(id, origin, &change);
-    }
-    pub fn copyChange(workspace: *const Workspace, id: DocumentId, origin: ChangeOrigin, change: *const text.Change) !DocumentChange {
-        const mappings = try workspace.allocator.alloc(text.Mapping, change.mappings.len);
-        @memcpy(mappings, change.mappings);
-        return .{ .allocator = workspace.allocator, .document = id, .origin = origin, .before = change.before, .after = change.after, .state = change.state, .mappings = mappings };
+        return DocumentChange.take(id, origin, try record.doc.apply(expected, edits, group));
     }
     pub fn open(workspace: *Workspace, path: []const u8) !DocumentId {
         const absolute = try workspace.absolutePath(path);

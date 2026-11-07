@@ -6,13 +6,15 @@ const builtin = @import("builtin");
 const text = @import("zircon_text");
 const frame = @import("framing.zig");
 const model = @import("model.zig");
+const synchronization = @import("synchronization.zig");
+const DocumentState = struct { snapshot: text.Snapshot };
 const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
-pub const Config = struct { environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
+pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
 const Pending = struct { kind: enum { initialize, completion, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
-    pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0 };
+    pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0, change_text_bytes: u64 = 0, incremental_changes: u64 = 0, resync_changes: u64 = 0 };
     counters: Stats = .{},
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -28,19 +30,20 @@ pub const Client = struct {
     stdout_ended: std.atomic.Value(bool) = .init(false),
     shutdown_answer: std.atomic.Value(bool) = .init(false),
     completion_supported: std.atomic.Value(bool) = .init(false),
-    sync_kind: enum { none, full, incremental } = .full,
-    position_encoding: enum { utf8, utf16, utf32 } = .utf16,
+    sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
     outgoing: std.ArrayList([]u8) = .empty,
     outgoing_bytes: usize = 0,
+    outgoing_limit_bytes: usize = 16 * 1024 * 1024,
     incoming: std.ArrayList(model.Message) = .empty,
     incoming_bytes: usize = 0,
     pending: std.AutoHashMapUnmanaged(u64, Pending) = .empty,
-    documents: std.StringHashMapUnmanaged(u64) = .empty,
+    documents: std.StringHashMapUnmanaged(DocumentState) = .empty,
     next_id: u64 = 2,
     stderr_bytes: std.ArrayList(u8) = .empty,
     pub fn start(a: std.mem.Allocator, io: std.Io, config: Config) !*Client {
+        if (config.outgoing_limit_bytes == 0 or config.outgoing_limit_bytes > 16 * 1024 * 1024) return error.InvalidOutgoingLimit;
         if (config.command.len == 0 or std.mem.indexOfScalar(u8, config.command, 0) != null) return error.InvalidServerCommand;
         var argv: std.ArrayList([]const u8) = .empty;
         defer argv.deinit(a);
@@ -53,7 +56,7 @@ pub const Client = struct {
         var transferred = false;
         errdefer if (!transferred) forceKill(&child, io);
         const self = try a.create(Client);
-        self.* = .{ .allocator = a, .io = io, .owner = std.Thread.getCurrentId(), .child = child, .wake = config.wake };
+        self.* = .{ .allocator = a, .io = io, .owner = std.Thread.getCurrentId(), .child = child, .wake = config.wake, .outgoing_limit_bytes = config.outgoing_limit_bytes };
         transferred = true;
         errdefer {
             self.stopWriter();
@@ -73,7 +76,7 @@ pub const Client = struct {
         try self.pending.put(transport_allocator, 1, .{ .kind = .initialize });
         const root_uri = try model.fileUri(a, config.root_path orelse config.cwd);
         defer a.free(root_uri);
-        try self.enqueue(.{ .jsonrpc = "2.0", .id = @as(u64, 1), .method = "initialize", .params = .{ .processId = @as(?u32, null), .rootUri = root_uri, .initializationOptions = config.initialization_options, .capabilities = .{ .textDocument = .{ .synchronization = .{ .didSave = false }, .completion = .{ .completionItem = .{ .snippetSupport = false, .insertReplaceSupport = false } }, .publishDiagnostics = .{ .versionSupport = true } } }, .clientInfo = .{ .name = "Zircon", .version = "0.1.0" } } });
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = @as(u64, 1), .method = "initialize", .params = .{ .processId = @as(?u32, null), .rootUri = root_uri, .initializationOptions = config.initialization_options, .capabilities = .{ .general = .{ .positionEncodings = [_][]const u8{"utf-16"} }, .textDocument = .{ .synchronization = .{ .didSave = false }, .completion = .{ .completionItem = .{ .snippetSupport = false, .insertReplaceSupport = false } }, .publishDiagnostics = .{ .versionSupport = true } } }, .clientInfo = .{ .name = "Zircon", .version = "0.1.0" } } });
         self.writer_thread = try std.Thread.spawn(.{}, writerMain, .{self});
         self.output_thread = try std.Thread.spawn(.{}, readMain, .{self});
         self.error_thread = try std.Thread.spawn(.{}, stderrMain, .{self});
@@ -95,50 +98,71 @@ pub const Client = struct {
         const owned = try self.allocator.dupe(u8, uri);
         errdefer self.allocator.free(owned);
         try self.documents.ensureUnusedCapacity(self.allocator, 1);
-        const bytes = try snapshot.copy(self.allocator, .{ .start = 0, .end = snapshot.byteLen() });
-        defer self.allocator.free(bytes);
-        try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didOpen", .params = .{ .textDocument = .{ .uri = uri, .languageId = language, .version = snapshot.revision(), .text = bytes } } });
-        self.documents.putAssumeCapacity(owned, snapshot.revision());
+        if (self.sync_options.open_close) {
+            const bytes = try snapshot.copy(self.allocator, .{ .start = 0, .end = snapshot.byteLen() });
+            defer self.allocator.free(bytes);
+            try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didOpen", .params = .{ .textDocument = .{ .uri = uri, .languageId = language, .version = snapshot.revision(), .text = bytes } } });
+        }
+        self.documents.putAssumeCapacity(owned, .{ .snapshot = snapshot.clone() });
     }
     pub fn didChange(self: *Client, uri: []const u8, snapshot: text.Snapshot) !void {
-        try self.check();
-        const current = self.documents.getPtr(uri) orelse return error.DocumentNotOpen;
-        if (snapshot.revision() <= current.*) return error.StaleDocumentVersion;
-        const bytes = try snapshot.copy(self.allocator, .{ .start = 0, .end = snapshot.byteLen() });
-        defer self.allocator.free(bytes);
-        try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didChange", .params = .{ .textDocument = .{ .uri = uri, .version = snapshot.revision() }, .contentChanges = [_]struct { text: []const u8 }{.{ .text = bytes }} } });
-        current.* = snapshot.revision();
+        return self.change(uri, snapshot, null, &.{});
     }
-    /// Send one retained edit incrementally when the server negotiated it.
-    /// Multiple mappings fall back to one full snapshot until the caller has a
-    /// complete ordered edit batch. This preserves correctness at the protocol
-    /// boundary while allowing ordinary typing to avoid whole-document copies.
-    pub fn didChangeIncremental(self: *Client, uri: []const u8, snapshot: text.Snapshot, mappings: []const text.Mapping) !void {
+    /// Ranges are validated against the exact last enqueued snapshot. Missing
+    /// retained events use a ranged whole-document replacement for incremental
+    /// servers. Queue failures leave both the snapshot and version unchanged.
+    pub fn didChangeEdits(self: *Client, uri: []const u8, before: u64, snapshot: text.Snapshot, mappings: []const text.Mapping) !void {
+        return self.change(uri, snapshot, before, mappings);
+    }
+    fn change(self: *Client, uri: []const u8, snapshot: text.Snapshot, before: ?u64, mappings: []const text.Mapping) !void {
         try self.check();
-        if (self.sync_kind != .incremental or self.position_encoding != .utf16 or mappings.len != 1 or mappings[0].range.start != mappings[0].range.end) return self.didChange(uri, snapshot);
         const current = self.documents.getPtr(uri) orelse return error.DocumentNotOpen;
-        if (snapshot.revision() <= current.*) return error.StaleDocumentVersion;
-        const mapping = mappings[0];
-        const end_offset = std.math.add(usize, mapping.range.start, mapping.inserted) catch return error.InvalidTextRange;
-        if (end_offset > snapshot.byteLen()) return error.InvalidTextRange;
-        const text_bytes = try snapshot.copy(self.allocator, .{ .start = mapping.range.start, .end = end_offset });
-        defer self.allocator.free(text_bytes);
-        const point = try @import("model.zig").positionAt(snapshot, mapping.range.start);
-        const edit_range: @import("model.zig").Range = .{ .start = point, .end = point };
-        try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didChange", .params = .{ .textDocument = .{ .uri = uri, .version = snapshot.revision() }, .contentChanges = [_]struct { range: @import("model.zig").Range, text: []const u8 }{.{ .range = edit_range, .text = text_bytes }} } });
-        current.* = snapshot.revision();
+        if (snapshot.revision() <= current.snapshot.revision()) return error.StaleDocumentVersion;
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        var text_bytes: usize = 0;
+        var incremental = false;
+        var resync = false;
+        switch (self.sync_options.kind) {
+            .none => {},
+            .full => {
+                const bytes = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
+                try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didChange", .params = .{ .textDocument = .{ .uri = uri, .version = snapshot.revision() }, .contentChanges = [_]struct { text: []const u8 }{.{ .text = bytes }} } });
+                text_bytes = bytes.len;
+            },
+            .incremental => {
+                const changes = if (before == current.snapshot.revision())
+                    try synchronization.edits(a, current.snapshot, snapshot, mappings)
+                else
+                    try synchronization.replacement(a, current.snapshot, snapshot);
+                try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didChange", .params = .{ .textDocument = .{ .uri = uri, .version = snapshot.revision() }, .contentChanges = changes } });
+                for (changes) |content_change| text_bytes += content_change.text.len;
+                incremental = true;
+                resync = before != current.snapshot.revision() or mappings.len == 0;
+            },
+        }
+        self.lock.lockUncancelable(self.io);
+        self.counters.change_text_bytes +%= text_bytes;
+        if (incremental) self.counters.incremental_changes +%= 1;
+        if (resync) self.counters.resync_changes +%= 1;
+        self.lock.unlock(self.io);
+        var previous = current.snapshot;
+        current.snapshot = snapshot.clone();
+        previous.deinit();
     }
     pub fn didClose(self: *Client, uri: []const u8) !void {
         try self.check();
         if (!self.documents.contains(uri)) return error.DocumentNotOpen;
-        try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didClose", .params = .{ .textDocument = .{ .uri = uri } } });
-        const old = self.documents.fetchRemove(uri).?;
+        if (self.sync_options.open_close) try self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didClose", .params = .{ .textDocument = .{ .uri = uri } } });
+        var old = self.documents.fetchRemove(uri).?;
+        old.value.snapshot.deinit();
         self.allocator.free(old.key);
     }
     pub fn completion(self: *Client, uri: []const u8, version: u64, cursor_position: model.Position) !u64 {
         try self.check();
         if (!self.completion_supported.load(.acquire)) return error.CompletionNotSupported;
-        if ((self.documents.get(uri) orelse return error.DocumentNotOpen) != version) return error.StaleDocumentVersion;
+        if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
         const id = try self.requestId();
         const owned = try transport_allocator.dupe(u8, uri);
         errdefer transport_allocator.free(owned);
@@ -185,7 +209,7 @@ pub const Client = struct {
     pub fn deinit(self: *Client) void {
         std.debug.assert(self.owner == std.Thread.getCurrentId());
         const was_ready = self.status() == .ready;
-        if (was_ready) {
+        if (was_ready and self.sync_options.open_close) {
             var documents = self.documents.keyIterator();
             while (documents.next()) |uri| self.enqueue(.{ .jsonrpc = "2.0", .method = "textDocument/didClose", .params = .{ .textDocument = .{ .uri = uri.* } } }) catch {};
         }
@@ -242,8 +266,11 @@ pub const Client = struct {
         var pending = self.pending.valueIterator();
         while (pending.next()) |item| transport_allocator.free(item.uri);
         self.pending.deinit(transport_allocator);
-        var documents = self.documents.keyIterator();
-        while (documents.next()) |key| self.allocator.free(key.*);
+        var documents = self.documents.iterator();
+        while (documents.next()) |entry| {
+            entry.value_ptr.snapshot.deinit();
+            self.allocator.free(entry.key_ptr.*);
+        }
         self.documents.deinit(self.allocator);
         self.stderr_bytes.deinit(transport_allocator);
     }
@@ -255,7 +282,7 @@ pub const Client = struct {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
         if (self.stopping.load(.acquire)) return error.ClientClosing;
-        if (bytes.len > 16 * 1024 * 1024 or self.outgoing_bytes > 16 * 1024 * 1024 - bytes.len) return error.OutgoingQueueFull;
+        if (bytes.len > self.outgoing_limit_bytes or self.outgoing_bytes > self.outgoing_limit_bytes - bytes.len) return error.OutgoingQueueFull;
         try self.outgoing.append(transport_allocator, bytes);
         self.outgoing_bytes += bytes.len;
         self.counters.queued_messages +%= 1;
@@ -512,28 +539,7 @@ fn parse(self: *Client, body: []const u8) !void {
     switch (request.kind) {
         .initialize => {
             const capabilities = field(result, "capabilities") orelse return error.InvalidInitializeResult;
-            if (field(capabilities, "textDocumentSync")) |sync| {
-                if (sync == .integer) {
-                    self.sync_kind = switch (sync.integer) {
-                        0 => .none,
-                        2 => .incremental,
-                        else => .full,
-                    };
-                } else if (sync == .object) {
-                    if (field(sync, "change")) |change| {
-                        if (change == .integer) {
-                            self.sync_kind = switch (change.integer) {
-                                0 => .none,
-                                2 => .incremental,
-                                else => .full,
-                            };
-                        }
-                    }
-                }
-            }
-            if (field(capabilities, "positionEncoding")) |encoding| {
-                if (encoding == .string) self.position_encoding = if (std.mem.eql(u8, encoding.string, "utf-8")) .utf8 else if (std.mem.eql(u8, encoding.string, "utf-32")) .utf32 else .utf16;
-            }
+            self.sync_options = try synchronization.Options.parse(capabilities);
             const supported = if (field(capabilities, "completionProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.completion_supported.store(supported, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });

@@ -321,9 +321,12 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
     } else self.overlay = .none;
 }
 pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome, origin: ws.ChangeOrigin) !void {
-    if (outcome.change) |*change| try self.publishDocumentChange(id, origin, change);
-    defer if (outcome.change) |*change| change.deinit();
+    defer if (outcome.change) |change| {
+        self.publishDocumentChange(id, origin, change);
+        outcome.change = null;
+    } else if (outcome.history_reset) |reset| self.publishDocumentReset(id, if (reset.action == .undo) .undo else .redo, reset.before);
     if (outcome.change == null and !outcome.reset) return;
+    defer cx.notify();
     self.language.clearCompletion();
     var snapshot = try self.workspace.snapshot(id);
     defer snapshot.deinit();
@@ -353,6 +356,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     const old_gutter_hover = selected.editor.gutter_hovered;
     const shortcut = self.key_bindings.resolve(e.data);
     var outcome = if (shortcut == .delete_line or shortcut == .toggle_comment) try selected.editor.execute(&record.doc, if (shortcut == .delete_line) .delete_line else .toggle_comment) else try selected.editor.handle(&record.doc, e);
+    errdefer if (outcome.change) |*change| change.deinit();
     if (outcome.handled and (shortcut == .delete_line or shortcut == .toggle_comment)) e.preventDefault();
     if (outcome.request_find) {
         self.vim_find_pending = true;
@@ -362,11 +366,11 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         self.allocator.free(self.status);
         self.status = &.{};
         self.status_is_error = false;
-        if (self.git.repository) try @import("services/git.zig").start(self, cx, .refresh);
     }
-    const changed = outcome.change != null;
+    const changed = outcome.change != null or outcome.reset;
     const origin: ws.ChangeOrigin = if (shortcut == .undo) .undo else if (shortcut == .redo) .redo else .typing;
     try applyOutcome(self, cx, selected.id, pane, &outcome, origin);
+    if (changed and self.git.repository) try @import("services/git.zig").start(self, cx, .refresh);
     if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
     const typed: []const u8 = switch (e.data) {
         .text => |bytes| bytes,
@@ -844,7 +848,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 .redo => .redo,
                 else => .select_all,
             });
-            try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result, .project_edit);
+            try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result, if (which == .undo) .undo else if (which == .redo) .redo else .project_edit);
         },
         .zoom_in, .zoom_out => {
             const current = try active(self);

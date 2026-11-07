@@ -1,6 +1,6 @@
 # Zircon Text
 
-UI-independent UTF-8 storage for the Zircon editor. This package imports only Zig's standard library. Documents use immutable AVL ropes with UTF-8 leaves of at most 4 KiB. Internal summaries index bytes, LF endings and UTF-16 units. Edits copy affected paths and boundary leaves; snapshots and history share untouched nodes.
+UI-independent UTF-8 storage for the Zircon editor. This package imports only Zig's standard library. Documents use immutable AVL ropes with UTF-8 leaves of at most 4 KiB. Internal summaries index bytes, LF endings, standalone CR detection and UTF-16 units. Edits copy affected paths and boundary leaves; snapshots and history share untouched nodes.
 
 ```zig
 const text = @import("zircon_text");
@@ -41,7 +41,7 @@ History retains at most 512 undo states by default. `setHistoryLimit` also trims
 
 ## Coordinates and search
 
-All public `Range` and `Point.byte_column` values use UTF-8 bytes. `lineCount` includes the final empty line after a trailing LF. `lineRange` excludes LF and its preceding CR for display; `lineRangeIncludingEnding` preserves those exact bytes. A standalone trailing CR remains content. `pointAt` and `offsetAt` support raw byte columns up to a line's LF position, so existing CRLF byte boundaries round-trip. Display code should use the display range when clamping a visual caret.
+All public `Range` and `Point.byte_column` values use UTF-8 bytes. `lineCount` includes the final empty line after a trailing LF. `lineRange` excludes LF and its preceding CR for display; `lineRangeIncludingEnding` preserves those exact bytes. A standalone trailing CR remains content for editor line methods. `hasBareCarriageReturn` lets protocol adapters detect documents that need CR-aware line conversion in constant time, including CRLF pairs split across rope leaves. `pointAt` and `offsetAt` support raw byte columns up to a line's LF position, so existing CRLF byte boundaries round-trip. Display code should use the display range when clamping a visual caret.
 
 `utf16Offset` and `byteOffsetFromUtf16` use indexed subtree summaries and refuse code-point or surrogate-pair interiors. `previousBoundary` and `nextBoundary` move one code point and treat CRLF as one line-ending step. They do not implement grapheme segmentation for combining marks, flags or emoji sequences.
 
