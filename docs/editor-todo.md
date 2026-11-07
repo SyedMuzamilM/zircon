@@ -31,6 +31,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 - [ ] **EXT-06: Branch/stash and project/recent-project menus.**
   Scope: menus from branch/project controls, branch creation, stash access, recent projects. Done: operate on real current project/repository identities; unavailable operations explain why; recent selection opens the right path. Preserve existing dirty-buffer guards.
   Progress: `5700514` fixes stable segmented branch/stash tabs, search focus and native resize feedback. Joined Stage All/Publish controls and rounded real Git counts are verified in [Git UI evidence](reviews/editor-program-2026-11-07/git-ui-evidence/README.md). Remaining acceptance stays open.
+  Progress: `19c26f5` adds worker-built file/hunk projection, unified/split state, collapse offsets, file headers and toolbar commands. `diff-projection-evidence` passes the real temporary-repository model test. Source-backed editing and hunk staging remain WORK-02/GIT-05.
 
 - [ ] **EXT-07: Agentic layout switching.**
   Scope: requested editor/agent workspace placement. Done: switch layouts without losing conversation, terminal sessions, document focus, tabs or drafts; persisted preferences match behavior.

@@ -36,3 +36,7 @@ TEXT-05 durable recovery remains the next new feature after the cross-provider r
 `c23490e` delivers bounded grammar retries and error ownership. Six fixture journeys pass; the native chain passed102/102 at that revision. The current Git UI correction adds cursor feedback, joined action/menu controls, real per-file line-count badges, stable segmented branch/stash tabs and focused popover modules. Its current native chain passes105/105, and the ReleaseFast install passes42/42 steps with271 passes and four explicit native-only skips. These checks overlap previous chains.
 
 The latest user screenshots refine the next editable-diff, header/toolbar, notification and syntax-performance work in `git-diff-next.md`. Recovery storage has a separate implementation under review; application integration and forced-termination acceptance remain open. Full-product10/10 remains unverified.
+
+## Diff projection slice
+
+`19c26f5` builds Git file/hunk row projections in the worker and transfers them with the patch. The view now has collapse-all, unified/split, previous/next hunk controls and file headers with stage/Open File actions. Portable tests pass77 with four explicit skips; the clean native rendering chain passes105 with one expected activation skip. Source-backed editing is intentionally still open. Edits must map additions/context rows into Workspace documents and route through `Shell.applyOutcome`; deletion rows stay read-only.
