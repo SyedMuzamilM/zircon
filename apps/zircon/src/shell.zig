@@ -17,6 +17,9 @@ pub const Fields = struct { find_query: ui.Entity(ui.controls.TextInput), agent_
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     workspace: workspace.Workspace,
+    /// Ordered document events waiting for service consumers. The queue owns
+    /// copied mappings and is drained on the UI thread.
+    document_changes: std.ArrayList(workspace.DocumentChange) = .empty,
     tabs: std.ArrayList(Tab) = .empty,
     active: usize = 0,
     editor_focus_request: u64 = 1,
@@ -116,6 +119,8 @@ pub const Shell = struct {
             if (tab.language_name) |name| self.allocator.free(name);
         }
         self.tabs.deinit(self.allocator);
+        for (self.document_changes.items) |*change| change.deinit();
+        self.document_changes.deinit(self.allocator);
         if (self.secondary) |*pane| pane.editor.deinit();
         for (self.tree.items) |row| {
             self.allocator.free(row.name);
@@ -142,6 +147,20 @@ pub const Shell = struct {
         self.allocator.free(self.active_icon_theme);
         self.icons.deinit(self.allocator);
         self.workspace.deinit();
+    }
+    pub fn publishDocumentChange(self: *Shell, id: workspace.DocumentId, origin: workspace.ChangeOrigin, change: *const @import("zircon_text").Change) !void {
+        try self.document_changes.append(self.allocator, try self.workspace.copyChange(id, origin, change));
+    }
+    pub fn documentChangeCount(self: *const Shell) usize {
+        return self.document_changes.items.len;
+    }
+    pub fn documentChangeOrigin(self: *const Shell, index: usize) ?workspace.ChangeOrigin {
+        return if (index < self.document_changes.items.len) self.document_changes.items[index].origin else null;
+    }
+    pub fn clearDocumentChanges(self: *Shell, cx: *ui.Context(Shell)) void {
+        for (self.document_changes.items) |*change| change.deinit();
+        self.document_changes.clearRetainingCapacity();
+        cx.notify();
     }
     pub const configureAgents = @import("services/agents.zig").configure;
     pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {

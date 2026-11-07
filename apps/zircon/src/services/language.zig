@@ -334,7 +334,7 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
         }
     }.less);
     var outcome = try current.editor.applyEdits(&record.doc, edits.items, try @import("zircon_editor").Editor.freshGroup());
-    try @import("../actions.zig").applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome);
+    try @import("../actions.zig").applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .completion);
     self.language.clearCompletion();
     self.editor_focus_request +%= 1;
     cx.notify();

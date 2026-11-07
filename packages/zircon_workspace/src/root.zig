@@ -18,9 +18,14 @@ pub const ChangeOrigin = enum { typing, undo, redo, completion, formatting, agen
 pub const DocumentChange = struct {
     document: DocumentId,
     origin: ChangeOrigin,
-    change: text.Change,
+    before: u64,
+    after: u64,
+    state: u64,
+    mappings: []text.Mapping,
+    allocator: std.mem.Allocator,
     pub fn deinit(self: *DocumentChange) void {
-        self.change.deinit();
+        // The mapping buffer is owned by the workspace/application event.
+        self.allocator.free(self.mappings);
         self.* = undefined;
     }
 };
@@ -86,7 +91,17 @@ pub const Workspace = struct {
     pub fn apply(workspace: *Workspace, id: DocumentId, expected: u64, edits: []const text.Edit, group: u64, origin: ChangeOrigin) !DocumentChange {
         const record = try workspace.get(id);
         const change = try record.doc.apply(expected, edits, group);
-        return .{ .document = id, .origin = origin, .change = change };
+        defer {
+            // The event owns a copied mapping list, not the text transaction.
+            var owned = change;
+            owned.deinit();
+        }
+        return try workspace.copyChange(id, origin, &change);
+    }
+    pub fn copyChange(workspace: *const Workspace, id: DocumentId, origin: ChangeOrigin, change: *const text.Change) !DocumentChange {
+        const mappings = try workspace.allocator.alloc(text.Mapping, change.mappings.len);
+        @memcpy(mappings, change.mappings);
+        return .{ .allocator = workspace.allocator, .document = id, .origin = origin, .before = change.before, .after = change.after, .state = change.state, .mappings = mappings };
     }
     pub fn open(workspace: *Workspace, path: []const u8) !DocumentId {
         const absolute = try workspace.absolutePath(path);

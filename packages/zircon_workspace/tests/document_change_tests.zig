@@ -14,8 +14,8 @@ test "workspace document changes carry identity, revisions and origin" {
     defer event.deinit();
     try t.expectEqual(id, event.document);
     try t.expectEqual(workspace.ChangeOrigin.typing, event.origin);
-    try t.expectEqual(@as(u64, 0), event.change.before);
-    try t.expectEqual(@as(u64, 1), event.change.after);
-    try t.expectEqual(@as(usize, 1), event.change.mappings.len);
+    try t.expectEqual(@as(u64, 0), event.before);
+    try t.expectEqual(@as(u64, 1), event.after);
+    try t.expectEqual(@as(usize, 1), event.mappings.len);
     try t.expectError(error.StaleRevision, project.apply(id, 0, &.{.{ .range = .{ .start = 0, .end = 0 }, .text = "stale" }}, 7, .agent));
 }

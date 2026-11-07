@@ -1,6 +1,7 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const zircon_workspace = @import("zircon_workspace");
 const t = std.testing;
 test "shell opens an untitled document and builds its real custom editor" {
     var app = try ui.App.init(.{ .allocator = std.testing.allocator });
@@ -14,6 +15,24 @@ test "shell opens an untitled document and builds its real custom editor" {
     try app.update(owner, zircon.Shell.bootstrap, .{h});
     _ = try app.step(0);
     try std.testing.expect((try app.window(h)).frames.committed.nodes.items.len > 10);
+}
+
+test "editor input publishes one ordered document change with a typed origin" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var shell = try zircon.Shell.init(t.allocator, t.io, ".", null);
+    const h = app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, shell) catch |err| {
+        shell.deinit(t.allocator);
+        return err;
+    };
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "hello" });
+    try t.expectEqual(@as(usize, 1), try app.read(owner, zircon.Shell.documentChangeCount, .{}));
+    try t.expectEqual(zircon_workspace.ChangeOrigin.typing, try app.read(owner, zircon.Shell.documentChangeOrigin, .{0}));
+    try app.update(owner, zircon.Shell.clearDocumentChanges, .{});
+    try t.expectEqual(@as(usize, 0), try app.read(owner, zircon.Shell.documentChangeCount, .{}));
 }
 
 const Ops = struct {

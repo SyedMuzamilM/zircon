@@ -320,7 +320,8 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
         },
     } else self.overlay = .none;
 }
-pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome) !void {
+pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome, origin: ws.ChangeOrigin) !void {
+    if (outcome.change) |*change| try self.publishDocumentChange(id, origin, change);
     defer if (outcome.change) |*change| change.deinit();
     if (outcome.change == null and !outcome.reset) return;
     self.language.clearCompletion();
@@ -364,7 +365,8 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         if (self.git.repository) try @import("services/git.zig").start(self, cx, .refresh);
     }
     const changed = outcome.change != null;
-    try applyOutcome(self, cx, selected.id, pane, &outcome);
+    const origin: ws.ChangeOrigin = if (shortcut == .undo) .undo else if (shortcut == .redo) .redo else .typing;
+    try applyOutcome(self, cx, selected.id, pane, &outcome, origin);
     if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
     const typed: []const u8 = switch (e.data) {
         .text => |bytes| bytes,
@@ -842,7 +844,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 .redo => .redo,
                 else => .select_all,
             });
-            try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result);
+            try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &result, .project_edit);
         },
         .zoom_in, .zoom_out => {
             const current = try active(self);

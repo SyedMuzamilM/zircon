@@ -80,6 +80,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **TEXT-07: One committed document-change path for every edit origin.**
   Depends: BASE-01; EXT-05 for pane integration. Scope: document/workspace events and application propagation. Done: local edits, undo/redo, reload, completion, formatting, agents and project edits carry document identity, revisions/content state, origin and mapping policy; views/search/LSP/preview/recovery receive ordered updates. Verify selections, scroll and collapsed ranges after reset/undo as well as ordinary edits.
+  Progress: [initial shared event contract](progress/2026-11-07-document-events.md) is implemented. Workspace events carry copied mappings and typed origins; Shell publishes typing, completion, search replacement and command edits. Remaining consumers and edit origins are open.
 
 - [ ] **TEXT-08: Encoding and line-ending policy.**
   Depends: TEXT-07; TEXT-04 for persistence integration. Scope: decoding metadata, save policy and encoding UI. Done: explicitly handle UTF-8 BOM and UTF-16, preserve chosen LF/CRLF behavior, reject unsupported/bad input visibly and prevent silent lossy conversion. Track broader legacy encodings under PLATFORM-03.

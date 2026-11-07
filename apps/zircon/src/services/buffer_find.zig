@@ -214,7 +214,7 @@ pub fn action(self: *Shell, cx: *ui.Context(Shell), which: @import("../commands.
         };
         if (edits.items.len > 0) {
             var outcome = try current.editor.applyEdits(&record.doc, edits.items, 0);
-            try @import("../actions.zig").applyOutcome(self, cx, current.id, self.find.pane, &outcome);
+            try @import("../actions.zig").applyOutcome(self, cx, current.id, self.find.pane, &outcome, .project_edit);
             try changed(self, cx);
             return;
         }

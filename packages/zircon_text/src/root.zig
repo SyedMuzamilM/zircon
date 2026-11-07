@@ -6,4 +6,5 @@ pub const Affinity = @import("types.zig").Affinity;
 pub const Direction = @import("types.zig").Direction;
 pub const Document = @import("document.zig").Document;
 pub const Change = @import("document.zig").Change;
+pub const Mapping = @import("document.zig").Mapping;
 pub const Snapshot = @import("snapshot.zig").Snapshot;
