@@ -26,7 +26,7 @@ There is no self-assigned quality score. Each area passes demonstrated behavior 
 3. Deliver GIT-01, LANG-01/02/03 and PERF-01 as separate measured changes. Keep full-reference fallbacks and stale-result protection.
 4. Deliver TEXT-02/03, UX-03/04/05, LANG-04/07, then shared transactions and the remaining local coding-loop tasks. Accessibility semantics start at the element boundary.
 5. Compare two UI API designs at real call sites. Choose the smaller understandable syntax, migrate examples and consumers, and document ownership and failure behavior with executable examples. Avoid a second permanent API for the same operation.
-6. Implement common native platform seams and native Linux/Windows adapters. Platform support is part of this program, not satisfied by portable tests. Add target builds early to expose POSIX/macOS assumptions, then platform execution and packaging checks.
+6. Implement common native platform seams and native Linux/Windows adapters using the [native platform plan](native-platforms.md). Platform support is part of this program, not satisfied by portable tests. Add target builds early to expose POSIX/macOS assumptions, then platform execution and packaging checks.
 7. Run the complete coding journey and lifecycle/failure checks. Resolve findings and document the verified scope.
 
 Units can overlap only at independent boundaries. Native tests that need foreground access run sequentially. Existing documentation changes belong to their current author and remain intact.

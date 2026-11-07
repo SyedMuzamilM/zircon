@@ -41,7 +41,7 @@ test "atomic save preserves permissions and undo to saved content clears dirty s
     try temp.dir.writeFile(t.io, .{ .sub_path = "source.txt", .data = "saved" });
     const file = try temp.dir.openFile(t.io, "source.txt", .{});
     defer file.close(t.io);
-    const permissions = std.Io.File.Permissions.fromMode(0o640);
+    const permissions = workspace.permissions.file(0o640);
     try file.setPermissions(t.io, permissions);
     const root = try rootPath(&temp, t.allocator);
     defer t.allocator.free(root);
@@ -56,7 +56,7 @@ test "atomic save preserves permissions and undo to saved content clears dirty s
     defer t.allocator.free(bytes);
     try t.expectEqualStrings("saved!", bytes);
     const stat = try temp.dir.statFile(t.io, "source.txt", .{});
-    try t.expectEqual(permissions.toMode() & 0o7777, stat.permissions.toMode() & 0o7777);
+    if (comptime @import("builtin").os.tag != .windows) try t.expectEqual(permissions.toMode() & 0o7777, stat.permissions.toMode() & 0o7777);
     try append(&project, id, "new");
     try t.expect(try project.dirty(id));
     try t.expect(try (try project.get(id)).doc.undo());
@@ -180,7 +180,7 @@ test "real permission failure leaves original file and unsaved document intact" 
     const id = try project.open("source.txt");
     try append(&project, id, "local");
     const old_saved = (try project.get(id)).saved_state;
-    try temp.dir.setPermissions(t.io, .fromMode(0o500));
+    try temp.dir.setPermissions(t.io, workspace.permissions.dir(0o500));
     defer temp.dir.setPermissions(t.io, .default_dir) catch {};
     if (project.save(id, null)) |_| return error.ExpectedPermissionFailure else |err| {
         try t.expect(err == error.PermissionDenied or err == error.AccessDenied or err == error.ReadOnlyFileSystem);

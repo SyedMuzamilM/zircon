@@ -299,7 +299,7 @@ fn persist(self: *Shell, session: *Session) !void {
     for (entries, session.conversation.entries.items) |*out, entry| out.* = .{ .role = entry.role, .text = entry.text.items };
     const bytes = try std.json.Stringify.valueAlloc(arena.allocator(), .{ .project = self.workspace.root_path, .provider = session.provider, .title = session.title, .session_id = session.conversation.session, .model = session.conversation.model, .entries = entries }, .{ .whitespace = .indent_2 });
     const temp = try std.mem.concat(arena.allocator(), u8, &.{ session.path.?, ".tmp" });
-    try std.Io.Dir.cwd().writeFile(self.workspace.io, .{ .sub_path = temp, .data = bytes, .flags = .{ .permissions = .fromMode(0o600) } });
+    try std.Io.Dir.cwd().writeFile(self.workspace.io, .{ .sub_path = temp, .data = bytes, .flags = .{ .permissions = @import("zircon_workspace").permissions.file(0o600) } });
     try std.Io.Dir.cwd().rename(temp, std.Io.Dir.cwd(), session.path.?, self.workspace.io);
     session.saved = session.conversation.revision;
 }

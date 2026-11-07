@@ -274,7 +274,8 @@ pub const Repository = struct {
             self.io.random(std.mem.asBytes(&nonce));
             const name = try std.fmt.allocPrint(a, "{s}/zircon-blame-{d}-{d}-{x}.tmp", .{ stripLineEnding(git_path), std.Thread.getCurrentId(), id, nonce });
             temporary = name;
-            const file = try std.Io.Dir.cwd().createFile(self.io, name, .{ .exclusive = true, .permissions = .fromMode(0o600) });
+            const permissions = if (comptime @import("builtin").os.tag == .windows) std.Io.File.Permissions.default_file else std.Io.File.Permissions.fromMode(0o600);
+            const file = try std.Io.Dir.cwd().createFile(self.io, name, .{ .exclusive = true, .permissions = permissions });
             temporary_created = true;
             defer file.close(self.io);
             try file.writeStreamingAll(self.io, bytes);

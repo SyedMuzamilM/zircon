@@ -84,7 +84,7 @@ fn journey(mode: []const u8, unrelated_error: bool) !void {
     });
     const file = try tmp.dir.openFile(t.io, "worker.py", .{});
     defer file.close(t.io);
-    try file.setPermissions(t.io, .fromMode(0o755));
+    try file.setPermissions(t.io, if (comptime @import("builtin").os.tag == .windows) .default_file else .fromMode(0o755));
     try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.grammar-retry/extension.json", .data =
         \\{"schema_version":1,"id":"org.zircon.grammar-retry","name":"Grammar retry","version":"1.0.0","contributes":{"languages":[{"id":"retry","name":"Retry","extensions":["retry"],"grammar":{"builtin":true,"name":"retry","wasm":"","highlights":""}}]}}
     });

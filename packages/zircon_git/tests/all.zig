@@ -205,7 +205,7 @@ test "failed commit hook leaves index and worktree available for retry" {
     defer repo.deinit();
     try temp.dir.writeFile(t.io, .{ .sub_path = "file.txt", .data = "retain" });
     try repo.stage(&.{"file.txt"});
-    const hook = try temp.dir.createFile(t.io, ".git/hooks/pre-commit", .{ .permissions = .fromMode(0o755) });
+    const hook = try temp.dir.createFile(t.io, ".git/hooks/pre-commit", .{ .permissions = if (comptime @import("builtin").os.tag == .windows) std.Io.File.Permissions.default_file else std.Io.File.Permissions.fromMode(0o755) });
     try hook.writeStreamingAll(t.io, "#!/bin/sh\nprintf 'fixture hook rejected\\n' >&2\nexit 1\n");
     hook.close(t.io);
     try t.expectError(error.GitCommandFailed, repo.commit("Rejected commit"));

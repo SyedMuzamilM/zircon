@@ -3,6 +3,7 @@
 //! File sync is used, but this module does not promise power-loss durability.
 const std = @import("std");
 const persistence = @import("persistence.zig");
+const permissions = @import("permissions.zig");
 const DiskStamp = persistence.DiskStamp;
 const max_index_bytes = 8 * 1024 * 1024;
 const max_documents = 2048;
@@ -76,7 +77,7 @@ pub const Store = struct {
         const hex = std.fmt.bytesToHex(root_digest, .lower);
         const project = try std.fs.path.join(a, &.{ home, &hex });
         defer a.free(project);
-        _ = try std.Io.Dir.cwd().createDirPathStatus(io, project, .fromMode(0o700));
+        _ = try std.Io.Dir.cwd().createDirPathStatus(io, project, permissions.dir(0o700));
         const dir = try std.Io.Dir.cwd().openDir(io, project, .{ .iterate = true });
         defer dir.close(io);
         const owned_root = try a.dupe(u8, root);
@@ -103,7 +104,7 @@ pub const Store = struct {
                 else => return err,
             };
             if (stat.kind != .file or stat.mtime.nanoseconds <= newest) continue;
-            const file = session_dir.createFile(io, "lock", .{ .truncate = false, .lock = .exclusive, .lock_nonblocking = true, .permissions = .fromMode(0o600) }) catch |err| switch (err) {
+            const file = session_dir.createFile(io, "lock", .{ .truncate = false, .lock = .exclusive, .lock_nonblocking = true, .permissions = permissions.file(0o600) }) catch |err| switch (err) {
                 error.WouldBlock => continue,
                 else => return err,
             };
@@ -122,10 +123,10 @@ pub const Store = struct {
         defer a.free(name);
         const path = try std.fs.path.join(a, &.{ project, name });
         errdefer a.free(path);
-        try std.Io.Dir.cwd().createDir(io, path, .fromMode(0o700));
+        try std.Io.Dir.cwd().createDir(io, path, permissions.dir(0o700));
         const fresh = try std.Io.Dir.cwd().openDir(io, path, .{});
         defer fresh.close(io);
-        const file = try fresh.createFile(io, "lock", .{ .exclusive = true, .lock = .exclusive, .lock_nonblocking = true, .permissions = .fromMode(0o600) });
+        const file = try fresh.createFile(io, "lock", .{ .exclusive = true, .lock = .exclusive, .lock_nonblocking = true, .permissions = permissions.file(0o600) });
         return .{ .allocator = a, .io = io, .path = path, .root = owned_root, .lock = file };
     }
     pub fn deinit(self: *Store) void {
@@ -306,7 +307,7 @@ fn exists(dir: std.Io.Dir, io: std.Io, name: []const u8) !bool {
     return true;
 }
 fn atomicWrite(dir: std.Io.Dir, io: std.Io, name: []const u8, bytes: []const u8, replace: bool) !void {
-    var atomic = try dir.createFileAtomic(io, name, .{ .replace = replace, .permissions = .fromMode(0o600) });
+    var atomic = try dir.createFileAtomic(io, name, .{ .replace = replace, .permissions = permissions.file(0o600) });
     defer atomic.deinit(io);
     try atomic.file.writeStreamingAll(io, bytes);
     try atomic.file.sync(io);

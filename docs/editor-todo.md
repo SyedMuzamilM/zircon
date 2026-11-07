@@ -282,6 +282,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **PLATFORM-02: Native Linux and Windows adapters.**
   Depends: PLATFORM-01 readiness, TEXT-02/03/06, UX-05/06, DEV-01. Scope: window/render/input/clipboard/IME/accessibility/filesystem/process/distribution per OS. Done: actual supported desktop journeys pass on each declared OS; portable compilation remains separately labeled; resource recovery and platform limitations are documented.
+  Progress: [platform plan](design/native-platforms.md) selects SDL3 for the first shared window/event backend while preserving macOS. Linux and Windows target compilation now pass 14/14 steps each. Native execution, text-system parity, PTY transport, dialogs, accessibility and packaging remain open.
 
 - [ ] **PLATFORM-03: Full bidi and broader encoding behavior.**
   Depends: TEXT-03/08, UX-07, PERF-01. Scope: bidi layout/cursor/selection and legacy detection/re-encoding. Done: mixed-direction editing follows an explicit Unicode policy and shared geometry; unsupported conversions require deliberate handling; round trips preserve representable data. Track Zed's own bidi limitations without treating them as the correctness target.

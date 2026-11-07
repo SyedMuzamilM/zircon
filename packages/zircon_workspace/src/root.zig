@@ -9,6 +9,7 @@ pub const Entry = tree.Entry;
 pub const deinitEntries = tree.deinitEntries;
 pub const DiskStamp = persistence.DiskStamp;
 pub const recovery = @import("recovery.zig");
+pub const permissions = @import("permissions.zig");
 pub const max_file_bytes = persistence.max_file_bytes;
 pub const DocumentId = struct { workspace: u64, slot: u32, generation: u32 };
 var next_workspace = std.atomic.Value(u64).init(1);
