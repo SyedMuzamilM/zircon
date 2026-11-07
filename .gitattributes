@@ -1,3 +1,4 @@
 # Preserve captured command output verbatim, including its trailing blank lines.
 docs/research/evidence/**/*.txt -whitespace
 docs/reviews/**/process-evidence/*.txt -whitespace
+docs/reviews/**/language-evidence/*.txt -whitespace
