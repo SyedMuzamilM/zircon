@@ -777,6 +777,169 @@ test "wrapped canvas paints continuation rows and pointer and arrow navigation u
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-word-wrap.png");
 }
 
+test "active source line has the same background across every wrapped row" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var doc = try text.Document.init(t.allocator, "alpha beta gamma delta epsilon zeta eta theta iota kappa\nsecond line\n");
+    var state = try editor.Editor.init(t.allocator);
+    state.soft_wrap = .editor_width;
+    const color = state.theme.active_line;
+    const line_height = state.line_height;
+    const h = app.openWindow(View, .{ .visible = false, .width = 200, .height = 300 }, .{ .document = doc, .state = state }) catch |err| {
+        doc.deinit();
+        state.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    const Read = struct {
+        fn rows(self: *const View) usize {
+            return self.state.wrap_cache.starts.items[1];
+        }
+    };
+    const owner = try app.windowEntity(View, h);
+    const rows = try app.read(owner, Read.rows, .{});
+    try t.expect(rows > 1);
+    var painted: usize = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| {
+        if (item.kind == .rect and std.meta.eql(item.color, color) and item.rect.width == 200) {
+            try t.expectApproxEqAbs(@as(f32, @floatFromInt(painted)) * line_height, item.rect.y, 0.01);
+            painted += 1;
+        }
+    }
+    try t.expectEqual(rows, painted);
+}
+
+test "wrapped continuation text retains leading space and tab indentation" {
+    for ([_][]const u8{ "    alpha beta gamma delta epsilon zeta", "\talpha beta gamma delta epsilon zeta", "  \talpha beta gamma delta epsilon zeta" }) |source| {
+        var doc = try text.Document.init(t.allocator, source);
+        defer doc.deinit();
+        var snapshot = doc.snapshot();
+        defer snapshot.deinit();
+        const cache = try editor.wrap.Cache.init(t.allocator);
+        defer cache.release();
+        var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+        const metrics = fixed.measurer();
+        var arena = std.heap.ArenaAllocator.init(t.allocator);
+        defer arena.deinit();
+        const line = try editor.display.Line.build(arena.allocator(), source, 4);
+        try cache.ensure(snapshot, 120, 14, 4, metrics);
+        try t.expect(cache.rows.items.len > 1);
+        var next: usize = 0;
+        for (cache.rows.items) |row| {
+            try t.expectEqual(next, row.start);
+            try t.expect(row.end > row.start);
+            const left = line.caret(metrics, .{ .size = 14, .mono = true }, row.start) - row.x;
+            const right = line.caret(metrics, .{ .size = 14, .mono = true }, row.end) - row.x;
+            try t.expectApproxEqAbs(if (row.first) @as(f32, 0) else 32, left, 0.01);
+            try t.expect(right <= 120.01);
+            next = row.end;
+        }
+        try t.expectEqual(source.len, next);
+        try expectText(&doc, source);
+    }
+}
+
+test "indented wrapped rows keep clicks carets and vertical navigation aligned" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var doc = try text.Document.init(t.allocator, "\talpha beta gamma delta epsilon zeta eta theta iota kappa\n");
+    var state = try editor.Editor.init(t.allocator);
+    state.soft_wrap = .editor_width;
+    const h = app.openWindow(View, .{ .visible = false, .width = 260, .height = 400 }, .{ .document = doc, .state = state }) catch |err| {
+        doc.deinit();
+        state.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    const Read = struct {
+        fn part(self: *const View) editor.wrap.Row {
+            return self.state.wrap_cache.rows.items[1];
+        }
+        fn head(self: *const View) usize {
+            return self.state.primary().head;
+        }
+    };
+    const owner = try app.windowEntity(View, h);
+    const part = try app.read(owner, Read.part, .{});
+    const metrics = (try app.window(h)).surface.?.measurer();
+    const indent = metrics.caret("    ", .{ .size = 14, .mono = true }, 4);
+    const x = editor.gutterWidth(2, 14) + indent;
+    for ([_]f32{ x - 10, x }) |click_x| {
+        try app.dispatch(h, .{ .pointer_down = .{ .position = .{ .x = click_x, .y = 27 } } });
+        try app.dispatch(h, .{ .pointer_up = .{ .position = .{ .x = click_x, .y = 27 } } });
+        _ = try app.step(0);
+        try t.expectEqual(part.start, try app.read(owner, Read.head, .{}));
+        try t.expectApproxEqAbs(x, (try app.window(h)).frames.committed.text_input.?.caret.x, 0.1);
+    }
+    try app.dispatch(h, .{ .key_down = .{ .key = .up } });
+    try t.expectEqual(@as(usize, 1), try app.read(owner, Read.head, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .down } });
+    try t.expectEqual(part.start, try app.read(owner, Read.head, .{}));
+    if (comptime ui.testing.native != void) {
+        _ = try app.step(0);
+        try (try app.window(h)).snapshot("/tmp/zircon-indented-wrap.png");
+    }
+}
+
+test "deep indentation and unbroken Unicode tokens wrap with bounded progress" {
+    var doc = try text.Document.init(t.allocator, "                            日🙂abcdefghijklmnop\n    abcdefghijklmnopqrstuvwxyz\n        \n");
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    const cache = try editor.wrap.Cache.init(t.allocator);
+    defer cache.release();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try cache.ensure(snapshot, 48, 14, 4, fixed.measurer());
+    try t.expect(cache.rows.items.len < snapshot.byteLen());
+    for (cache.rows.items) |row| {
+        const range = try snapshot.lineRange(row.line);
+        try t.expect(row.end > row.start or range.start == range.end);
+        try t.expect(snapshot.isBoundary(row.start) and snapshot.isBoundary(row.end));
+    }
+}
+
+test "inline Git change backgrounds cover the gutter and source on wrapped rows" {
+    for ([_]bool{ false, true }) |wrap| {
+        var app = try ui.App.init(.{ .allocator = t.allocator });
+        defer app.deinit();
+        var doc = try text.Document.init(t.allocator, "    new alpha beta gamma delta epsilon zeta\nnext\n");
+        var state = try editor.Editor.init(t.allocator);
+        state.soft_wrap = if (wrap) .editor_width else .none;
+        state.git_revision = doc.revision();
+        state.git_changes = try t.allocator.dupe(editor.GitChange, &.{.{ .kind = .modified, .start = 0, .end = 1, .old_start = 0, .old_count = 1, .expanded = true, .removed = "old\n" }});
+        const h = app.openWindow(View, .{ .visible = false, .width = 240, .height = 300 }, .{ .document = doc, .state = state }) catch |err| {
+            doc.deinit();
+            state.deinit();
+            return err;
+        };
+        _ = try app.step(0);
+        const frame = &(try app.window(h)).frames.committed;
+        // Sample the painted backgrounds away from the Git strip, text and caret.
+        for ([_]f32{ 5, 27, 49 }) |y| {
+            const gutter = backgroundAt(frame.scene.items, .{ .x = 12, .y = y });
+            const source = backgroundAt(frame.scene.items, .{ .x = editor.gutterWidth(3, 14) - 2, .y = y });
+            try t.expectApproxEqAbs(source.r, gutter.r, 0.001);
+            try t.expectApproxEqAbs(source.g, gutter.g, 0.001);
+            try t.expectApproxEqAbs(source.b, gutter.b, 0.001);
+        }
+        if (comptime ui.testing.native != void) if (wrap) try (try app.window(h)).snapshot("/tmp/zircon-inline-git-gutter.png");
+    }
+}
+
+fn backgroundAt(items: @FieldType(ui.graphics.Scene, "items"), point: ui.Point) ui.Color {
+    var result: ui.Color = .{ .r = 0, .g = 0, .b = 0 };
+    for (items) |item| {
+        if (item.kind != .rect) continue;
+        const rect = item.rect;
+        const clip = item.clip;
+        if (point.x < rect.x or point.x >= rect.x + rect.width or point.y < rect.y or point.y >= rect.y + rect.height or point.x < clip.x or point.x >= clip.x + clip.width or point.y < clip.y or point.y >= clip.y + clip.height) continue;
+        result.r = item.color.r * item.color.a + result.r * (1 - item.color.a);
+        result.g = item.color.g * item.color.a + result.g * (1 - item.color.a);
+        result.b = item.color.b * item.color.a + result.b * (1 - item.color.a);
+    }
+    return result;
+}
+
 test "wrapped edits reshape changed lines and retain UTF8 mappings in the suffix" {
     var doc = try text.Document.init(t.allocator, "one two three four five\nunchanged 日🙂 line\nlast\n");
     defer doc.deinit();

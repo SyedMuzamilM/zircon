@@ -155,20 +155,20 @@ const Canvas = struct {
         const style: ui.TextStyle = .{ .size = self.font_size, .mono = true, .color = self.theme.foreground };
         const primary_row = if (self.selections.len > 0) (try self.snapshot.pointAt(if (self.block_cursor) self.cursor else self.selections[0].head)).line else 0;
         for (prepared.lines) |line| {
-            if (self.highlight_active_line and cx.focused and line.row == primary_row and (line.segment == null or (self.cursor >= line.segment.?.start and (self.cursor < line.segment.?.end or self.cursor == line.range.end)))) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
+            if (self.highlight_active_line and cx.focused and line.row == primary_row) try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = self.theme.active_line });
             for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end) {
                 var fill = self.theme.git_added;
                 fill.a = 0.15;
                 try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = bounds.width, .height = self.line_height }, .color = fill });
-                if (change.old_count == change.end - change.start and !line.oversized) {
-                    const columns = annotations.changedColumns(annotations.lineAt(change.removed, line.row - change.start), line.original);
-                    try highlightColumns(cx, metrics.*, line, style, bounds.x + prepared.gutter - self.horizontal, columns.start, columns.end, self.theme.git_added);
-                }
             };
             const x = bounds.x + prepared.gutter - self.horizontal - (if (line.segment) |part| part.x else 0);
             const segment_start = if (line.segment) |part| part.start - line.range.start else 0;
             const segment_end = if (line.segment) |part| @min(line.original.len, part.end - line.range.start) else line.original.len;
             try cx.painter.pushClip(.{ .x = bounds.x + prepared.gutter - 4, .y = bounds.y, .width = @max(0, bounds.width - prepared.gutter + 4), .height = bounds.height });
+            for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end and change.old_count == change.end - change.start and !line.oversized) {
+                const columns = annotations.changedColumns(annotations.lineAt(change.removed, line.row - change.start), line.original);
+                try highlightColumns(cx, metrics.*, line, style, x, @max(columns.start, segment_start), @min(columns.end, segment_end), self.theme.git_added);
+            };
             if (!line.oversized) {
                 var indent: usize = 0;
                 while (indent < line.original.len and (line.original[indent] == ' ' or line.original[indent] == '\t')) indent += 1;
@@ -181,7 +181,7 @@ const Canvas = struct {
                 tint.a = 0.2;
                 while (self.indent_guides and guide < last_guide) : (guide += self.tab_width) {
                     const guide_x = @as(f32, @floatFromInt(guide)) * advance;
-                    try cx.painter.fillRect(.{ .bounds = .{ .x = x + guide_x, .y = line.y, .width = 1, .height = self.line_height }, .color = tint });
+                    try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + guide_x, .y = line.y, .width = 1, .height = self.line_height }, .color = tint });
                 }
                 var match_start: usize = 0;
                 var match_end = self.search_ranges.len;
@@ -258,7 +258,6 @@ const Canvas = struct {
                 }
             };
             cx.painter.popClip();
-            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x, .y = line.y, .width = prepared.gutter - 8, .height = self.line_height }, .color = if (self.highlight_active_line and cx.focused and line.row == primary_row) self.theme.active_line else self.theme.background });
 
             if (self.fold_controls and self.show_line_numbers and (line.segment == null or line.segment.?.first)) if (self.wrap_cache.folding.region(line.row)) |fold| {
                 const folded = self.wrap_cache.folding.isCollapsed(fold.start);

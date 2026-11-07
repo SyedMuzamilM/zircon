@@ -5,6 +5,8 @@ const ui = @import("zircon_ui");
 const display = @import("display.zig");
 const annotations = @import("annotations.zig");
 pub const Mode = enum { none, editor_width };
+// Subtract x from shaped source positions to get row-local positions. For a
+// continuation it includes the repeated indentation, without inserting bytes.
 pub const Row = struct { line: usize, start: usize, end: usize, x: f32, first: bool };
 pub const Cache = struct {
     allocator: std.mem.Allocator,
@@ -94,21 +96,26 @@ pub const Cache = struct {
             // unbounded source line on the UI thread.
             const original = if (range.end - range.start > 64 * 1024) "" else try s.copy(arena.allocator(), range);
             const expanded = try display.Line.build(arena.allocator(), original, tabs);
+            var leading: usize = 0;
+            while (leading < original.len and (original[leading] == ' ' or original[leading] == '\t')) leading += 1;
+            const indent = if (leading == original.len) 0 else @min(expanded.caret(metrics, style, leading), available / 2);
             var start: usize = 0;
             while (true) {
                 const x = expanded.caret(metrics, style, start);
-                var end = expanded.index(metrics, style, x + available);
+                const hanging = if (start == 0) 0 else indent;
+                const row_width = available - hanging;
+                var end = expanded.index(metrics, style, x + row_width);
                 end = @min(original.len, end);
                 // Hit testing chooses nearest; wrapping needs the last fitting
                 // boundary, otherwise a glyph can cross the pane edge.
-                while (end > start and expanded.caret(metrics, style, end) - x > available) end = previous(original, end);
+                while (end > start and expanded.caret(metrics, style, end) - x > row_width) end = previous(original, end);
                 if (end <= start and start < original.len) end = start + (std.unicode.utf8ByteSequenceLength(original[start]) catch 1);
                 if (end < original.len) {
                     var word = end;
                     while (word > start and original[word - 1] != ' ' and original[word - 1] != '\t') word = previous(original, word);
-                    if (word > start) end = word;
+                    if (word > @max(start, leading)) end = word;
                 }
-                try rows.append(self.allocator, .{ .line = line, .start = range.start + start, .end = if (original.len == 0) range.end else range.start + end, .x = x, .first = start == 0 });
+                try rows.append(self.allocator, .{ .line = line, .start = range.start + start, .end = if (original.len == 0) range.end else range.start + end, .x = x - hanging, .first = start == 0 });
                 if (end >= original.len) break;
                 start = end;
             }
