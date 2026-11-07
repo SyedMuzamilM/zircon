@@ -1,0 +1,9 @@
+{
+  "pid_candidates": [
+    "30515",
+    "30516"
+  ],
+  "profile": "/tmp/zircon-ui-review/zeddata-isolated",
+  "fixture": "/tmp/zircon-ui-review/EditorReview",
+  "config_isolation": "ZED_STATELESS=1; owned prior reference profile"
+}
