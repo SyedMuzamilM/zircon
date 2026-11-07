@@ -1,6 +1,9 @@
 const std = @import("std");
 const workspace = @import("zircon_workspace");
 const t = std.testing;
+test {
+    _ = @import("document_change_tests.zig");
+}
 fn rootPath(temp: *t.TmpDir, a: std.mem.Allocator) ![]u8 {
     var buffer: [4096]u8 = undefined;
     const n = try temp.dir.realPath(t.io, &buffer);

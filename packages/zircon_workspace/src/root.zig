@@ -14,6 +14,16 @@ pub const max_file_bytes = persistence.max_file_bytes;
 pub const DocumentId = struct { workspace: u64, slot: u32, generation: u32 };
 var next_workspace = std.atomic.Value(u64).init(1);
 pub const CloseDecision = enum { if_clean, cancel, discard, save };
+pub const ChangeOrigin = enum { typing, undo, redo, completion, formatting, agent, external_reload, project_edit, recovery_restore };
+pub const DocumentChange = struct {
+    document: DocumentId,
+    origin: ChangeOrigin,
+    change: text.Change,
+    pub fn deinit(self: *DocumentChange) void {
+        self.change.deinit();
+        self.* = undefined;
+    }
+};
 pub const Record = struct {
     doc: text.Document,
     path: ?[]u8,
@@ -69,6 +79,14 @@ pub const Workspace = struct {
     }
     pub fn dirty(workspace: *const Workspace, id: DocumentId) !bool {
         return (try workspace.getConst(id)).dirty();
+    }
+    /// Apply one ordered edit transaction through the workspace owner. The
+    /// returned change carries identity, revisions and origin for later
+    /// subscribers such as recovery, Git, language services and views.
+    pub fn apply(workspace: *Workspace, id: DocumentId, expected: u64, edits: []const text.Edit, group: u64, origin: ChangeOrigin) !DocumentChange {
+        const record = try workspace.get(id);
+        const change = try record.doc.apply(expected, edits, group);
+        return .{ .document = id, .origin = origin, .change = change };
     }
     pub fn open(workspace: *Workspace, path: []const u8) !DocumentId {
         const absolute = try workspace.absolutePath(path);
