@@ -14,6 +14,7 @@ const status_height = @import("views/components.zig").metrics.status;
 const result_limit = 12;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
+    try @import("services/recovery.zig").schedule(self, b);
     b.frame.tooltips_enabled = self.tooltips;
     b.frame.tooltip_delay = self.tooltip_delay / 1000;
     const colors = self.colors;

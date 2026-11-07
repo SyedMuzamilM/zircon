@@ -104,6 +104,12 @@ pub const Ui = struct {
     pub fn viewport(ui: *const Ui) @import("../layout/geometry.zig").Size {
         return ui.frame.viewport;
     }
+    /// Schedule one frame relative to the current frame clock. A discarded
+    /// frame cannot replace the committed deadline.
+    pub fn requestFrameAfter(ui: *Ui, seconds: f64) !void {
+        if (!std.math.isFinite(seconds) or seconds <= 0 or !std.math.isFinite(ui.frame.time + seconds)) return error.InvalidFrameDeadline;
+        ui.frame.next_deadline = @min(ui.frame.next_deadline orelse std.math.inf(f64), ui.frame.time + seconds);
+    }
     pub fn dragRegion(ui: *Ui, element: elements.Element) !elements.Element {
         _ = try ui.frame.get(element);
         ui.frame.nodes.items[element.index].drag_region = true;

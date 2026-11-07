@@ -64,6 +64,14 @@ pub const Store = struct {
     /// Reuse the newest unlocked committed session. A live window's lock is
     /// never taken over, including when several windows open the same root.
     pub fn init(a: std.mem.Allocator, io: std.Io, home: []const u8, root: []const u8) !Store {
+        return open(a, io, home, root, true);
+    }
+    /// Create a distinct session without consuming another window's abandoned
+    /// backup. Use after discarding this window's prior session.
+    pub fn initFresh(a: std.mem.Allocator, io: std.Io, home: []const u8, root: []const u8) !Store {
+        return open(a, io, home, root, false);
+    }
+    fn open(a: std.mem.Allocator, io: std.Io, home: []const u8, root: []const u8, reuse_existing: bool) !Store {
         const root_digest = reference(root).digest;
         const hex = std.fmt.bytesToHex(root_digest, .lower);
         const project = try std.fs.path.join(a, &.{ home, &hex });
@@ -82,6 +90,7 @@ pub const Store = struct {
         var newest: i96 = std.math.minInt(i96);
         var iterator = dir.iterate();
         while (try iterator.next(io)) |entry| {
+            if (!reuse_existing) break;
             if (entry.kind != .directory or !sessionName(entry.name)) continue;
             const session = try std.fs.path.join(a, &.{ project, entry.name });
             var keep = false;

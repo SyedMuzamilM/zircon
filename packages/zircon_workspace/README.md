@@ -33,6 +33,14 @@ An existing file changed since loading or the previous save returns `DiskConflic
 
 `close(id, .if_clean)` refuses dirty documents with `UnsavedChanges`. `.cancel` keeps the document. `.discard` releases it. `.save` saves dirty content first and closes only after success. The application supplies Save/Discard/Cancel UI and handles Save As when needed.
 
+## Recovery storage
+
+`recovery.Store.init(allocator, io, recovery_home, project_root)` locks the newest available session for that root, or creates a new session. A live window's session remains locked. `initFresh` always creates a separate session and leaves abandoned sessions available for later restoration. Use `initFresh` when replacing a discarded session; resuming another window's backup and immediately publishing unrelated documents would overwrite that backup.
+
+`publish` writes immutable document content before atomically replacing the session index. Unchanged contents can reuse `ContentRef`. `load` validates hashes, bounds and metadata, retains corrupt content for salvage, and returns available documents with a warning count. `exclude` writes a document tombstone, while `discard` excludes a whole session. Callers serialize these operations and keep the store lock alive until all writers finish.
+
+`Workspace.restore` creates a new runtime document identity from checkpoint bytes. Passing the original `DiskStamp` preserves later save-conflict detection. Restoring a checkpoint does not write the source file. Storage uses file sync and atomic publication, without promising power-loss durability for directory changes. The native integration and its checkpoint policy are documented in the [editor guide](../../docs/editor-guide.md#recovery).
+
 ## Project navigation
 
 `children(directory, allocator)` lists one directory only, with directories sorted before files and names sorted without ASCII case. Entries own copied `name` and absolute `path`; call `deinitEntries(entries, allocator)`. Symlinks to regular files/directories are listed, and broken links are skipped. Expanding a symlink directory is the application's explicit operation; the package does not recursively crawl trees.

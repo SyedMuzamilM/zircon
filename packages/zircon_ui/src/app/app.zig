@@ -18,6 +18,7 @@ const State = struct {
     depth: usize = 0,
     dirty: bool = false,
     scheduled_frames: u64 = 0,
+    time: f64 = 0,
     windows: std.ArrayList(?*windows.Window) = .empty,
     reactive: reactivity.Reactivity = .{},
     jobs: OwnedTasks,
@@ -120,6 +121,7 @@ pub const App = struct {
         try app.check();
         if (app.state.depth != 0) return error.TransactionActive;
         if (!std.math.isFinite(time) or time < 0) return error.InvalidTime;
+        app.state.time = time;
         const native_count = app.state.windows.items.len;
         for (0..native_count) |index| if (app.state.windows.items[index]) |window_value| try window_value.flushNativeFocus();
         var external_index: usize = 0;
@@ -184,6 +186,12 @@ pub const App = struct {
         }
         return count;
     }
+    /// Time supplied to the current step. Native and headless services share
+    /// this clock so deadlines can be tested without sleeping.
+    pub fn currentTime(app: *App) !f64 {
+        try app.check();
+        return app.state.time;
+    }
     pub fn dispatch(app: *App, handle: windows.Handle, input: @import("../platform/interface.zig").Input) !void {
         try (try app.window(handle)).dispatch(input);
     }
@@ -201,7 +209,7 @@ pub const App = struct {
                 }
             };
             if (!open) return;
-            if (app.state.dirty) continue;
+            if (app.state.dirty or app.state.close_requests.items.len > 0) continue;
             const next = if (deadline) |time| @max(0, time - windows.now()) else std.math.inf(f64);
             const interval = if (animated or app.state.jobs.queue.pending()) @min(next, 1.0 / 120.0) else next;
             try windows.pump(if (std.math.isFinite(interval)) interval else -1);

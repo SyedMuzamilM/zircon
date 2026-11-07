@@ -6,6 +6,20 @@ The titlebar shows the project and current branch. Click the project name to sea
 
 Drag a tab across its tab strip to reorder it. Drop a tab or project file near the left, right, top, or bottom editor edge to split in that direction. Each pane has its own tabs and active document. Git diffs, project search, and extensions open as tabs in the focused group. Open files and new documents appear in the focused pane. Use the split button to choose Split right, left, up or down, or use `Cmd+Option` with an arrow key. There are two editor panes; choosing a direction while split repositions the second pane. Close split merges the second pane's tabs into the first pane. Closing one view of a shared document keeps the other view and its unsaved text. `Cmd+Option+S` keeps the existing split toggle. Drag the dividers to resize panes or reduce the sidebar to 120 pixels. Project and Git sidebars keep separate widths during the session. Escape cancels a tab drag. The panes keep separate selections while sharing document bytes and history.
 
+## Recovery
+
+The native app checkpoints open documents under `~/Library/Application Support/Zircon/recovery`. Each project window owns a locked session. Opening the project after a crash restores available dirty and untitled text, pane membership, active panes, primary selections, scroll positions and language overrides. An explicit file argument still opens or selects that file after restoration. Clean saved files reopen their current disk contents.
+
+Checkpoints wait for a 250 ms quiet interval, with a maximum scheduling delay of one second while typing continues. Slow writes, an existing writer or storage failure can delay successful protection beyond that interval. Work since the last successful checkpoint can be lost. A recovery checkpoint does not save the source file and does not clear its dirty flag. Restored dirty files retain their original disk baseline, so an intervening external write still causes a save conflict.
+
+The recovery indicator in the status bar shows a persistent warning when a checkpoint fails. Hover it to inspect the failure and the age of the last successful checkpoint in this session. Click to request a checkpoint or retry a failed write. Storage initialization failures require resolving the error and restarting. Ordinary typing does not remove the recovery warning.
+
+Discard closes only after the recovery exclusion commits. If the document changes while close is pending, the editor keeps the newer work. Closing one pane's view keeps a document that remains open in another pane. Clean window close checkpoints the final session; explicit window discard excludes that session from automatic restoration. Corrupt recovery records remain available for salvage while valid records restore. A corrupt index is reported and retained instead of overwritten.
+
+Recovery currently preserves the primary selection in each view, rather than all multicursors or undo history. Session checkpoints are limited to 2,048 documents and 256 MiB total text, with a 64 MiB per-document limit. The storage contract covers process termination; it does not promise power-loss durability. `--snapshot` runs do not enable recovery.
+
+Run `./tools/zig build verify-recovery` on macOS for the native kill/restart and idle-close checks. The command prints the directory containing its disposable projects and verification records.
+
 ## Terminal and language controls
 
 Click the terminal icon at the bottom right to open or hide the terminal panel. The plus button creates another shell tab in the project directory. Click a terminal tab to switch sessions. Close a tab with its close button or `Cmd+W` while the terminal has focus. Hiding the panel keeps its sessions running.

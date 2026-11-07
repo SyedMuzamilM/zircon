@@ -133,6 +133,14 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
         issues += message.data.diagnostics.items.len;
     };
     try items.append(b.allocator(), try b.button(.{ .label = "Diagnostics", .tooltip = "Language server diagnostics", .children = if (issues == 0) &.{try v.icon(b, .check, c.muted, 13)} else &.{ try v.icon(b, .warning, c.warning, 13), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d}", .{issues}), c.warning, 11) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.language_servers, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 22 }, .align_items = .center, .gap = 3, .padding = .{ .left = 3, .right = 3 } } }));
+    if (self.recovery) |recovery| {
+        const previous = if (recovery.last_checkpoint) |at| try std.fmt.allocPrint(b.allocator(), "Last successful recovery checkpoint {d:.1} seconds ago.", .{@max(0, b.frame.time - at)}) else "No recovery checkpoint has completed in this session.";
+        const tip = if (recovery.last_error) |err|
+            try std.fmt.allocPrint(b.allocator(), "Recovery failed: {s}. {s} {s}", .{ @errorName(err), previous, if (recovery.store == null and !recovery.busy) "Resolve the storage error and restart the editor." else "Click to retry." })
+        else
+            try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ previous, if (recovery.busy) "Checkpoint in progress." else if (recovery.due != null) "New changes are waiting for a checkpoint." else "Click to checkpoint now." });
+        try items.append(b.allocator(), try b.button(.{ .label = if (recovery.last_error != null) "Recovery failed" else "Recovery checkpoint", .tooltip = tip, .children = &.{try v.icon(b, if (recovery.last_error != null) .warning else .check, if (recovery.last_error != null) c.warning else c.muted, 13)}, .on_click = b.onClick(@import("../services/recovery.zig").checkpoint), .style = .{ .direction = .row, .width = .{ .px = 22 }, .height = .{ .px = 22 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center } }));
+    }
     if (self.status.len > 0) try items.append(b.allocator(), try b.styled(try v.text(b, self.status, if (self.status_is_error) c.warning else c.muted, 11), .{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .percent = 35 }, .text = .{ .size = 11, .color = if (self.status_is_error) c.warning else c.muted }, .overflow = .hidden }));
     if (self.tab_drag) |drag| if (drag.moved) try items.append(b.allocator(), try v.text(b, "Drop on a tab strip or any editor edge · Esc cancels", c.muted, 11));
     try items.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));

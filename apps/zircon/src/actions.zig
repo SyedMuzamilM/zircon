@@ -264,11 +264,18 @@ pub fn requestTabClose(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
     if (try self.workspace.dirty(self.tabs.items[index].document)) {
         self.pending = .{ .tab = index };
         try show(self, cx, .dirty);
-    } else try closeTab(self, index, .if_clean);
+    } else try closeTab(self, cx, index, .if_clean);
 }
-fn closeTab(self: *Shell, index: usize, decision: ws.CloseDecision) !void {
+fn closeTab(self: *Shell, cx: *ui.Context(Shell), index: usize, decision: ws.CloseDecision) !void {
     const id = self.tabs.items[index].document;
-    if (!try self.workspace.close(id, decision)) return;
+    if (decision == .if_clean and try self.workspace.dirty(id)) return error.UnsavedChanges;
+    if (@import("services/recovery.zig").enabled(self)) {
+        try @import("services/recovery.zig").requestClose(self, cx, .{ .document = .{ .id = id, .state = (try self.workspace.getConst(id)).doc.stateId() } });
+    } else try finishCloseTab(self, index);
+}
+pub fn finishCloseTab(self: *Shell, index: usize) !void {
+    const id = self.tabs.items[index].document;
+    if (!try self.workspace.close(id, .discard)) return;
     if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) {
         preview.view.deinit();
         self.preview = null;
@@ -300,13 +307,15 @@ fn closeTab(self: *Shell, index: usize, decision: ws.CloseDecision) !void {
 }
 fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.pending) |pending| switch (pending) {
-        .tab => |i| try closeTab(self, i, .if_clean),
+        .tab => |i| try closeTab(self, cx, i, .if_clean),
         .window => {
             if (firstDirty(self) != null) {
                 try show(self, cx, .dirty);
             } else {
-                self.allow_close = true;
-                try cx.app.requestCloseWindow(self.window.?);
+                if (@import("services/recovery.zig").enabled(self)) try @import("services/recovery.zig").requestClose(self, cx, .window_save) else {
+                    self.allow_close = true;
+                    try cx.app.requestCloseWindow(self.window.?);
+                }
             }
         },
     } else self.overlay = .none;
@@ -773,11 +782,12 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .discard_dirty => {
             if (self.pending) |pending| switch (pending) {
-                .tab => |i| try closeTab(self, i, .discard),
+                .tab => |i| try closeTab(self, cx, i, .discard),
                 .window => {
-                    if (self.recovery) |*store| try store.discard();
-                    self.allow_close = true;
-                    try cx.app.requestCloseWindow(self.window.?);
+                    if (@import("services/recovery.zig").enabled(self)) try @import("services/recovery.zig").requestClose(self, cx, .{ .window_discard = try @import("services/recovery.zig").fingerprint(self) }) else {
+                        self.allow_close = true;
+                        try cx.app.requestCloseWindow(self.window.?);
+                    }
                 },
             };
         },
@@ -843,11 +853,15 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
     _ = event;
 }
 pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data == .close) try @import("services/recovery.zig").validateClose(self, cx);
     if (e.data == .close and !self.allow_close and firstDirty(self) != null) {
         self.pending = .window;
         try show(self, cx, .dirty);
         e.preventDefault();
         cx.notify();
+    } else if (e.data == .close and !self.allow_close and @import("services/recovery.zig").enabled(self)) {
+        e.preventDefault();
+        if (self.recovery.?.close == null) try @import("services/recovery.zig").requestClose(self, cx, .window_save);
     }
 }
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {

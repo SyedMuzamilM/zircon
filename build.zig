@@ -127,6 +127,11 @@ pub fn build(b: *std.Build) void {
             .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
         });
         const editor_bench = b.addExecutable(.{ .name = "zircon-editor-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_editor.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_git", .module = git_module } } }) });
+        const recovery_journey = b.addExecutable(.{ .name = "zircon-recovery-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_recovery.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
+        const recovery_run = b.addSystemCommand(&.{ "python3", "tools/verify_recovery.py" });
+        recovery_run.addArtifactArg(recovery_journey);
+        recovery_run.has_side_effects = true;
+        b.step("verify-recovery", "Kill and restart native recovery sessions and verify exact restored state").dependOn(&recovery_run.step);
         b.step("build-bench-editor", "Build native input-to-frame submission baseline driver").dependOn(&b.addInstallArtifact(editor_bench, .{}).step);
         const agent_journey = b.addExecutable(.{ .name = "zircon-agent-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_agent_workspace.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
         const agent_journey_run = b.addRunArtifact(agent_journey);

@@ -79,7 +79,7 @@ pub const Shell = struct {
     colors: @import("theme.zig").Palette = .{},
     editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: @import("services/git.zig").Model = .{},
-    recovery: ?@import("zircon_workspace").recovery.Store = null,
+    recovery: ?@import("services/recovery.zig").Model = null,
     search: @import("services/search.zig").Model = .{},
     find: @import("services/buffer_find.zig").Model = .{},
     catalog: @import("services/catalog.zig").Model = .{},
@@ -128,7 +128,7 @@ pub const Shell = struct {
         }
         self.file_index.deinit(self.allocator);
         self.allocator.free(self.status);
-        if (self.recovery) |*store| store.deinit();
+        if (self.recovery) |*recovery| recovery.deinit(self.allocator);
         self.git.deinit();
         self.search.deinit();
         self.find.deinit(self.allocator);
@@ -158,15 +158,15 @@ pub const Shell = struct {
             return err;
         };
     }
-    /// Opens a private crash-recovery session. Checkpoint publication is wired
-    /// separately; keeping the lock here lets discard close the right session.
+    /// Restores an unlocked session and enables asynchronous checkpoints.
     pub fn initRecovery(self: *Shell, cx: *ui.Context(Shell), home: []const u8) !void {
-        if (self.recovery != null) return;
-        self.recovery = @import("zircon_workspace").recovery.Store.init(self.allocator, self.workspace.io, home, self.workspace.root_path) catch |err| {
+        @import("services/recovery.zig").init(self, home) catch |err| {
+            self.recovery = .{ .home = try self.allocator.dupe(u8, home), .store = null, .last_error = err };
             try self.reportError(err);
             cx.notify();
             return;
         };
+        cx.notify();
     }
     pub fn loadExtensions(self: *Shell, cx: *ui.Context(Shell), home: []const u8) !void {
         var registry = try @import("zircon_extensions").Registry.init(self.allocator, self.workspace.io, home);
@@ -617,6 +617,7 @@ pub const Shell = struct {
             error.WindowNotFound => return,
             else => return err,
         };
+        try @import("services/recovery.zig").poll(self, cx);
         try @import("terminal.zig").poll(self, cx);
         try @import("services/buffer_find.zig").poll(self, cx);
         try @import("services/agents.zig").poll(self, cx);

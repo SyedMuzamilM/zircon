@@ -63,6 +63,10 @@ pub fn main(init: std.process.Init) !void {
             };
             try app.update(owner, Report.call, .{err});
         };
+        if (snapshot_path == null) {
+            const recovery_home = try std.fs.path.join(init.arena.allocator(), &.{ user_directory, "Library", "Application Support", "Zircon", "recovery" });
+            try app.update(owner, Shell.initRecovery, .{recovery_home});
+        }
     }
     try app.update(owner, Shell.bootstrap, .{handle});
     if (snapshot_path) |path| {

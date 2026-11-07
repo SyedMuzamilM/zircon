@@ -1,6 +1,38 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const t = std.testing;
+test "view deadlines use the step clock and failed frames retain the committed deadline" {
+    const Timer = struct {
+        delay: f64 = 1,
+        fail: bool = false,
+        pub fn render(self: *const @This(), b: *ui.Ui) !ui.Element {
+            try b.requestFrameAfter(self.delay);
+            if (self.fail) return error.TimerRenderFailed;
+            return b.text("deadline");
+        }
+        fn set(self: *@This(), cx: *ui.Context(@This()), delay: f64, fail: bool) void {
+            self.delay = delay;
+            self.fail = fail;
+            cx.notify();
+        }
+    };
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try app.openWindow(Timer, .{ .visible = false }, .{});
+    const owner = try app.windowEntity(Timer, handle);
+    _ = try app.step(10);
+    try t.expectEqual(@as(f64, 10), try app.currentTime());
+    try t.expectEqual(@as(?f64, 11), (try app.window(handle)).deadline);
+    try app.update(owner, Timer.set, .{ 0.2, true });
+    try t.expectError(error.TimerRenderFailed, app.step(10.1));
+    try t.expectEqual(@as(?f64, 11), (try app.window(handle)).deadline);
+    try app.update(owner, Timer.set, .{ @as(f64, 0), false });
+    try t.expectError(error.InvalidFrameDeadline, app.step(10.2));
+    try t.expectEqual(@as(?f64, 11), (try app.window(handle)).deadline);
+    try app.update(owner, Timer.set, .{ @as(f64, 2), false });
+    _ = try app.step(11);
+    try t.expectEqual(@as(?f64, 13), (try app.window(handle)).deadline);
+}
 test "bare button labels honor centered control alignment" {
     const View = struct {
         pub fn render(_: *const @This(), b: *ui.Ui) !ui.Element {
