@@ -2,6 +2,8 @@
 
 Zircon UI is an independent native UI framework in Zig. Zircon is a native text editor built on that framework, in separate packages. GPUI and NanoUI are architectural references, not dependencies. The [user-supplied specification](docs/specification/framework-api-v0.1.md) is preserved unchanged.
 
+For framework development, start with the [Zircon UI API reference and remaining work](docs/zircon-ui.md) and [app setup guide](docs/zircon-ui-usage.md).
+
 The framework now opens macOS windows through `App.openWindow` and runs them through `App.run`. It owns entity state, transactional frame trees, layout, input dispatch, focus/capture, CoreText measurement, Metal rendering, custom elements, animations, observations, typed events, and owned background jobs. Direct Zig bindings call system APIs; there are no C headers or Objective-C implementation files.
 
 Use Zig 0.17.1 through the project-local wrapper:
@@ -23,7 +25,7 @@ Use Zig 0.17.1 through the project-local wrapper:
 
 The Linux command compiles portable tests; it does not provide a Linux native adapter. `tools/zig` uses the local compiler when present and otherwise requires Zig 0.17.1 on PATH. It does not replace the global compiler. On macOS, it applies a private [child-process isolation fix](docs/design/darwin-process-isolation.md) to the pinned standard library; direct `zig build` bypasses that fix.
 
-Read [implementation status](docs/status.md) for tested coverage and limitations, [package usage](packages/zircon_ui/README.md), [runtime design](docs/design/runtime.md), [editor design](docs/design/editor.md), and [source research](docs/research/gpui-and-nanoui.md). Full Zed feature parity and performance advantages have not been established.
+Read [implementation status](docs/status.md) for tested coverage and limitations, [package usage](packages/zircon_ui/README.md), [runtime design](docs/design/runtime.md), [editor design](docs/design/editor.md), [source research](docs/research/gpui-and-nanoui.md), and the [Zed/GPUI comparison](docs/research/zed-gpui-vs-zircon-2026-11-07.md). Full Zed feature parity and performance advantages have not been established.
 
 The [editor roadmap](docs/editor-roadmap.md) and [checklist](docs/editor-todo.md) track the remaining work. [Native verification](docs/native-verification.md) describes fresh execution and separate input-routing coverage.
 

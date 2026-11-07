@@ -2,6 +2,8 @@
 
 An independent Zig UI framework. Ordinary applications own entities and views; the framework owns windows, input, layout, text and GPU resources.
 
+Read the [API reference and remaining work](../../docs/zircon-ui.md) for public API locations and current limits. [Build an app with Zircon UI](../../docs/zircon-ui-usage.md) provides dependency setup and a complete counter example.
+
 ```zig
 const ui = @import("zircon_ui");
 var app = try ui.App.init(.{ .allocator = allocator });
@@ -59,3 +61,5 @@ SVG/path effects, native menus/dialogs, full accessibility, advanced layout and 
 Set `WindowOptions.chrome = .integrated` for a full-size content view with hidden title and transparent titlebar. Native traffic lights, resize and fullscreen controls remain. Reserve their area in the root view. `Ui.dragRegion` opts a committed element into native window dragging; interactive descendants retain ordinary input. `App.openChildWindow` keeps settings or similar windows above their parent; closing the parent closes its children. `App.raiseWindow` reuses an existing child.
 
 `App.watchExternal(owner, callback)` registers a UI-thread inbox drain tied to a generational entity. A producer publishes owned data and calls the static, thread-safe `App.wake()`. AppKit receives a coalesced application event, so an idle app can block between real events. Stop/join the producer before destroying its inbox storage. Registration does not authorize transport threads to access entities.
+
+See the [compact composition guide](../../docs/zircon-ui-composition.md) for eager tuple children, inline button keys/listeners and callback payload inference. The root `check` compiles both counter examples and verifies that documented source matches.
