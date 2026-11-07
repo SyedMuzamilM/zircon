@@ -197,7 +197,7 @@ pub fn field(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), a
     try cx.read(handle, ui.controls.TextInput.copy, .{ a, &bytes });
     return bytes;
 }
-fn setField(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), value: []const u8, placeholder: []const u8) !void {
+pub fn setField(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), value: []const u8, placeholder: []const u8) !void {
     const Update = struct {
         fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), bytes: []const u8, label: []const u8) !void {
             try input.bytes.ensureTotalCapacity(input.allocator, bytes.len);

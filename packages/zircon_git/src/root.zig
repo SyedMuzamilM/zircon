@@ -5,6 +5,8 @@ const process = @import("process.zig");
 pub const processStats = process.stats;
 const status_module = @import("status.zig");
 const diff_module = @import("diff.zig");
+const numstat = @import("numstat.zig");
+pub const LineStats = numstat.LineStats;
 const history_module = @import("history.zig");
 pub const Status = status_module.Status;
 pub const Entry = status_module.Entry;
@@ -72,9 +74,51 @@ pub const Repository = struct {
         return result.stdout;
     }
     pub fn status(self: *Repository, a: std.mem.Allocator) !Status {
+        var result = try self.readStatus(a);
+        errdefer result.deinit();
+        self.statusCounts(a, &result) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            // Optional counts must not hide the actual changed-file list.
+            for (@constCast(result.entries)) |*entry| entry.stats = null;
+        };
+        return result;
+    }
+    fn readStatus(self: *Repository, a: std.mem.Allocator) !Status {
         const bytes = try self.command(a, &.{ "status", "--porcelain=v1", "--branch", "-z", "--untracked-files=all" });
         defer a.free(bytes);
         return status_module.parse(a, bytes);
+    }
+    /// Counts describe HEAD to the current worktree, including staged changes.
+    /// An unborn repository compares staged paths against Git's empty tree.
+    fn statusCounts(self: *Repository, a: std.mem.Allocator, result: *Status) !void {
+        if (result.entries.len == 0) return;
+        const entries = @constCast(result.entries);
+        var by_path: std.StringHashMapUnmanaged(usize) = .empty;
+        defer by_path.deinit(a);
+        {
+            for (entries, 0..) |*entry, i| if (entry.index != .untracked) {
+                entry.stats = .{};
+                try by_path.put(a, entry.path, i);
+            };
+            if (by_path.count() > 0) {
+                const empty_tree = if (result.unborn) try self.command(a, &.{ "hash-object", "-t", "tree", "--stdin" }) else null;
+                defer if (empty_tree) |value| a.free(value);
+                const baseline_tree = if (empty_tree) |value| std.mem.trim(u8, value, "\r\n") else "HEAD";
+                const bytes = try self.command(a, &.{ "diff", "--numstat", "-z", "--find-renames", "--no-ext-diff", "--no-textconv", baseline_tree, "--" });
+                defer a.free(bytes);
+                const rows = try numstat.parse(a, bytes);
+                defer a.free(rows);
+                for (rows) |row| if (by_path.get(row.path)) |i| {
+                    entries[i].stats = row.stats;
+                };
+            }
+        }
+        const dir = try std.Io.Dir.cwd().openDir(self.io, self.root, .{});
+        defer dir.close(self.io);
+        var remaining: u64 = 64 * 1024 * 1024;
+        for (entries) |*entry| if (entry.index == .untracked) {
+            entry.stats = countNewFile(self.io, dir, entry.path, &remaining) catch null;
+        };
     }
     pub fn diff(self: *Repository, a: std.mem.Allocator, path: ?[]const u8, staged: bool) !Diff {
         return self.compare(a, path, staged, false);
@@ -91,7 +135,7 @@ pub const Repository = struct {
         var empty_tree: ?[]u8 = null;
         defer if (empty_tree) |value| a.free(value);
         if (against_head) {
-            var state = try self.status(a);
+            var state = try self.readStatus(a);
             defer state.deinit();
             if (state.unborn) {
                 empty_tree = try self.command(a, &.{ "hash-object", "-t", "tree", "-w", "--stdin" });
@@ -103,7 +147,7 @@ pub const Repository = struct {
         const bytes = try self.command(a, args.items);
         defer a.free(bytes);
         if (staged) return diff_module.parse(a, bytes);
-        var current = try self.status(a);
+        var current = try self.readStatus(a);
         defer current.deinit();
         var combined: std.ArrayList(u8) = .empty;
         defer combined.deinit(a);
@@ -260,7 +304,7 @@ pub const Repository = struct {
             },
             .pull => |rebase| try self.command(al, &.{ "pull", if (rebase) "--rebase" else "--ff-only" }),
             .push => |push| blk: {
-                var state = try self.status(al);
+                var state = try self.readStatus(al);
                 defer state.deinit();
                 if (state.detached) return error.DetachedHead;
                 if (push.remote.len > 0) try validateRefArgument(push.remote);
@@ -332,6 +376,7 @@ pub fn validatePath(path: []const u8) !void {
 
 test {
     _ = @import("parser_tests.zig");
+    _ = @import("numstat.zig");
 }
 
 fn stripLineEnding(bytes: []const u8) []const u8 {
@@ -340,4 +385,45 @@ fn stripLineEnding(bytes: []const u8) []const u8 {
 
 fn validateRefArgument(value: []const u8) !void {
     if (value.len == 0 or value[0] == '-' or std.mem.indexOfAny(u8, value, "\x00\r\n") != null or std.mem.indexOf(u8, value, "@{") != null) return error.InvalidGitReference;
+}
+
+/// Bound work on untracked files and never follow a symlink outside the repo.
+/// Unreadable, changing, oversized and nonregular files retain unknown counts.
+fn countNewFile(io: std.Io, dir: std.Io.Dir, path: []const u8, remaining: *u64) !LineStats {
+    try validatePath(path);
+    const before = try dir.statFile(io, path, .{ .follow_symlinks = false });
+    if (before.kind == .sym_link) {
+        var link: [std.fs.max_path_bytes]u8 = undefined;
+        const length = try dir.readLink(io, path, &link);
+        return countBytes(link[0..length]);
+    }
+    if (before.kind != .file or before.size > remaining.*) return error.UnknownGitLineCounts;
+    remaining.* -= before.size;
+    const file = try dir.openFile(io, path, .{ .follow_symlinks = false });
+    defer file.close(io);
+    const opened = try file.stat(io);
+    if (!sameFile(before, opened)) return error.ChangingGitFile;
+    var buffer: [32 * 1024]u8 = undefined;
+    var offset: u64 = 0;
+    var added: u64 = 0;
+    var last: ?u8 = null;
+    while (offset < before.size) {
+        const length: usize = @intCast(@min(buffer.len, before.size - offset));
+        const read = try file.readPositionalAll(io, buffer[0..length], offset);
+        if (read != length) return error.ChangingGitFile;
+        // Git's binary heuristic examines the first 8000 bytes.
+        if (offset < 8000 and std.mem.indexOfScalar(u8, buffer[0..@min(read, @as(usize, @intCast(8000 - offset)))], 0) != null) return .{ .binary = true };
+        added += std.mem.count(u8, buffer[0..read], "\n");
+        last = buffer[read - 1];
+        offset += read;
+    }
+    if (!sameFile(before, try file.stat(io)) or !sameFile(before, try dir.statFile(io, path, .{ .follow_symlinks = false }))) return error.ChangingGitFile;
+    return .{ .added = added + @intFromBool(last != null and last.? != '\n') };
+}
+fn countBytes(bytes: []const u8) LineStats {
+    if (std.mem.indexOfScalar(u8, bytes[0..@min(bytes.len, 8000)], 0) != null) return .{ .binary = true };
+    return .{ .added = std.mem.count(u8, bytes, "\n") + @intFromBool(bytes.len > 0 and bytes[bytes.len - 1] != '\n') };
+}
+fn sameFile(a: std.Io.File.Stat, b: std.Io.File.Stat) bool {
+    return a.kind == b.kind and a.inode == b.inode and a.size == b.size and a.mtime.nanoseconds == b.mtime.nanoseconds and a.ctime.nanoseconds == b.ctime.nanoseconds;
 }

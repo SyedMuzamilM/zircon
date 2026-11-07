@@ -7,4 +7,5 @@ test {
     _ = @import("settings_tests.zig");
     _ = @import("language_lifecycle_tests.zig");
     _ = @import("grammar_retry_tests.zig");
+    _ = @import("git_controls_tests.zig");
 }

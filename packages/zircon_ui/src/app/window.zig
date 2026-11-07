@@ -32,6 +32,7 @@ pub const Window = struct {
     pressed: ?u32 = null,
     pointer_position: ?g.Point = null,
     hover_started: f64 = 0,
+    cursor: platform.Cursor = .arrow,
     dirty: bool = true,
     closed: bool = false,
     active: bool = true,
@@ -128,6 +129,7 @@ pub const Window = struct {
         w.pressed = reconcile(&w.frames.committed, staging, w.pressed);
         w.frames.commitPrepared();
         surface.setTextInput(w.frames.committed.text_input);
+        if (w.pointer_position != null or w.capture != null) w.updateCursor();
         w.animations.commitFrame();
         w.animating = w.animations.active(w.time);
         w.deadline = w.frames.committed.next_deadline;
@@ -173,6 +175,10 @@ pub const Window = struct {
     }
     pub fn dispatch(w: *Window, input: platform.Input) !void {
         if (w.closed) return;
+        defer switch (input) {
+            .pointer_down, .pointer_move, .pointer_up, .pointer_leave, .focus => w.updateCursor(),
+            else => {},
+        };
         if (input == .pointer_leave) {
             w.pointer_position = null;
             if (w.frames.committed.hovered_node != null) w.dirty = true;
@@ -299,6 +305,24 @@ pub const Window = struct {
             w.capture = null;
             e.release_requested = false;
         }
+    }
+    /// Captured drags keep their cursor outside the original hit region.
+    /// Otherwise the deepest explicit style inherits through its ancestors.
+    fn updateCursor(w: *Window) void {
+        const frame = &w.frames.committed;
+        var current: ?u32 = if (w.active) w.capture else null;
+        if (current == null and w.active) if (w.pointer_position) |point| if (frame.root) |root| {
+            current = hitTest(frame, modalRoot(frame) orelse root.index, point, .{ .width = w.dimensions.width, .height = w.dimensions.height });
+        };
+        var cursor: platform.Cursor = .arrow;
+        while (current) |index| : (current = frame.nodes.items[index].parent) {
+            if (frame.nodes.items[index].style.cursor) |value| {
+                cursor = value;
+                break;
+            }
+        }
+        w.cursor = cursor;
+        if (w.surface) |surface| surface.setCursor(cursor);
     }
     fn click(w: *Window, index: u32, point: g.Point) !void {
         const node = w.frames.committed.nodes.items[index];

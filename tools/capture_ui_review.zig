@@ -106,6 +106,14 @@ pub fn main(init: std.process.Init) !void {
         try app.update(owner, Ops.command, .{.git_changes});
         try settle(&app, init.io);
         try snapshot(&app, h, a, args[2], theme, "git");
+        try click(&app, h, "Branches and stashes");
+        try settle(&app, init.io);
+        try snapshot(&app, h, a, args[2], theme, "git-branches");
+        try click(&app, h, "Stashes");
+        try snapshot(&app, h, a, args[2], theme, "git-stashes");
+        try click(&app, h, "Branches");
+        try snapshot(&app, h, a, args[2], theme, "git-branches-return");
+        try escape(&app, h);
         try app.update(owner, Ops.command, .{.project_search});
         _ = try app.step(0);
         try app.dispatch(h, .{ .text = "session" });

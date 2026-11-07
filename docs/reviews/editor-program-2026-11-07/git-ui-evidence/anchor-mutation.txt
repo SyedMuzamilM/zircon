@@ -1,0 +1,35 @@
+    Finished `release` profile [optimized] target(s) in 0.16s
+test-editor-native
++- run test 2 pass, 1 fail (3 total)
+error: 'git_controls_tests.test.branch and stash tabs retain popup placement across repeated pointer clicks' failed:
+       expected 32, found 76
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:93:17: 0x104accabf in expectEqualInner__func_1126 (test)
+                       return error.TestExpectedEqual;
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:57:5: 0x104accc7b in expectEqual (test)
+           return expectEqualInner(T, expected, actual);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:128:17: 0x104accccb in expectEqualInner__func_1125 (test)
+                       try expectEqual(@field(expected, field_name), @field(actual, field_name));
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:57:5: 0x104acd7b7 in expectEqual (test)
+           return expectEqualInner(T, expected, actual);
+           ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/git_controls_tests.zig:54:9: 0x104acd86b in test.branch and stash tabs retain popup placement across repeated pointer clicks (test)
+               try t.expectEqual(original, try bounds(&app, h, "git-controls", false));
+               ^
+failed command: ./.zig-cache/o/a203df4ffee8b5d068a2f01afb16ab20/test --cache-dir=./.zig-cache --seed=0x259547e5 --listen=-
+
+Build Summary: 8/10 steps succeeded (1 failed); 35/36 tests passed (1 failed)
+test-editor-native transitive failure
++- run test 2 pass, 1 fail (3 total)
+   +- compile test debug native success 5s MaxRSS:705M
+   |  +- options cached
+   +- run cargo success 216ms
+   +- run test 24 pass (24 total) 975ms MaxRSS:112M
+      +- compile test debug native cached 76ms MaxRSS:32M
+      |  +- options cached
+      +- run test 9 pass (9 total) 378ms MaxRSS:111M
+         +- compile test debug native cached 75ms MaxRSS:32M
+            +- options (reused)
+

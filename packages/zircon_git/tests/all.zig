@@ -380,3 +380,106 @@ test "conflicting stash pop preserves its stash and reports the failed apply" {
     defer status.deinit();
     try t.expect(status.entries[0].conflicted);
 }
+
+fn expectCounts(status: git.Status, path: []const u8, expected: git.LineStats) !void {
+    for (status.entries) |entry| if (std.mem.eql(u8, path, entry.path)) {
+        const actual = entry.stats orelse return error.MissingGitLineCounts;
+        try t.expectEqual(expected, actual);
+        return;
+    };
+    return error.MissingGitFile;
+}
+
+test "file line counts include net partially staged changes deletions and untracked EOF" {
+    var temp = t.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try init(&temp);
+    defer t.allocator.free(root);
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    try temp.dir.writeFile(t.io, .{ .sub_path = "partial.txt", .data = "one\ntwo\nthree\n" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "deleted.txt", .data = "first\nlast" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "reverted.txt", .data = "original\n" });
+    try repo.stage(&.{ "partial.txt", "deleted.txt", "reverted.txt" });
+    try repo.commit("Baseline");
+    try temp.dir.writeFile(t.io, .{ .sub_path = "partial.txt", .data = "one\nstaged\nthree\n" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "reverted.txt", .data = "staged\n" });
+    try repo.stage(&.{ "partial.txt", "reverted.txt" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "partial.txt", .data = "one\nworktree\nthree\nextra\n" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "reverted.txt", .data = "original\n" });
+    try temp.dir.deleteFile(t.io, "deleted.txt");
+    try temp.dir.writeFile(t.io, .{ .sub_path = "日本\tnew\nfile.txt", .data = "first\nlast" });
+    var status = try repo.status(t.allocator);
+    defer status.deinit();
+    try expectCounts(status, "partial.txt", .{ .added = 2, .deleted = 1 });
+    try expectCounts(status, "deleted.txt", .{ .deleted = 2 });
+    try expectCounts(status, "reverted.txt", .{});
+    try expectCounts(status, "日本\tnew\nfile.txt", .{ .added = 2 });
+}
+
+test "unborn counts use current bytes for staged additions and binary files" {
+    var temp = t.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try init(&temp);
+    defer t.allocator.free(root);
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    try temp.dir.writeFile(t.io, .{ .sub_path = "new.txt", .data = "staged\n" });
+    try repo.stage(&.{"new.txt"});
+    try temp.dir.writeFile(t.io, .{ .sub_path = "new.txt", .data = "first\nsecond\nthird" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "image.bin", .data = "a\x00b\n" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "empty.txt", .data = "" });
+    var status = try repo.status(t.allocator);
+    defer status.deinit();
+    try expectCounts(status, "new.txt", .{ .added = 3 });
+    try expectCounts(status, "image.bin", .{ .binary = true });
+    try expectCounts(status, "empty.txt", .{});
+    try temp.dir.writeFile(t.io, .{ .sub_path = ".gitattributes", .data = "*.forced -diff\n" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "looks-text.forced", .data = "text with binary diff attribute\n" });
+    try repo.stage(&.{ "new.txt", "image.bin", "empty.txt", ".gitattributes", "looks-text.forced" });
+    var staged = try repo.status(t.allocator);
+    defer staged.deinit();
+    try expectCounts(staged, "looks-text.forced", .{ .binary = true });
+    try repo.commit("Create files");
+    try temp.dir.writeFile(t.io, .{ .sub_path = "image.bin", .data = "new\x00binary\n" });
+    var changed = try repo.status(t.allocator);
+    defer changed.deinit();
+    try expectCounts(changed, "image.bin", .{ .binary = true });
+}
+
+test "rename line counts preserve unusual target paths and untracked symlinks count link text" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    var temp = t.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try init(&temp);
+    defer t.allocator.free(root);
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    try temp.dir.writeFile(t.io, .{ .sub_path = "before.txt", .data = "one\ntwo\nthree\nfour\nfive\n" });
+    try repo.stage(&.{"before.txt"});
+    try repo.commit("Original");
+    try command(root, &.{ "mv", "before.txt", "after\t日本\n.txt" });
+    try temp.dir.writeFile(t.io, .{ .sub_path = "after\t日本\n.txt", .data = "one\ntwo\nTHREE\nfour\nfive\n" });
+    try temp.dir.symLink(t.io, "after\t日本\n.txt", "link.txt", .{});
+    var status = try repo.status(t.allocator);
+    defer status.deinit();
+    try expectCounts(status, "after\t日本\n.txt", .{ .added = 1, .deleted = 1 });
+    try expectCounts(status, "link.txt", .{ .added = 2 });
+}
+
+test "oversized untracked content leaves counts unknown without hiding the file" {
+    var temp = t.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try init(&temp);
+    defer t.allocator.free(root);
+    var repo = (try git.Repository.discover(t.allocator, t.io, root)).?;
+    defer repo.deinit();
+    const file = try temp.dir.createFile(t.io, "large.dat", .{});
+    defer file.close(t.io);
+    try file.setLength(t.io, 64 * 1024 * 1024 + 1);
+    var status = try repo.status(t.allocator);
+    defer status.deinit();
+    try t.expectEqual(@as(usize, 1), status.entries.len);
+    try t.expectEqualStrings("large.dat", status.entries[0].path);
+    try t.expect(status.entries[0].stats == null);
+}

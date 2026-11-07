@@ -32,7 +32,8 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         if (self.git.commits.len == 0) try rows.append(b.allocator(), try note(b, c, "No commits yet"));
         try children.append(b.allocator(), try list(b, rows.items, @max(0, -visible.top), @as(f32, @floatFromInt(self.git.commits.len)) * history_height));
     } else {
-        try children.append(b.allocator(), try b.row(.{ .height = .{ .px = 34 }, .flex_shrink = 0, .gap = 3, .align_items = .center, .padding = .{ .left = 8, .right = 8 } }, &.{ try ghostAction(b, c, .git_diff_all, "View diff", .diff), try b.div(.{ .flex_grow = 1 }, &.{}), if (width >= 260) try ghostAction(b, c, .git_stage_all, "Stage all", .plus) else try v.iconButton(b, c, .git_stage_all, "Stage all", .plus, false), try v.iconButton(b, c, .git_changes_menu, "Change actions", .chevron_down, self.git.menu == .changes), try v.iconButton(b, c, .git_refresh, "Refresh", .refresh, false) }));
+        const stage_control = try splitAction(b, c, .git_stage_all, .git_changes_menu, "Stage all", "Change actions", .plus, width >= 260, self.git.menu == .changes, self.git.busy);
+        try children.append(b.allocator(), try b.row(.{ .height = .{ .px = 34 }, .flex_shrink = 0, .gap = 6, .align_items = .center, .padding = .{ .left = 8, .right = 8 } }, &.{ try ghostAction(b, c, .git_diff_all, "View diff", .diff), try b.div(.{ .flex_grow = 1 }, &.{}), try b.key(.{ .string = "git-stage-control" }, stage_control), try v.iconButton(b, c, .git_refresh, "Refresh", .refresh, false) }));
         var rows: std.ArrayList(ui.Element) = .empty;
         var total: f32 = 0;
         var scroll_y: f32 = 0;
@@ -48,7 +49,9 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         try children.append(b.allocator(), try list(b, rows.items, scroll_y, total));
         try children.append(b.allocator(), try v.rule(b, c));
         const branch = if (self.git.status) |status| if (status.branch.len > 0) status.branch else "Detached HEAD" else "Loading…";
-        try children.append(b.allocator(), try b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 8 }, .gap = 6, .align_items = .center }, &.{ try b.button(.{ .label = "Switch branch", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, branch, c.text, 12) }, .on_click = try b.onClickWith(Command.git_branches, Shell.onCommand), .style = .{ .direction = .row, .gap = 5, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .hover_background = c.hover, .overflow = .hidden } }), if (width < 220) try b.div(.{ .width = .{ .px = 0 }, .flex_shrink = 0 }, &.{}) else try b.button(.{ .label = if (@import("git_controls.zig").hasUpstream(self)) "Push" else "Publish", .children = &.{ try v.icon(b, .arrow_up, c.muted, 14), try v.text(b, if (self.git.busy) "Working…" else if (@import("git_controls.zig").hasUpstream(self)) "Push" else "Publish", c.text, 12) }, .on_click = if (self.git.busy) null else try b.onClickWith(if (@import("git_controls.zig").hasUpstream(self)) Command.git_push else Command.git_publish, Shell.onCommand), .style = v.buttonStyle(c, false) }), try v.iconButton(b, c, .git_network_menu, "Remote actions", .chevron_down, self.git.menu == .network) }));
+        const upstream = @import("git_controls.zig").hasUpstream(self);
+        const publish = try splitAction(b, c, if (upstream) .git_push else .git_publish, .git_network_menu, if (upstream) "Push" else "Publish", "Remote actions", .arrow_up, width >= 220, self.git.menu == .network, self.git.busy);
+        try children.append(b.allocator(), try b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 8 }, .gap = 6, .align_items = .center }, &.{ try b.button(.{ .label = "Switch branch", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, branch, c.text, 12) }, .on_click = try b.onClickWith(Command.git_branches, Shell.onCommand), .style = .{ .direction = .row, .gap = 5, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .hover_background = c.hover, .overflow = .hidden } }), try b.key(.{ .string = "git-publish-control" }, publish) }));
         try children.append(b.allocator(), try v.rule(b, c));
         var staged = false;
         var conflicted = false;
@@ -98,27 +101,12 @@ fn treeRow(self: *const Shell, b: *ui.Ui, entries: []const git.Entry, row: tree.
         .directory => |directory| return b.key(.{ .string = try std.fmt.allocPrint(b.allocator(), "{s}:{s}", .{ @tagName(directory.group), directory.path }) }, try b.button(.{ .label = directory.path, .children = &.{ try v.icon(b, if (self.git.tree.directories.contains(directory.path)) .chevron_right else .chevron_down, c.muted, 12), try v.icon(b, .folder, c.muted, 15), try v.text(b, std.fs.path.basename(directory.path), c.muted, 12) }, .on_click = try b.onClickWith(DirectoryTarget{ .target = .{ .index = directory.entry, .generation = self.git.status_generation }, .prefix_len = @intCast(directory.path.len) }, toggleDirectory), .style = .{ .direction = .row, .height = .{ .px = row_height }, .gap = 5, .align_items = .center, .flex_shrink = 0, .padding = .{ .left = 12 + @as(f32, @floatFromInt(directory.depth)) * 14 }, .hover_background = c.hover, .overflow = .hidden } })),
         .file => |file| {
             const entry = entries[file.index];
-            const change = if (entry.conflicted) git.Change.unmerged else if (entry.unstaged) entry.worktree else entry.index;
-            const tint = switch (change) {
-                .added, .untracked => c.added,
-                .deleted, .unmerged => c.deleted,
-                .modified, .type_changed => c.modified,
-                else => c.muted,
-            };
             const selected = std.mem.eql(u8, self.git.selected_path, entry.path);
             var style = v.iconButtonStyle(c, false);
             const name = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (entry.staged and !entry.unstaged) "Unstage" else "Stage", entry.path });
             const staging = try b.button(.{ .label = name, .tooltip = name, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, if (entry.staged and entry.unstaged) .square_mixed else if (entry.staged) .square_checked else .square, if (entry.staged) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(Target{ .index = file.index, .generation = self.git.status_generation }, stage), .style = style });
             style = .{ .direction = .row, .height = .{ .px = row_height }, .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 6, .align_items = .center, .padding = .{ .left = 26 + @as(f32, @floatFromInt(file.depth)) * 14 }, .overflow = .hidden };
-            const target = try b.button(.{ .label = entry.path, .children = &.{ try v.fileGlyph(self, b, entry.path, false, false, 15), try b.styled(try v.text(b, std.fs.path.basename(entry.path), c.text, 12), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.text }, .overflow = .hidden }), try v.text(b, switch (change) {
-                .added => "A",
-                .deleted => "D",
-                .modified => "M",
-                .untracked => "?",
-                .unmerged => "!",
-                .renamed => "R",
-                else => "",
-            }, tint, 11) }, .on_click = try b.onClickWith(Target{ .index = file.index, .generation = self.git.status_generation }, openFile), .style = style });
+            const target = try b.button(.{ .label = entry.path, .children = &.{ try v.fileGlyph(self, b, entry.path, false, false, 15), try b.styled(try v.text(b, std.fs.path.basename(entry.path), c.text, 12), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.text }, .overflow = .hidden }), try changeBadges(b, c, entry) }, .on_click = try b.onClickWith(Target{ .index = file.index, .generation = self.git.status_generation }, openFile), .style = style });
             return b.key(.{ .string = entry.path }, try b.row(.{ .height = .{ .px = row_height }, .flex_shrink = 0, .align_items = .center, .padding = .{ .right = 6 }, .background = if (selected) c.selected else null, .hover_background = c.hover }, &.{ target, staging }));
         },
     }
@@ -158,4 +146,27 @@ fn ghostAction(b: *ui.Ui, c: v.Palette, command: Command, name: []const u8, icon
 }
 fn note(b: *ui.Ui, c: v.Palette, bytes: []const u8) !ui.Element {
     return b.styled(try v.text(b, bytes, c.muted, 12), .{ .padding = ui.Insets.all(12), .text = .{ .size = 12, .color = c.muted } });
+}
+
+/// The main action and its menu share one surface, with independent hit targets.
+fn splitAction(b: *ui.Ui, c: v.Palette, action: Command, menu: Command, label: []const u8, menu_label: []const u8, glyph: v.Icon, show_label: bool, selected: bool, busy: bool) !ui.Element {
+    return b.row(.{ .height = .{ .px = 22 }, .flex_shrink = 0, .radius = v.metrics.control_radius, .background = c.element, .overflow = .hidden }, &.{
+        try b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = if (show_label) &.{ try v.icon(b, glyph, c.muted, 12), try v.text(b, label, c.text, 11) } else &.{try v.icon(b, glyph, c.muted, 12)}, .on_click = if (busy) null else try b.onClickWith(action, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 22 }, .gap = 4, .padding = .{ .left = 6, .right = 6 }, .align_items = .center, .hover_background = c.hover, .opacity = if (busy) 0.5 else 1 } }),
+        try b.div(.{ .width = .{ .px = 1 }, .height = .{ .px = 14 }, .margin = .{ .top = 4 }, .background = c.line, .flex_shrink = 0 }, &.{}),
+        try b.button(.{ .label = menu_label, .tooltip = menu_label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, .chevron_down, c.muted, 12)}, .on_click = try b.onClickWith(menu, Shell.onCommand), .style = .{ .width = .{ .px = 20 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .background = if (selected) c.selected else null, .hover_background = c.hover } }),
+    });
+}
+fn changeBadges(b: *ui.Ui, c: v.Palette, entry: git.Entry) !ui.Element {
+    var badges: std.ArrayList(ui.Element) = .empty;
+    if (entry.stats) |stats| {
+        if (stats.binary) return badge(b, "Binary", c.muted);
+        if (stats.added > 0 or stats.deleted == 0) try badges.append(b.allocator(), try badge(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{stats.added}), c.added));
+        if (stats.deleted > 0) try badges.append(b.allocator(), try badge(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{stats.deleted}), c.deleted));
+    } else try badges.append(b.allocator(), try badge(b, "…", c.muted));
+    return b.row(.{ .gap = 3, .align_items = .center, .flex_shrink = 0 }, badges.items);
+}
+fn badge(b: *ui.Ui, label: []const u8, color: ui.Color) !ui.Element {
+    var background = color;
+    background.a = 0.12;
+    return b.row(.{ .height = .{ .px = 18 }, .padding = .{ .left = 5, .right = 5 }, .radius = 4, .align_items = .center, .background = background, .flex_shrink = 0 }, &.{try v.text(b, label, color, 11)});
 }

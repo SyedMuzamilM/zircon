@@ -1,0 +1,34 @@
+[
+  {
+    "file": "zircon-dark-git-branches-return.png",
+    "sha256": "517cc9ac364a0e0a966f99ef3b513dfc202c29f1b3e7930c7d2ffa1a0628f0dd"
+  },
+  {
+    "file": "zircon-dark-git-branches.png",
+    "sha256": "3042631029c932003d7a87fa17f85b2af0944852d8e1430b965f2fe0b85cee92"
+  },
+  {
+    "file": "zircon-dark-git-stashes.png",
+    "sha256": "2b89d4cde72df75c96d02d02c438f07af06f1046ca12d051983f606a752451b6"
+  },
+  {
+    "file": "zircon-dark-git.png",
+    "sha256": "00edb3e4146a693ef731ec2d91de35db59d67e6e7845db06053e46912c940cb8"
+  },
+  {
+    "file": "zircon-light-git-branches-return.png",
+    "sha256": "82db3e33fab1bf468b4399bc359c0a7318ae2909afb4e8e4538c6b7ba7e4296e"
+  },
+  {
+    "file": "zircon-light-git-branches.png",
+    "sha256": "a1736840e7e5bebdac4f68f43ac69bba28e4fafec69ef76f93c7b20a3ea8e1d1"
+  },
+  {
+    "file": "zircon-light-git-stashes.png",
+    "sha256": "4e779cb62682bff46bf739add941e28530bf09000308a25741ae9cf7f1e98ffa"
+  },
+  {
+    "file": "zircon-light-git.png",
+    "sha256": "b475a1ebe8ebf2bc401cf342575a5c36cc9f6e6eec486e7050fc68f078fd4fd5"
+  }
+]

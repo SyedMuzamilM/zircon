@@ -1,0 +1,8 @@
+Build Summary: 6/6 steps succeeded; 24/24 tests passed
+check success
++- run test 16 pass (16 total) 4s MaxRSS:7M
+|  +- compile test debug native success 1s MaxRSS:291M
+|  +- run test 8 pass (8 total) 444ms MaxRSS:3M
+|     +- compile test debug native success 1s MaxRSS:276M
++- zig fmt --check success
+

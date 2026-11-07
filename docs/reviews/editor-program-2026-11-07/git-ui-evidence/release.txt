@@ -1,0 +1,52 @@
+    Finished `release` profile [optimized] target(s) in 0.43s
+Build Summary: 42/42 steps succeeded; 271/275 tests passed (4 skipped)
+build-bench-editor success
++- install zircon-editor-bench success
+   +- compile exe zircon-editor-bench fast native success 34s MaxRSS:1G
+      +- options cached
+install success
++- install tools/zed-extension-host/target/release/zircon-extension-host to zircon-extension-host cached
+|  +- run cargo success 525ms
++- install zircon success
+|  +- compile exe zircon fast native success 31s MaxRSS:1G
+|     +- options (reused)
++- install assets/icons/LICENSES to share/zircon/icons-LICENSES cached
++- install assets/icons/SOURCE.md to share/zircon/icons-SOURCE.md cached
++- check success
+   +- run test 16 pass (16 total) 3s MaxRSS:6M
+   |  +- compile test fast native success 8s MaxRSS:406M
+   +- run test cached
+   |  +- compile test fast native cached 59ms MaxRSS:31M
+   +- run test cached
+   |  +- compile test fast native cached 58ms MaxRSS:31M
+   +- run test cached
+   |  +- compile test fast native cached 60ms MaxRSS:31M
+   +- run test cached
+   |  +- compile test fast native cached 48ms MaxRSS:31M
+   +- run test cached
+   |  +- compile test fast native cached 62ms MaxRSS:31M
+   +- run test 8 pass (8 total) 351ms MaxRSS:2M
+   |  +- compile test fast native success 8s MaxRSS:385M
+   +- contracts success
+   |  +- compile test fast native success 223ms MaxRSS:99M
+   |  |  +- options cached
+   |  +- compile test fast native success 224ms MaxRSS:100M
+   |  |  +- options (reused)
+   |  +- compile test fast native success 219ms MaxRSS:99M
+   |     +- options (reused)
+   +- run test 105 pass (105 total) 1s MaxRSS:19M
+   |  +- compile test fast native success 13s MaxRSS:616M
+   |     +- options (reused)
+   +- run test cached
+   |  +- compile test fast native cached 72ms MaxRSS:31M
+   +- run test 21 pass (21 total) 363ms MaxRSS:2M
+   |  +- compile test fast native success 11s MaxRSS:500M
+   +- run test 45 pass (45 total) 372ms MaxRSS:3M
+   |  +- compile test fast native success 11s MaxRSS:549M
+   |     +- options (reused)
+   +- run test 76 pass, 4 skip (80 total) 11s MaxRSS:340M
+   |  +- compile test fast native success 38s MaxRSS:1G
+   |  |  +- options (reused)
+   |  +- run cargo (reused)
+   +- zig fmt --check success
+

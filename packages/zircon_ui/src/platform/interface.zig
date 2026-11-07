@@ -4,6 +4,7 @@ const std = @import("std");
 const g = @import("../layout/geometry.zig");
 const scene = @import("../graphics/scene.zig");
 const measure = @import("../layout/measure.zig");
+pub const Cursor = @import("../ui/style.zig").Cursor;
 pub const WindowOptions = struct {
     title: []const u8 = "Zircon",
     width: f32 = 1080,
@@ -99,6 +100,7 @@ pub const Surface = struct {
         snapshot: *const fn (*anyopaque, scene.Frame, []const u8) anyerror!void,
         clipboard_read: *const fn (*anyopaque, std.mem.Allocator) anyerror![]u8,
         clipboard_write: *const fn (*anyopaque, []const u8) anyerror!void,
+        set_cursor: ?*const fn (*anyopaque, Cursor) void = null,
         set_text_input: ?*const fn (*anyopaque, ?TextSnapshot) void = null,
         accept_close: ?*const fn (*anyopaque) void = null,
         set_parent: ?*const fn (*anyopaque, ?Surface) void = null,
@@ -108,6 +110,9 @@ pub const Surface = struct {
         set_appearance: ?*const fn (*anyopaque, ?bool) void = null,
         choose_path: ?*const fn (*anyopaque, std.mem.Allocator, PathKind) anyerror!?[]u8 = null,
     };
+    pub fn setCursor(s: Surface, cursor: Cursor) void {
+        if (s.ops.set_cursor) |f| f(s.context, cursor);
+    }
     pub fn systemDark(s: Surface) bool {
         return if (s.ops.system_dark) |f| f(s.context) else true;
     }

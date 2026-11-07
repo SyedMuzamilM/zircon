@@ -176,7 +176,7 @@ fn emptyEditor(b: *ui.Ui, colors: Palette) !ui.Element {
 }
 
 fn divider(b: *ui.Ui, colors: Palette, kind: u8, horizontal: bool) !ui.Element {
-    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .direction = if (horizontal) .column else .row, .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.document, .hover_background = colors.hover, .padding = if (horizontal) .{ .top = 2, .bottom = 2 } else .{ .left = 2, .right = 2 } }, &.{try b.div(.{ .width = if (horizontal) .auto else .{ .px = 1 }, .height = if (horizontal) .{ .px = 1 } else .auto, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
+    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .cursor = if (horizontal) .resize_vertical else .resize_horizontal, .direction = if (horizontal) .column else .row, .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.document, .hover_background = colors.hover, .padding = if (horizontal) .{ .top = 2, .bottom = 2 } else .{ .left = 2, .right = 2 } }, &.{try b.div(.{ .width = if (horizontal) .auto else .{ .px = 1 }, .height = if (horizontal) .{ .px = 1 } else .auto, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
 }
 
 fn statusBar(self: *const Shell, b: *ui.Ui) !ui.Element {

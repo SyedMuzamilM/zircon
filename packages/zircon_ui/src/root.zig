@@ -40,6 +40,7 @@ pub const testing = struct {
 pub const Ui = @import("ui/ui.zig").Ui;
 pub const Element = @import("ui/element.zig").Element;
 pub const ElementKey = @import("ui/element.zig").Key;
+pub const Cursor = @import("ui/style.zig").Cursor;
 pub const Style = @import("ui/style.zig").Style;
 pub const Length = @import("ui/style.zig").Length;
 pub const Insets = @import("layout/geometry.zig").Insets;

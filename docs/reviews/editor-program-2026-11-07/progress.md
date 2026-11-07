@@ -30,3 +30,9 @@ The initial epoch mutation caused both intended assertion failures, then later s
 Fresh cross-provider review remains the next acceptance step for these commits. Full parity remains unverified.
 
 TEXT-05 durable recovery remains the next new feature after the cross-provider review. `recovery-design.md` compares immutable checkpoints with a journal and names forced-termination acceptance. Measured Git/LSP/folding/wrap scheduling work remains GIT-01, LANG-01/03 and PERF-01. No already tracked gap is dropped because this first unit passes.
+
+## Current UI correction
+
+`c23490e` delivers bounded grammar retries and error ownership. Six fixture journeys pass; the native chain passed102/102 at that revision. The current Git UI correction adds cursor feedback, joined action/menu controls, real per-file line-count badges, stable segmented branch/stash tabs and focused popover modules. Its current native chain passes105/105, and the ReleaseFast install passes42/42 steps with271 passes and four explicit native-only skips. These checks overlap previous chains.
+
+The latest user screenshots refine the next editable-diff, header/toolbar, notification and syntax-performance work in `git-diff-next.md`. Recovery storage has a separate implementation under review; application integration and forced-termination acceptance remain open. Full-product10/10 remains unverified.

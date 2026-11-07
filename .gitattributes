@@ -2,3 +2,6 @@
 docs/research/evidence/**/*.txt -whitespace
 docs/reviews/**/process-evidence/*.txt -whitespace
 docs/reviews/**/language-evidence/*.txt -whitespace
+docs/reviews/**/grammar-retry-evidence/*.txt -whitespace
+docs/reviews/**/git-ui-evidence/*.txt -whitespace
+docs/reviews/**/recovery-storage-evidence/*.txt -whitespace

@@ -186,6 +186,7 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
 }
 
 const ops: platform.Surface.Ops = .{
+    .set_cursor = setCursor,
     .system_dark = systemDark,
     .set_appearance = setAppearance,
     .choose_path = choosePath,
@@ -209,6 +210,17 @@ fn systemDark(_: *anyopaque) bool {
     const names = objc.send(Id, objc.class("NSArray"), "arrayWithObjects:count:", .{ &[_]Id{ objc.string("NSAppearanceNameAqua"), objc.string("NSAppearanceNameDarkAqua") }, @as(usize, 2) });
     const match = objc.send(Id, appearance, "bestMatchFromAppearancesWithNames:", .{names});
     return std.mem.eql(u8, objc.fromString(match), "NSAppearanceNameDarkAqua");
+}
+fn setCursor(_: *anyopaque, cursor: platform.Cursor) void {
+    const selector: [:0]const u8 = switch (cursor) {
+        .arrow => "arrowCursor",
+        .text => "IBeamCursor",
+        .pointing_hand => "pointingHandCursor",
+        .resize_horizontal => "resizeLeftRightCursor",
+        .resize_vertical => "resizeUpDownCursor",
+    };
+    const native_cursor = objc.send(Id, objc.class("NSCursor"), selector, .{});
+    objc.send(void, native_cursor, "set", .{});
 }
 fn setAppearance(raw: *anyopaque, dark: ?bool) void {
     const appearance: Id = if (dark) |value| objc.send(Id, objc.class("NSAppearance"), "appearanceNamed:", .{objc.string(if (value) "NSAppearanceNameDarkAqua" else "NSAppearanceNameAqua")}) else null;
