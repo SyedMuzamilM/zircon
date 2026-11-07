@@ -123,11 +123,11 @@ pub const View = struct {
             const parent = parentCategory(category);
             if (parent == null or self.expanded[@backingInt(parent.?)]) {
                 const has_children = category == .appearance or category == .editor or category == .panels;
-                try sections.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ if (has_children) try v.icon(b, if (self.expanded[@backingInt(category)]) .chevron_down else .chevron_right, c.muted, 14) else try b.div(.{ .width = .{ .px = 14 }, .flex_shrink = 0 }, &.{}), try v.text(b, categoryName(category), c.text, 13) }, .on_click = try b.onClickWith(category, select), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .gap = 6, .padding = .{ .left = if (parent != null) 22 else 6, .right = 6 }, .align_items = .center, .radius = v.metrics.control_radius, .background = if (self.category == category) c.selected else null, .hover_background = c.hover } }));
+                try sections.append(b.allocator(), try b.button(.{ .label = categoryName(category), .children = &.{ if (has_children) try v.icon(b, if (self.expanded[@backingInt(category)]) .chevron_down else .chevron_right, c.muted, 14) else try b.div(.{ .width = .{ .px = 14 }, .flex_shrink = 0 }, &.{}), try v.text(b, categoryName(category), c.text, 13) }, .on_click = b.onClickWith(select, category), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .gap = 6, .padding = .{ .left = if (parent != null) 22 else 6, .right = 6 }, .align_items = .center, .radius = v.metrics.control_radius, .background = if (self.category == category) c.selected else null, .hover_background = c.hover } }));
             }
         }
         const nav_height = @as(f32, @floatFromInt(sections.items.len)) * 33;
-        try nav.append(b.allocator(), try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .gap = 3, .scroll_y = @min(self.nav_scroll.offset, @max(0, nav_height - @max(0, b.viewport().height - 140))), .overflow = .hidden }, sections.items), .{ .on_input = try b.onInputWith(nav_height, scrollNav) }));
+        try nav.append(b.allocator(), try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .gap = 3, .scroll_y = @min(self.nav_scroll.offset, @max(0, nav_height - @max(0, b.viewport().height - 140))), .overflow = .hidden }, sections.items), .{ .on_input = b.onInputWith(scrollNav, nav_height) }));
         try nav.append(b.allocator(), try v.rule(b, c));
         try nav.append(b.allocator(), try v.text(b, "Zircon settings", c.muted, 11));
         const sidebar = try b.column(.{ .width = .{ .px = 238 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 12, .bottom = 14 }, .gap = 5, .background = c.sidebar }, nav.items);
@@ -148,7 +148,7 @@ pub const View = struct {
         if (row_count == 0) try rows.append(b.allocator(), try v.text(b, "No settings match your search.", c.muted, 13));
         if (self.error_value) |err| try rows.append(b.allocator(), try v.text(b, @import("../errors.zig").message(err), c.warning, 12));
         const content_height = 55 + @as(f32, @floatFromInt(row_count)) * row_height + 40;
-        const list = try b.listen(try b.key(.{ .string = "settings-content" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .padding = .{ .left = 32, .right = 30, .bottom = 24 }, .scroll_y = @min(self.scroll.offset, @max(0, content_height - @max(1, b.viewport().height - 60))), .overflow = .hidden }, rows.items)), .{ .on_input = try b.onInputWith(content_height, onScroll) });
+        const list = try b.listen(try b.key(.{ .string = "settings-content" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .padding = .{ .left = 32, .right = 30, .bottom = 24 }, .scroll_y = @min(self.scroll.offset, @max(0, content_height - @max(1, b.viewport().height - 60))), .overflow = .hidden }, rows.items)), .{ .on_input = b.onInputWith(onScroll, content_height) });
         const main = try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = c.document, .overflow = .hidden }, &.{ header, list });
         const base = try b.row(.{ .background = c.document }, &.{ sidebar, try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{}), main });
         var layers: std.ArrayList(ui.Element) = .empty;
@@ -415,7 +415,7 @@ fn choiceStyle(c: v.Palette) ui.Style {
     return style;
 }
 fn changeButton(b: *ui.Ui, c: v.Palette, change: Change, label: []const u8) !ui.Element {
-    return b.button(.{ .label = label, .children = &.{try v.text(b, if (change == .ui_down or change == .height_down) "−" else if (change == .ui_up or change == .height_up) "+" else label, c.text, 13)}, .on_click = try b.onClickWith(change, View.change), .style = choiceStyle(c) });
+    return b.button(.{ .label = label, .children = &.{try v.text(b, if (change == .ui_down or change == .height_down) "−" else if (change == .ui_up or change == .height_up) "+" else label, c.text, 13)}, .on_click = b.onClickWith(View.change, change), .style = choiceStyle(c) });
 }
 fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snapshot, row: Row) !ui.Element {
     _ = self;
@@ -521,7 +521,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                     if (generation.resolveIconTheme(values.icon_theme)) |icons| name = icons.name;
                 }
             }
-            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .theme) Picker.theme else Picker.icons, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 10, .right = 8 }, .align_items = .center, .justify_content = .space_between, .radius = v.metrics.control_radius, .background = c.sidebar, .hover_background = c.hover } }));
+            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = b.onClickWith(View.openPicker, if (row == .theme) Picker.theme else Picker.icons), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 10, .right = 8 }, .align_items = .center, .justify_content = .space_between, .radius = v.metrics.control_radius, .background = c.sidebar, .hover_background = c.hover } }));
         },
         .font_family, .ui_font_family => {
             const name: []const u8 = if (row == .font_family and values.editor_font_name.len > 0) values.editor_font_name.slice() else if (row == .ui_font_family and values.interface_font_name.len > 0) values.interface_font_name.slice() else if (row == .font_family) switch (values.font_family) {
@@ -532,7 +532,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .plex => "IBM Plex Sans",
                 .system => "System",
             };
-            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = try b.onClickWith(if (row == .font_family) Picker.code_font else Picker.ui_font, View.openPicker), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .justify_content = .space_between, .background = c.element, .hover_background = c.hover, .radius = v.metrics.control_radius } }));
+            try controls.append(b.allocator(), try b.button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = b.onClickWith(View.openPicker, if (row == .font_family) Picker.code_font else Picker.ui_font), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .justify_content = .space_between, .background = c.element, .hover_background = c.hover, .radius = v.metrics.control_radius } }));
         },
         .ui_font_size, .line_height => {
             const is_ui = row == .ui_font_size;
@@ -544,7 +544,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
             inline for (.{ .{ Change.tab_two, "2", 2 }, .{ Change.tab_four, "4", 4 }, .{ Change.tab_eight, "8", 8 } }) |choice| {
                 var style = choiceStyle(c);
                 if (values.tab_width == choice[2]) style.background = c.selected;
-                try controls.append(b.allocator(), try b.button(.{ .label = choice[1], .on_click = try b.onClickWith(choice[0], View.change), .style = style }));
+                try controls.append(b.allocator(), try b.button(.{ .label = choice[1], .on_click = b.onClickWith(View.change, choice[0]), .style = style }));
             }
         },
         .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor => {
@@ -584,7 +584,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .blame => .blame,
                 else => .motion,
             };
-            try controls.append(b.allocator(), try b.button(.{ .label = title, .children = &.{try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 })}, .on_click = try b.onClickWith(change, View.change), .style = .{ .width = .{ .px = 38 }, .height = .{ .px = 28 }, .align_items = .center, .justify_content = .center, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 0 } }));
+            try controls.append(b.allocator(), try b.button(.{ .label = title, .children = &.{try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 })}, .on_click = b.onClickWith(View.change, change), .style = .{ .width = .{ .px = 38 }, .height = .{ .px = 28 }, .align_items = .center, .justify_content = .center, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 0 } }));
         },
     }
     return b.key(.{ .string = @tagName(row) }, try b.column(.{ .height = .{ .px = row_height }, .flex_shrink = 0 }, &.{ try b.row(.{ .flex_grow = 1, .gap = 18, .align_items = .center }, &.{ try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 7, .overflow = .hidden }, &.{ try v.text(b, title, c.text, 14), try v.text(b, help, c.muted, 12) }), try b.row(.{ .gap = 4, .align_items = .center, .flex_shrink = 0 }, controls.items) }), try v.rule(b, c) }));
@@ -670,11 +670,11 @@ fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         style.height = .{ .px = 32 };
         style.justify_content = .start;
         style.background = if (i == self.choice_index) c.selected else null;
-        try rows.append(b.allocator(), try b.button(.{ .label = choice.name, .children = &.{ try b.div(.{ .width = .{ .px = 16 }, .flex_shrink = 0, .justify_content = .center }, if (current) &.{try v.icon(b, .check, c.accent, 14)} else &.{}), try v.text(b, choice.name, c.text, 13) }, .on_click = try b.onClickWith(ChoiceTarget{ .index = @intCast(i), .picker = self.picker }, choose), .style = style }));
+        try rows.append(b.allocator(), try b.button(.{ .label = choice.name, .children = &.{ try b.div(.{ .width = .{ .px = 16 }, .flex_shrink = 0, .justify_content = .center }, if (current) &.{try v.icon(b, .check, c.accent, 14)} else &.{}), try v.text(b, choice.name, c.text, 13) }, .on_click = b.onClickWith(choose, ChoiceTarget{ .index = @intCast(i), .picker = self.picker }), .style = style }));
     }
     if (visible.end < choices.len) try rows.append(b.allocator(), try b.div(.{ .height = .{ .px = @as(f32, @floatFromInt(choices.len - visible.end)) * 32 }, .flex_shrink = 0 }, &.{}));
     if (choices.len == 0) try rows.append(b.allocator(), try v.text(b, "No matching choices", c.muted, 12));
-    const list = try b.listen(try b.column(.{ .height = .{ .px = height }, .min_height = .{ .px = 0 }, .scroll_y = offset, .overflow = .hidden }, rows.items), .{ .on_input = try b.onInputWith(total, View.scrollPicker) });
+    const list = try b.listen(try b.column(.{ .height = .{ .px = height }, .min_height = .{ .px = 0 }, .scroll_y = offset, .overflow = .hidden }, rows.items), .{ .on_input = b.onInputWith(View.scrollPicker, total) });
     var children: std.ArrayList(ui.Element) = .empty;
     if (self.choice_query) |handle| try children.append(b.allocator(), try b.autofocus(try b.key(.{ .string = "settings-choice-query" }, try b.view(handle))));
     try children.appendSlice(b.allocator(), &.{ try v.rule(b, c), list });

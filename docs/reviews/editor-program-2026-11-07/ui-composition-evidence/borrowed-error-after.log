@@ -1,0 +1,17 @@
+Build Summary: 9/9 steps succeeded
+contracts success
++- compile test debug native success 279ms MaxRSS:101M
+|  +- options cached
++- compile test debug native success 300ms MaxRSS:101M
+|  +- options (reused)
++- compile test debug native success 280ms MaxRSS:103M
+|  +- options (reused)
++- compile test debug native success 297ms MaxRSS:102M
+|  +- options (reused)
++- compile test debug native success 272ms MaxRSS:101M
+|  +- options (reused)
++- compile test debug native success 289ms MaxRSS:102M
+|  +- options (reused)
++- compile test debug native success 289ms MaxRSS:102M
+   +- options (reused)
+

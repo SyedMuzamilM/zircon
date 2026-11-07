@@ -4,9 +4,9 @@ const ui = @import("zircon_ui");
 const Counter = struct {
     count: u32 = 0,
     pub fn render(self: *const Counter, builder: *ui.Ui) !ui.Element {
-        return builder.column(.{ .gap = 12, .padding = ui.Insets.all(24) }, &.{
-            try builder.textFmt("Count: {d}", .{self.count}),
-            try builder.button(.{ .label = "Increment", .on_click = builder.onClick(increment) }),
+        return builder.column(.{ .gap = 12, .padding = .all(24) }, .{
+            builder.textFmt("Count: {d}", .{self.count}),
+            builder.button(.{ .key = .named("increment"), .label = "Increment", .on_click = builder.onClick(increment) }),
         });
     }
     fn increment(self: *Counter, event: *ui.Event(ui.Click), cx: *ui.Context(Counter)) void {

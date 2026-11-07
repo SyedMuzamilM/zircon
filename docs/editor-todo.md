@@ -101,6 +101,9 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 ## M2: language services and everyday coding
 
+- [x] **UI-01: Compact typed UI composition with executable documentation.**
+  Scope: `zircon_ui` constructors, callback payload inference, examples and application consumers. Done: eager tuples accept elements/results, modifiers propagate failures, button metadata avoids wrapper nesting, callbacks infer pointer-free payloads, and compiled examples stay synchronized with the public guide. [Design and verification](design/ui-syntax.md), [usage](zircon-ui-composition.md) and [acceptance logs](reviews/editor-program-2026-11-07/ui-composition-evidence/README.md) cover ownership, allocation failures, focus, large arrays and lexical migration. Shared copied-value validation closes error-union pointer escapes for handlers and entity results. This does not complete contextual keymaps, stock lists or native platform adapters.
+
 - [ ] **LANG-01: Negotiate LSP synchronization and position encoding.**
   Depends: TEXT-07; BASE-03. Scope: language client and change batching. Done: honor None/Full/Incremental and supported encoding, preserve ordered valid versions, bound/coalesce output without losing edits; test a slow server, rapid changes, undo, reopen and Unicode. Measure copied/serialized bytes and queue pressure.
 

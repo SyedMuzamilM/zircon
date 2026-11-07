@@ -2,7 +2,17 @@
 const std = @import("std");
 pub const Insets = @import("../layout/geometry.zig").Insets;
 pub const Color = @import("../layout/geometry.zig").Color;
-pub const Length = union(enum) { auto, px: f32, percent: f32, rem: f32, viewport_width: f32, viewport_height: f32 };
+pub const Length = union(enum) {
+    auto,
+    px: f32,
+    percent: f32,
+    rem: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    pub fn pixels(value: f32) Length {
+        return .{ .px = value };
+    }
+};
 pub const Direction = enum { row, column, stack };
 pub const Align = enum { start, center, end, stretch };
 pub const Justify = enum { start, center, end, space_between };

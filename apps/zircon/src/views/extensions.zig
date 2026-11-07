@@ -70,7 +70,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         if (snapshot.extension("org.zircon.oxide") == null) try rows.append(b.allocator(), try b.column(.{ .padding = ui.Insets.all(18), .gap = 12, .background = c.panel, .radius = ui.controls.metrics.popover_radius }, &.{ try label(b, "Available locally: Oxide contributions", c.text, 16), try label(b, "A warm theme, symbol icon theme, Python syntax and ZLS configuration.", c.muted, 13), try command(b, .install_bundled_extension, "Install Oxide", c) }));
     } else try rows.append(b.allocator(), try label(b, "An extension directory has not been configured for this workspace.", c.warning, 13));
     if (self.status.len > 0) try rows.append(b.allocator(), try label(b, self.status, if (self.status_is_error) c.warning else c.muted, 13));
-    const list = try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .gap = 18, .overflow = .hidden, .scroll_y = self.catalog.installed_scroll.offset }, rows.items[3..]), .{ .on_input = try b.onInputWith(installed_height, scrollInstalled) });
+    const list = try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .gap = 18, .overflow = .hidden, .scroll_y = self.catalog.installed_scroll.offset }, rows.items[3..]), .{ .on_input = b.onInputWith(scrollInstalled, installed_height) });
     return b.column(.{ .flex_grow = 1, .padding = ui.Insets.all(24), .gap = 18, .overflow = .hidden, .background = c.document }, &.{ rows.items[0], rows.items[1], rows.items[2], list });
 }
 fn label(b: *ui.Ui, bytes: []const u8, color: ui.Color, size: f32) !ui.Element {
@@ -80,7 +80,7 @@ fn command(b: *ui.Ui, value: @import("../commands.zig").Command, text: []const u
     return @import("components.zig").actionButton(b, c, value, text, false);
 }
 fn action(b: *ui.Ui, value: Payload, text: []const u8, c: @import("../theme.zig").Palette) !ui.Element {
-    return b.button(.{ .label = text, .on_click = try b.onClickWith(value, perform), .style = buttonStyle(c) });
+    return b.button(.{ .label = text, .on_click = b.onClickWith(perform, value), .style = buttonStyle(c) });
 }
 fn buttonStyle(c: @import("../theme.zig").Palette) ui.Style {
     return @import("components.zig").buttonStyle(c, false);
@@ -122,7 +122,7 @@ fn perform(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), value: 
 }
 
 fn tab(b: *ui.Ui, self: *const Shell, all: bool, name: []const u8) !ui.Element {
-    return b.button(.{ .label = name, .on_click = try b.onClickWith(all, chooseTab), .style = @import("components.zig").buttonStyle(self.colors, self.catalog.show_available == all) });
+    return b.button(.{ .label = name, .on_click = b.onClickWith(chooseTab, all), .style = @import("components.zig").buttonStyle(self.colors, self.catalog.show_available == all) });
 }
 fn chooseTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), all: bool) !void {
     self.catalog.show_available = all;
@@ -158,9 +158,9 @@ fn available(self: *const Shell, b: *ui.Ui) !ui.Element {
             if (std.mem.eql(u8, feature, known)) supported = true;
         };
         const busy = self.catalog.install_id != null and std.mem.eql(u8, self.catalog.install_id.?, entry.id);
-        try rows.append(b.allocator(), try b.key(.{ .string = entry.id }, try b.column(.{ .height = .{ .px = 92 }, .flex_shrink = 0, .gap = 8, .padding = ui.Insets.all(12), .background = c.document, .overflow = .hidden }, &.{ try b.row(.{ .height = .{ .px = 28 }, .gap = 8, .align_items = .center }, &.{ try v.icon(b, .extension, c.muted, 16), try b.styled(try label(b, entry.name, c.text, 14), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }), try label(b, entry.version, c.muted, 11), try b.button(.{ .label = if (!supported) "Not supported yet" else if (busy) "Installing…" else if (update) "Update" else if (installed) "Installed" else "Install", .on_click = if (!supported or (installed and !update) or self.catalog.installing != null) null else try b.onClickWith(Remote{ .generation = self.catalog.generation, .index = @intCast(i) }, installRemote), .style = v.buttonStyle(c, (!installed or update) and !busy) }) }), try label(b, if (entry.description.len > 0) entry.description else entry.id, c.muted, 12), try v.rule(b, c) })));
+        try rows.append(b.allocator(), try b.key(.{ .string = entry.id }, try b.column(.{ .height = .{ .px = 92 }, .flex_shrink = 0, .gap = 8, .padding = ui.Insets.all(12), .background = c.document, .overflow = .hidden }, &.{ try b.row(.{ .height = .{ .px = 28 }, .gap = 8, .align_items = .center }, &.{ try v.icon(b, .extension, c.muted, 16), try b.styled(try label(b, entry.name, c.text, 14), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }), try label(b, entry.version, c.muted, 11), try b.button(.{ .label = if (!supported) "Not supported yet" else if (busy) "Installing…" else if (update) "Update" else if (installed) "Installed" else "Install", .on_click = if (!supported or (installed and !update) or self.catalog.installing != null) null else try b.onClickWith(installRemote, Remote{ .generation = self.catalog.generation, .index = @intCast(i) }), .style = v.buttonStyle(c, (!installed or update) and !busy) }) }), try label(b, if (entry.description.len > 0) entry.description else entry.id, c.muted, 12), try v.rule(b, c) })));
     }
-    try content.append(b.allocator(), try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = @max(0, -visible.top), .overflow = .hidden }, rows.items), .{ .on_input = try b.onInputWith(@as(f32, @floatFromInt(entries.len)) * 92, scroll) }));
+    try content.append(b.allocator(), try b.listen(try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = @max(0, -visible.top), .overflow = .hidden }, rows.items), .{ .on_input = b.onInputWith(scroll, @as(f32, @floatFromInt(entries.len)) * 92) }));
     return b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .gap = 12 }, content.items);
 }
 const Remote = struct { generation: u64, index: u32 };

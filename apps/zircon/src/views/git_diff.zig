@@ -144,12 +144,12 @@ fn action(b: *ui.Ui, c: v.Palette, command: Command, name: []const u8, title: []
     if (label) try children.append(b.allocator(), try v.text(b, title, c.text, 12));
     var style = v.buttonStyle(c, false);
     style.background = null;
-    return b.button(.{ .label = name, .children = children.items, .on_click = try b.onClickWith(command, Shell.onCommand), .style = style });
+    return b.button(.{ .label = name, .children = children.items, .on_click = b.onClickWith(Shell.onCommand, command), .style = style });
 }
 fn comparison(b: *ui.Ui, c: v.Palette, command: Command, name: []const u8, selected: bool) !ui.Element {
     var style = v.buttonStyle(c, false);
     style.background = if (selected) c.element else null;
-    return b.button(.{ .label = name, .on_click = try b.onClickWith(command, Shell.onCommand), .style = style });
+    return b.button(.{ .label = name, .on_click = b.onClickWith(Shell.onCommand, command), .style = style });
 }
 fn fileHeader(self: *const Shell, b: *ui.Ui, c: v.Palette, path: []const u8) !ui.Element {
     const name = std.fs.path.basename(path);

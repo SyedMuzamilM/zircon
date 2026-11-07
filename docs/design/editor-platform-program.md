@@ -44,6 +44,8 @@ Units can overlap only at independent boundaries. Native tests that need foregro
 
 Starting commit is `560dc2a9d9111012ebfa93fb2243515ac5339753`, plus pre-existing documentation changes. `./tools/zig build check --summary all` passed all 32 steps on 2026-11-07. Cached suites are reported as cached; the 187 executed checks do not represent the total suite inventory.
 
-Current implementation slice is TEXT-05 application recovery. Two independent design readers compare writer ownership and close/discard ordering before implementation. Both inherit the session model; model diversity is reduced and the unconfigured different-family arena judge is omitted. Passing tests do not substitute for required independent implementation review.
+TEXT-05 [application recovery](../progress/2026-11-07-recovery-integration.md) is delivered in `c4ce46e`. The [compact UI syntax](ui-syntax.md) adds eager tuple composition and typed callback inference with compiled documentation. Independent design/review readers inherit the session model; model diversity is reduced and the unconfigured different-family arena judge is omitted. Passing tests do not substitute for required independent implementation review.
+
+Shared document-change delivery remains the next editor integration foundation. Linux/Windows backend designs are being grounded against native source and primary dependency APIs. Linux can now be exercised in a disposable Docker Desktop environment. Windows target compilation currently exposes POSIX permission assumptions and native Windows execution remains unverified.
 
 Later slices retain their original checklist status until their acceptance gate passes. Linux and Windows execution availability must be established before claiming those platforms verified.

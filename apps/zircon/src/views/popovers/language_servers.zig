@@ -32,7 +32,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     try rows.append(b.allocator(), try b.div(.{ .margin = .{ .top = 4, .bottom = 4 } }, &.{rule}));
     const Command = @import("../../commands.zig").Command;
     inline for (.{ .{ Command.restart_language_servers, "Restart all servers" }, .{ Command.stop_language_servers, "Stop all servers" }, .{ Command.install_language_support, "Install language support…" } }) |action| {
-        try rows.append(b.allocator(), try b.button(.{ .label = action[1], .children = &.{try v.text(b, action[1], c.text, 12)}, .on_click = try b.onClickWith(action[0], Shell.onCommand), .style = .{ .height = .{ .px = 24 }, .flex_shrink = 0, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = v.metrics.control_radius, .hover_background = c.hover } }));
+        try rows.append(b.allocator(), try b.button(.{ .label = action[1], .children = &.{try v.text(b, action[1], c.text, 12)}, .on_click = b.onClickWith(Shell.onCommand, action[0]), .style = .{ .height = .{ .px = 24 }, .flex_shrink = 0, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = v.metrics.control_radius, .hover_background = c.hover } }));
     }
     height += 1 + 3 * 24;
     return panel.render(self, b, .{ .width = 200, .height = height, .border_only = true }, rows.items);

@@ -107,6 +107,12 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "zircon_ui", .module = module }},
     }) });
     const example_run = b.addRunArtifact(example);
+    const examples_compile = b.step("examples-check", "Compile the documented headless and supported native counter examples");
+    examples_compile.dependOn(&example.step);
+    const examples_docs = b.addSystemCommand(&.{ "python3", "tools/check_ui_examples.py", "--check" });
+    examples_compile.dependOn(&examples_docs.step);
+    const migration_tests = b.addSystemCommand(&.{ "python3", "tools/test_migrate_ui_callbacks.py" });
+    examples_compile.dependOn(&migration_tests.step);
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);
     const extension_host_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
     extension_host_build.addFileArg(b.path("tools/zed-extension-host/Cargo.toml"));
@@ -199,6 +205,7 @@ pub fn build(b: *std.Build) void {
         }) });
         b.step("counter-native", "Open the native framework counter").dependOn(&b.addRunArtifact(counter_native).step);
         b.step("build-native", "Compile native framework applications").dependOn(&counter_native.step);
+        examples_compile.dependOn(&counter_native.step);
         const native = b.createModule(.{ .root_source_file = b.path("packages/zircon_ui/src/native_test_root.zig"), .target = target, .optimize = optimize, .link_libc = true });
         const native_options = b.addOptions();
         native_options.addOption(bool, "native", true);
@@ -237,6 +244,10 @@ pub fn build(b: *std.Build) void {
         .{ "mutable_render", "render must receive (*const Self, *Ui)" },
         .{ "borrowed_read", "read/update results cannot borrow pointers or slices; copy into a caller-owned output argument" },
         .{ "invalid_handler", "onClick requires fn (*Self, *Event(Click), *Context(Self)) !void" },
+        .{ "invalid_child", "UI child must be Element or !Element" },
+        .{ "borrowed_handler", "handler payloads must be pointer-free copied values" },
+        .{ "borrowed_error_payload", "handler payloads must be pointer-free copied values" },
+        .{ "borrowed_error_result", "read/update results cannot borrow pointers or slices; copy into a caller-owned output argument" },
     }) |fixture| {
         const invalid = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(b.fmt("packages/zircon_ui/tests/compile_fail/{s}.zig", .{fixture[0]})),
@@ -251,6 +262,7 @@ pub fn build(b: *std.Build) void {
     for (feature_runs.items) |execute| check.dependOn(&execute.step);
     check.dependOn(&git_parser_run.step);
     check.dependOn(contracts);
+    check.dependOn(examples_compile);
     check.dependOn(&run.step);
     check.dependOn(&text_run.step);
     check.dependOn(&workspace_run.step);

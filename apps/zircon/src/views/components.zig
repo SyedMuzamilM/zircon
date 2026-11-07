@@ -20,13 +20,13 @@ pub const metrics = struct {
     pub const inset: f32 = 12;
 };
 pub fn text(b: *ui.Ui, bytes: []const u8, color: ui.Color, size: f32) !ui.Element {
-    return b.styled(try b.text(bytes), .{ .text = .{ .size = size, .color = color }, .overflow = .hidden, .flex_shrink = 0 });
+    return b.styled(b.text(bytes), .{ .text = .{ .size = size, .color = color }, .overflow = .hidden, .flex_shrink = 0 });
 }
 pub fn icon(b: *ui.Ui, name: Icon, color: ui.Color, size: f32) !ui.Element {
     return ui.controls.icons.element(b, name, color, size);
 }
 pub fn iconButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, name: Icon, selected: bool) !ui.Element {
-    return b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = try b.onClickWith(action, Shell.onCommand), .style = iconButtonStyle(c, selected) });
+    return b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = b.onClickWith(Shell.onCommand, action), .style = iconButtonStyle(c, selected) });
 }
 pub fn iconButtonStyle(c: Palette, selected: bool) ui.Style {
     return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover };
@@ -56,7 +56,7 @@ pub fn actionButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Co
     const color = if (primary) c.on_primary else c.text;
     if (glyph) |name| try children.append(b.allocator(), try icon(b, name, color, 14));
     try children.append(b.allocator(), try text(b, label, color, 12));
-    return b.button(.{ .label = label, .children = children.items, .on_click = try b.onClickWith(action, Shell.onCommand), .style = buttonStyle(c, primary) });
+    return b.button(.{ .label = label, .children = children.items, .on_click = b.onClickWith(Shell.onCommand, action), .style = buttonStyle(c, primary) });
 }
 pub fn rule(b: *ui.Ui, c: Palette) !ui.Element {
     return b.div(.{ .height = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{});
@@ -78,10 +78,10 @@ pub fn fileColor(c: Palette, path: []const u8) ui.Color {
 }
 
 pub fn menuRow(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, shortcut: []const u8, selected: bool) !ui.Element {
-    return b.key(.{ .number = @backingInt(action) }, try b.button(.{ .label = label, .children = &.{
+    return b.button(.{ .key = .{ .number = @backingInt(action) }, .label = label, .children = &.{
         try b.styled(try text(b, label, c.text, 13), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden, .text = .{ .size = 13, .color = c.text } }),
         try text(b, shortcut, c.muted, 12),
-    }, .on_click = try b.onClickWith(action, Shell.onCommand), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 20, .padding = .{ .left = 10, .right = 10 }, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }));
+    }, .on_click = b.onClickWith(Shell.onCommand, action), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 20, .padding = .{ .left = 10, .right = 10 }, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover, .overflow = .hidden } });
 }
 
 /// Align to the invoking control, flip above it when needed, and stay inside

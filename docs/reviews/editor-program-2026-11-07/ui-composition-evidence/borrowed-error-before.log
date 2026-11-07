@@ -1,0 +1,27 @@
+contracts
++- compile test debug native failure
+error: 
+       ========= should contain: ===============
+       read/update results cannot borrow pointers or slices; copy into a caller-owned output argument
+       ========= but not found: ================
+       
+       =========================================
+failed command: /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_ui -Mroot=packages/zircon_ui/tests/compile_fail/borrowed_error_result.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -fno-emit-bin --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/ --listen=-
+
+Build Summary: 7/9 steps succeeded (1 failed)
+contracts transitive failure
++- compile test debug native success 303ms MaxRSS:100M
+|  +- options cached
++- compile test debug native success 288ms MaxRSS:102M
+|  +- options (reused)
++- compile test debug native success 296ms MaxRSS:101M
+|  +- options (reused)
++- compile test debug native success 309ms MaxRSS:102M
+|  +- options (reused)
++- compile test debug native success 299ms MaxRSS:102M
+|  +- options (reused)
++- compile test debug native success 328ms MaxRSS:103M
+|  +- options (reused)
++- compile test debug native failure
+   +- options (reused)
+

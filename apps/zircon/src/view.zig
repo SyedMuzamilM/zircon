@@ -44,7 +44,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         var choices: std.ArrayList(ui.Element) = .empty;
         const start = self.language.completion_index -| 7;
         for (message.data.completion.items[start..@min(start + 8, message.data.completion.items.len)], start..) |item, index| {
-            try choices.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = item.label, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onCompletion), .style = .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .top = 7 }, .background = if (index == self.language.completion_index) colors.selected else colors.panel, .text = .{ .size = 13, .mono = true, .color = colors.text }, .overflow = .hidden } })));
+            try choices.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = item.label, .on_click = b.onClickWith(Shell.onCompletion, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .top = 7 }, .background = if (index == self.language.completion_index) colors.selected else colors.panel, .text = .{ .size = 13, .mono = true, .color = colors.text }, .overflow = .hidden } })));
         }
         if (choices.items.len == 0) try choices.append(b.allocator(), try label(b, colors, "No completions", colors.muted, 12));
         const requested: ui.Size = .{ .width = @min(420, viewport.width - 24), .height = @as(f32, @floatFromInt(@max(1, choices.items.len))) * 30 + 12 };
@@ -106,10 +106,10 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const primary_source = self.panel == .editor or self.panel == .markdown;
         var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0));
         primary = try b.styled(primary, .{ .width = .{ .px = primary_width }, .flex_grow = 1, .min_height = .{ .px = 0 }, .min_width = .{ .px = 0 }, .overflow = .hidden });
-        if (primary_source) primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 0), Shell.onEditor) });
+        if (primary_source) primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = b.onInputWith(Shell.onEditor, @as(u8, 0)) });
         if (self.currentTool(0) == .git_diff) primary = try b.requestFocus(try b.listen(try b.key(.{ .string = "primary-tool" }, primary), .{ .focusable = true }), if (self.active_pane == .primary) self.editor_focus_request else 0);
         if (primary_source) primary = try b.requestFocus(if (self.agent_mode) primary else try b.autofocus(primary), if (!self.agent_mode and self.active_pane == .primary) self.editor_focus_request else 0);
-        try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, primary_record, tab.document, &tab.editor, primary, 0, primary_width))), .{ .on_capture = try b.onInputWith(@as(u8, 0), Shell.onPaneInput) }));
+        try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, primary_record, tab.document, &tab.editor, primary, 0, primary_width))), .{ .on_capture = b.onInputWith(Shell.onPaneInput, @as(u8, 0)) }));
         if (preview_visible) {
             try panes.append(b.allocator(), try divider(b, colors, 1, false));
             const preview = try b.listen(try b.key(.{ .string = "markdown-preview" }, try self.preview.?.view.render(b)), .{ .focusable = true, .on_input = b.onInput(Shell.onPreview) });
@@ -120,10 +120,10 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             const secondary_source = self.secondary_tool == null;
             var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool);
             secondary_canvas = try b.styled(secondary_canvas, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
-            if (secondary_source) secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 1), Shell.onEditor) });
+            if (secondary_source) secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = b.onInputWith(Shell.onEditor, @as(u8, 1)) });
             if (self.secondary_tool == .git_diff) secondary_canvas = try b.requestFocus(try b.listen(try b.key(.{ .string = "secondary-tool" }, secondary_canvas), .{ .focusable = true }), if (self.active_pane == .secondary) self.editor_focus_request else 0);
             if (secondary_source) secondary_canvas = try b.requestFocus(secondary_canvas, if (!self.agent_mode and self.active_pane == .secondary) self.editor_focus_request else 0);
-            try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, record, secondary.document, &secondary.editor, secondary_canvas, 1, if (vertical) width else available - primary_width))), .{ .on_capture = try b.onInputWith(@as(u8, 1), Shell.onPaneInput) }));
+            try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, record, secondary.document, &secondary.editor, secondary_canvas, 1, if (vertical) width else available - primary_width))), .{ .on_capture = b.onInputWith(Shell.onPaneInput, @as(u8, 1)) }));
         }
         if (self.secondary != null and self.split_reverse and !preview_visible) std.mem.swap(ui.Element, &panes.items[0], &panes.items[2]);
         try children.append(b.allocator(), try b.key(.{ .string = "panes" }, try b.div(.{ .direction = if (vertical) .column else .row, .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, panes.items)));
@@ -137,7 +137,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
                 .warning => "Warning",
                 .information => "Information",
                 .hint => "Hint",
-            }, diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }), .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onDiagnostic), .style = .{ .height = .{ .px = 28 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 6 }, .background = colors.panel, .text = .{ .size = 12, .color = colors.warning }, .overflow = .hidden } })));
+            }, diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }), .on_click = b.onClickWith(Shell.onDiagnostic, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 28 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 6 }, .background = colors.panel, .text = .{ .size = 12, .color = colors.warning }, .overflow = .hidden } })));
             break;
         };
     }
@@ -177,7 +177,7 @@ fn emptyEditor(b: *ui.Ui, colors: Palette) !ui.Element {
 }
 
 fn divider(b: *ui.Ui, colors: Palette, kind: u8, horizontal: bool) !ui.Element {
-    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .cursor = if (horizontal) .resize_vertical else .resize_horizontal, .direction = if (horizontal) .column else .row, .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.document, .hover_background = colors.hover, .padding = if (horizontal) .{ .top = 2, .bottom = 2 } else .{ .left = 2, .right = 2 } }, &.{try b.div(.{ .width = if (horizontal) .auto else .{ .px = 1 }, .height = if (horizontal) .{ .px = 1 } else .auto, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = try b.onInputWith(kind, Shell.onDrag) });
+    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .cursor = if (horizontal) .resize_vertical else .resize_horizontal, .direction = if (horizontal) .column else .row, .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.document, .hover_background = colors.hover, .padding = if (horizontal) .{ .top = 2, .bottom = 2 } else .{ .left = 2, .right = 2 } }, &.{try b.div(.{ .width = if (horizontal) .auto else .{ .px = 1 }, .height = if (horizontal) .{ .px = 1 } else .auto, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = b.onInputWith(Shell.onDrag, kind) });
 }
 
 fn statusBar(self: *const Shell, b: *ui.Ui) !ui.Element {
@@ -229,7 +229,7 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
                 const limit = resultCapacity(self, b);
                 const start = resultStart(filtered.len, self.overlay_index, limit);
                 for (filtered[start..@min(start + limit, filtered.len)], start..) |index, visible| {
-                    const row = try b.button(.{ .label = self.file_index.items[index].label, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onFile), .style = resultStyle(colors, visible == self.overlay_index) });
+                    const row = try b.button(.{ .label = self.file_index.items[index].label, .on_click = b.onClickWith(Shell.onFile, @as(u32, @intCast(index))), .style = resultStyle(colors, visible == self.overlay_index) });
                     try children.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, row));
                 }
                 if (filtered.len == 0) try children.append(b.allocator(), try label(b, colors, if (self.indexing) "Indexing files…" else "No matching files. Open a file by path with ⌘O.", colors.muted, 12));

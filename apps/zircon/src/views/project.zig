@@ -24,10 +24,10 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui
         if (if (entry.directory) self.project_folder_icons else self.project_file_icons) try children.append(b.allocator(), try v.fileGlyph(self, b, entry.path, entry.directory, entry.expanded, 16));
         try children.append(b.allocator(), try v.text(b, entry.name, if (entry.directory) c.folder else c.text, 13));
         const accessible = if (contribution != null and contribution.? == .symbol) try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ contribution.?.symbol, entry.name }) else entry.name;
-        const row = try b.button(.{ .label = accessible, .children = children.items, .on_click = try b.onClickWith(@as(u32, @intCast(index)), Shell.onTree), .style = .{ .direction = .row, .height = .{ .px = tree_row }, .flex_shrink = 0, .align_items = .center, .gap = 5, .padding = .{ .left = 5, .right = 8 }, .background = if (selected) c.selected else null, .hover_background = if (selected) c.selected else c.hover, .overflow = .hidden } });
-        try rows.append(b.allocator(), try b.listen(try b.key(.{ .string = entry.path }, row), .{ .on_input = try b.onInputWith(@as(u32, @intCast(index)), Shell.onTreeDrag) }));
+        const row = try b.button(.{ .key = .named(entry.path), .on_input = b.onInputWith(Shell.onTreeDrag, @intCast(index)), .label = accessible, .children = children.items, .on_click = b.onClickWith(Shell.onTree, @as(u32, @intCast(index))), .style = .{ .direction = .row, .height = .{ .px = tree_row }, .flex_shrink = 0, .align_items = .center, .gap = 5, .padding = .{ .left = 5, .right = 8 }, .background = if (selected) c.selected else null, .hover_background = if (selected) c.selected else c.hover, .overflow = .hidden } });
+        try rows.append(b.allocator(), row);
     }
     if (rows.items.len == 0) try rows.append(b.allocator(), try b.styled(try v.text(b, "This folder is empty.", c.muted, 12), .{ .padding = ui.Insets.all(12), .text = .{ .size = 12, .color = c.muted } }));
     const list = try b.listen(try b.key(.{ .string = "project-files" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = @max(0, -visible.top), .overflow = .hidden }, rows.items)), .{ .on_input = b.onInput(Shell.onTreeInput) });
-    return b.key(.{ .string = "sidebar" }, try b.column(.{ .width = .{ .px = width }, .flex_shrink = 0, .background = c.sidebar, .overflow = .hidden }, &.{ header, list }));
+    return b.key(.named("sidebar"), b.column(.{ .width = .{ .px = width }, .flex_shrink = 0, .background = c.sidebar, .overflow = .hidden }, &.{ header, list }));
 }

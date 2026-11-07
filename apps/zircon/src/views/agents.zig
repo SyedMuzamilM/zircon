@@ -18,7 +18,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     for (self.agents.sessions.items[visible.start..visible.end], visible.start..) |session, index| {
         const state = session.conversation.state;
         const status = try std.fmt.allocPrint(b.allocator(), "{s} · {s}", .{ session.provider, @tagName(state) });
-        try sessions.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = session.title, .children = &.{ try v.text(b, session.title, c.text, 12), try v.text(b, status, c.muted, 10) }, .on_click = try b.onClickWith(@as(u32, @intCast(index)), selectSession), .style = .{ .height = .{ .px = 52 }, .flex_shrink = 0, .padding = .{ .left = 12, .top = 8, .right = 8 }, .gap = 5, .background = if (index == self.agents.active) c.selected else null, .hover_background = c.hover, .overflow = .hidden } })));
+        try sessions.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = session.title, .children = &.{ try v.text(b, session.title, c.text, 12), try v.text(b, status, c.muted, 10) }, .on_click = b.onClickWith(selectSession, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 52 }, .flex_shrink = 0, .padding = .{ .left = 12, .top = 8, .right = 8 }, .gap = 5, .background = if (index == self.agents.active) c.selected else null, .hover_background = c.hover, .overflow = .hidden } })));
     }
     try sessions.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
     try sessions.append(b.allocator(), try b.column(.{ .gap = 6, .padding = ui.Insets.all(8), .flex_shrink = 0 }, &.{ try v.actionButton(b, c, .agent_config, "Configure providers", false), try v.actionButton(b, c, .agent_mode, "Back to editor", false) }));
@@ -47,10 +47,10 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             var buttons: std.ArrayList(ui.Element) = .empty;
             if (s.conversation.protocol == .acp) {
                 if (agent.field(params, "options")) |options| if (options == .array) for (options.array.items[0..@min(16, options.array.items.len)], 0..) |option, index| {
-                    try buttons.append(b.allocator(), try b.button(.{ .label = agent.string(agent.field(option, "name")), .on_click = try b.onClickWith(@as(u32, @intCast(index)), answer), .style = v.buttonStyle(c, false) }));
+                    try buttons.append(b.allocator(), try b.button(.{ .label = agent.string(agent.field(option, "name")), .on_click = b.onClickWith(answer, @as(u32, @intCast(index))), .style = v.buttonStyle(c, false) }));
                 };
             } else {
-                try buttons.appendSlice(b.allocator(), &.{ try b.button(.{ .label = "Allow once", .on_click = try b.onClickWith(@as(u32, 0), answer), .style = v.buttonStyle(c, true) }), try b.button(.{ .label = "Reject", .on_click = try b.onClickWith(@as(u32, 1), answer), .style = v.buttonStyle(c, false) }) });
+                try buttons.appendSlice(b.allocator(), &.{ try b.button(.{ .label = "Allow once", .on_click = b.onClickWith(answer, @as(u32, 0)), .style = v.buttonStyle(c, true) }), try b.button(.{ .label = "Reject", .on_click = b.onClickWith(answer, @as(u32, 1)), .style = v.buttonStyle(c, false) }) });
             }
             try content.append(b.allocator(), try b.column(.{ .gap = 8, .padding = ui.Insets.all(12), .background = c.panel, .flex_shrink = 0 }, &.{ try v.text(b, "Permission required · review the request above", c.warning, 12), try b.row(.{ .gap = 6, .overflow = .hidden }, buttons.items) }));
         }
@@ -90,7 +90,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             style.background = if (position == selected) c.selected else null;
             style.justify_content = .start;
             style.overflow = .hidden;
-            try choices.append(b.allocator(), try b.button(.{ .label = label, .on_click = try b.onClickWith(@as(u32, @intCast(index)), choose), .style = style }));
+            try choices.append(b.allocator(), try b.button(.{ .label = label, .on_click = b.onClickWith(choose, @as(u32, @intCast(index))), .style = style }));
         }
         if (indices.len == 0) try choices.append(b.allocator(), try v.text(b, "No options. Connect an agent to load its models.", c.muted, 12));
         try choices.append(b.allocator(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} choices · ↑ ↓ navigate · Enter select · Esc close", .{indices.len}), c.muted, 10));
@@ -102,7 +102,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     return b.key(.{ .string = "agent-workspace" }, try b.stack(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, layers.items));
 }
 fn pickerButton(b: *ui.Ui, c: v.Palette, label: []const u8, which: service.Picker) !ui.Element {
-    return b.button(.{ .label = label, .children = &.{ try v.text(b, label, c.text, 12), try v.icon(b, .chevron_down, c.muted, 10) }, .on_click = try b.onClickWith(which, togglePicker), .style = .{ .direction = .row, .gap = 5, .height = .{ .px = 28 }, .align_items = .center, .padding = .{ .left = 7, .right = 7 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .min_width = .{ .px = 0 }, .overflow = .hidden } });
+    return b.button(.{ .label = label, .children = &.{ try v.text(b, label, c.text, 12), try v.icon(b, .chevron_down, c.muted, 10) }, .on_click = b.onClickWith(togglePicker, which), .style = .{ .direction = .row, .gap = 5, .height = .{ .px = 28 }, .align_items = .center, .padding = .{ .left = 7, .right = 7 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .min_width = .{ .px = 0 }, .overflow = .hidden } });
 }
 fn togglePicker(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), which: service.Picker) !void {
     self.agents.picker = if (self.agents.picker == which) .none else which;

@@ -39,6 +39,10 @@ fn validate(comptime E: type, comptime F: type, comptime count: usize) type {
     if (info.param_types[1] != *event.Event(E) or info.param_types[2] != *runtime.Context(T)) @compileError(message);
     return T;
 }
+pub fn CallbackPayload(comptime E: type, comptime F: type) type {
+    _ = validate(E, F, 4);
+    return @typeInfo(F).@"fn".param_types[3] orelse @compileError("handler payload parameter must have a concrete type");
+}
 fn bind(comptime E: type, owner: identity.Token, comptime callback: anytype) Handler(E) {
     const T = comptime validate(E, @TypeOf(callback), 3);
     const Adapter = struct {
@@ -70,14 +74,7 @@ fn bindWith(comptime E: type, a: std.mem.Allocator, owner: identity.Token, value
     return .{ .owner = owner, .payload = owned, .invoke = Adapter.invoke };
 }
 fn requireValue(comptime T: type) void {
-    switch (@typeInfo(T)) {
-        .pointer => @compileError("handler payloads must be pointer-free copied values"),
-        .@"struct" => |info| for (info.field_types) |Field| requireValue(Field),
-        .@"union" => |info| for (info.field_types) |Field| requireValue(Field),
-        .array => |info| requireValue(info.child),
-        .optional => |info| requireValue(info.child),
-        else => {},
-    }
+    if (@import("../entity/value.zig").containsPointer(T)) @compileError("handler payloads must be pointer-free copied values");
 }
 pub fn requireView(comptime T: type) void {
     const Ui = @import("ui.zig").Ui;

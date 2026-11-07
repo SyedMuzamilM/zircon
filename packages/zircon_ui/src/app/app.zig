@@ -447,16 +447,5 @@ fn requireFirst(comptime F: type, comptime First: type) void {
     if (info.@"fn".param_types.len == 0 or info.@"fn".param_types[0] != First) @compileError("entity callback has incompatible self parameter");
 }
 fn requireSnapshot(comptime T: type) void {
-    switch (@typeInfo(T)) {
-        .pointer => @compileError("read/update results cannot borrow pointers or slices; copy into a caller-owned output argument"),
-        .@"struct" => |info| {
-            for (info.field_types) |Field| requireSnapshot(Field);
-        },
-        .@"union" => |info| {
-            for (info.field_types) |Field| requireSnapshot(Field);
-        },
-        .array => |info| requireSnapshot(info.child),
-        .optional => |info| requireSnapshot(info.child),
-        else => {},
-    }
+    if (@import("../entity/value.zig").containsPointer(T)) @compileError("read/update results cannot borrow pointers or slices; copy into a caller-owned output argument");
 }

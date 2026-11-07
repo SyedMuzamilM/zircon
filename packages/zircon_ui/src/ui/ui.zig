@@ -6,7 +6,19 @@ const styles = @import("style.zig");
 const adapter = @import("adapter.zig");
 const runtime = @import("../app/app.zig");
 const identity = @import("../entity/entity.zig");
-pub const Button = struct { tooltip_colors: ?[3]@import("../layout/geometry.zig").Color = null, tooltip: ?[]const u8 = null, label: []const u8, on_click: ?adapter.ClickHandler = null, style: styles.Style = .{}, children: []const elements.Element = &.{} };
+pub const Button = struct {
+    key: ?elements.Key = null,
+    tooltip_colors: ?[3]@import("../layout/geometry.zig").Color = null,
+    tooltip: ?[]const u8 = null,
+    label: []const u8,
+    on_click: ?anyerror!adapter.ClickHandler = null,
+    on_input: ?anyerror!adapter.InputHandler = null,
+    on_capture: ?anyerror!adapter.InputHandler = null,
+    focusable: bool = true,
+    autofocus: bool = false,
+    style: styles.Style = .{},
+    children: []const elements.Element = &.{},
+};
 pub const Ui = struct {
     frame: *tree.Frame,
     owner: identity.Token,
@@ -32,18 +44,24 @@ pub const Ui = struct {
     }
     pub fn button(ui: *Ui, options: Button) !elements.Element {
         try options.style.validate();
+        const on_click = if (options.on_click) |handler| try handler else null;
+        const on_input = if (options.on_input) |handler| try handler else null;
+        const on_capture = if (options.on_capture) |handler| try handler else null;
         if (!std.unicode.utf8ValidateSlice(options.label)) return error.InvalidUtf8;
         const label = try ui.frame.allocator().dupe(u8, options.label);
-        if (options.children.len > 0) {
-            const element = try ui.div(options.style, options.children);
-            const node = &ui.frame.nodes.items[element.index];
-            node.kind = .{ .button = .{ .label = label, .on_click = options.on_click } };
-            node.focusable = true;
-            node.tooltip_colors = options.tooltip_colors;
-            if (options.tooltip) |tip| node.tooltip = try ui.allocator().dupe(u8, tip);
-            return element;
-        }
-        return ui.frame.append(.{ .style = options.style, .tooltip_colors = options.tooltip_colors, .tooltip = if (options.tooltip) |tip| try ui.allocator().dupe(u8, tip) else null, .focusable = true, .kind = .{ .button = .{ .label = label, .on_click = options.on_click } } });
+        const key_value = if (options.key) |key_value| try ui.copyKey(key_value) else null;
+        const tooltip = if (options.tooltip) |tip| try ui.allocator().dupe(u8, tip) else null;
+        const element = try ui.container(options.style, options.children);
+        const node = &ui.frame.nodes.items[element.index];
+        node.kind = .{ .button = .{ .label = label, .on_click = on_click } };
+        node.key = key_value;
+        node.on_input = on_input;
+        node.on_capture = on_capture;
+        node.focusable = options.focusable;
+        node.autofocus = options.autofocus;
+        node.tooltip_colors = options.tooltip_colors;
+        node.tooltip = tooltip;
+        return element;
     }
     pub fn onClick(ui: *Ui, comptime callback: anytype) adapter.ClickHandler {
         return adapter.click(ui.owner, callback);
@@ -51,36 +69,42 @@ pub const Ui = struct {
     pub fn onInput(ui: *Ui, comptime callback: anytype) adapter.InputHandler {
         return adapter.input(ui.owner, callback);
     }
-    pub fn onClickWith(ui: *Ui, value: anytype, comptime callback: anytype) !adapter.ClickHandler {
+    pub fn onClickWith(ui: *Ui, comptime callback: anytype, value: adapter.CallbackPayload(@import("../event/event.zig").Click, @TypeOf(callback))) !adapter.ClickHandler {
         return adapter.clickWith(ui.allocator(), ui.owner, value, callback);
     }
-    pub fn onInputWith(ui: *Ui, value: anytype, comptime callback: anytype) !adapter.InputHandler {
+    pub fn onInputWith(ui: *Ui, comptime callback: anytype, value: adapter.CallbackPayload(@import("../event/event.zig").Input, @TypeOf(callback))) !adapter.InputHandler {
         return adapter.inputWith(ui.allocator(), ui.owner, value, callback);
     }
-    pub const Listeners = struct { on_input: ?adapter.InputHandler = null, on_capture: ?adapter.InputHandler = null, focusable: ?bool = null };
-    pub fn listen(ui: *Ui, element: elements.Element, options: Listeners) !elements.Element {
+    pub const Listeners = struct { on_input: ?anyerror!adapter.InputHandler = null, on_capture: ?anyerror!adapter.InputHandler = null, focusable: ?bool = null };
+    pub fn listen(ui: *Ui, value: anytype, options: Listeners) !elements.Element {
+        const element = try resolveElement(value);
+        const on_input = if (options.on_input) |handler| try handler else null;
+        const on_capture = if (options.on_capture) |handler| try handler else null;
         _ = try ui.frame.get(element);
         const node = &ui.frame.nodes.items[element.index];
-        node.on_input = options.on_input;
-        node.on_capture = options.on_capture;
+        node.on_input = on_input;
+        node.on_capture = on_capture;
         if (options.focusable) |focusable| node.focusable = focusable;
         return element;
     }
     /// Takes focus when this logical element first enters a committed frame.
-    pub fn autofocus(ui: *Ui, element: elements.Element) !elements.Element {
+    pub fn autofocus(ui: *Ui, value: anytype) !elements.Element {
+        const element = try resolveElement(value);
         _ = try ui.frame.get(element);
         ui.frame.nodes.items[element.index].autofocus = true;
         return element;
     }
     /// Changing this generation requests focus after a successful frame. It is
     /// useful when a command activates an already existing logical control.
-    pub fn requestFocus(ui: *Ui, element: elements.Element, generation: u64) !elements.Element {
+    pub fn requestFocus(ui: *Ui, value: anytype, generation: u64) !elements.Element {
+        const element = try resolveElement(value);
         _ = try ui.frame.get(element);
         ui.frame.nodes.items[element.index].focus_request = generation;
         return element;
     }
     /// Restricts keyboard traversal and pointer routing to this subtree.
-    pub fn modal(ui: *Ui, element: elements.Element) !elements.Element {
+    pub fn modal(ui: *Ui, value: anytype) !elements.Element {
+        const element = try resolveElement(value);
         _ = try ui.frame.get(element);
         ui.frame.nodes.items[element.index].modal = true;
         return element;
@@ -110,7 +134,8 @@ pub const Ui = struct {
         if (!std.math.isFinite(seconds) or seconds <= 0 or !std.math.isFinite(ui.frame.time + seconds)) return error.InvalidFrameDeadline;
         ui.frame.next_deadline = @min(ui.frame.next_deadline orelse std.math.inf(f64), ui.frame.time + seconds);
     }
-    pub fn dragRegion(ui: *Ui, element: elements.Element) !elements.Element {
+    pub fn dragRegion(ui: *Ui, value: anytype) !elements.Element {
+        const element = try resolveElement(value);
         _ = try ui.frame.get(element);
         ui.frame.nodes.items[element.index].drag_region = true;
         return element;
@@ -137,23 +162,56 @@ pub const Ui = struct {
         if (target.width < 0 or target.height < 0) return error.InvalidAnimation;
         return .{ .x = try ui.animate(key_value * 4, target.x, transition), .y = try ui.animate(key_value * 4 + 1, target.y, transition), .width = @max(0, try ui.animate(key_value * 4 + 2, target.width, transition)), .height = @max(0, try ui.animate(key_value * 4 + 3, target.height, transition)) };
     }
-    pub fn column(ui: *Ui, style: styles.Style, children: []const elements.Element) !elements.Element {
+    pub fn column(ui: *Ui, style: styles.Style, children: anytype) !elements.Element {
         var actual = style;
         actual.direction = .column;
         return ui.div(actual, children);
     }
-    pub fn row(ui: *Ui, style: styles.Style, children: []const elements.Element) !elements.Element {
+    pub fn row(ui: *Ui, style: styles.Style, children: anytype) !elements.Element {
         var actual = style;
         actual.direction = .row;
         return ui.div(actual, children);
     }
-    pub fn stack(ui: *Ui, style: styles.Style, children: []const elements.Element) !elements.Element {
+    pub fn stack(ui: *Ui, style: styles.Style, children: anytype) !elements.Element {
         var actual = style;
         actual.direction = .stack;
         return ui.div(actual, children);
     }
-    pub fn div(ui: *Ui, style: styles.Style, children: []const elements.Element) !elements.Element {
+    pub fn div(ui: *Ui, style: styles.Style, children: anytype) !elements.Element {
         try style.validate();
+        switch (@typeInfo(@TypeOf(children))) {
+            .@"struct" => |info| {
+                if (!info.is_tuple) @compileError("UI children must be a tuple, array or slice of Element or !Element");
+                const resolved = try ui.allocator().alloc(elements.Element, info.field_names.len);
+                inline for (info.field_names, 0..) |name, index| resolved[index] = try resolveElement(@field(children, name));
+                return ui.container(style, resolved);
+            },
+            .array => |info| {
+                if (info.child == elements.Element) return ui.container(style, &children);
+                const resolved = try ui.allocator().alloc(elements.Element, info.len);
+                for (children, 0..) |value, index| resolved[index] = try resolveElement(value);
+                return ui.container(style, resolved);
+            },
+            .pointer => |info| switch (info.size) {
+                .one => {
+                    if (@typeInfo(info.child) == .array) {
+                        const values: []const @typeInfo(info.child).array.child = children;
+                        return ui.div(style, values);
+                    }
+                    return ui.div(style, children.*);
+                },
+                .slice => {
+                    if (info.child == elements.Element) return ui.container(style, children);
+                    const resolved = try ui.allocator().alloc(elements.Element, children.len);
+                    for (children, 0..) |value, index| resolved[index] = try resolveElement(value);
+                    return ui.container(style, resolved);
+                },
+                else => @compileError("UI children must be a tuple, array or slice of Element or !Element"),
+            },
+            else => @compileError("UI children must be a tuple, array or slice of Element or !Element"),
+        }
+    }
+    fn container(ui: *Ui, style: styles.Style, children: []const elements.Element) !elements.Element {
         for (children, 0..) |child, i| {
             if ((try ui.frame.get(child)).parent != null) return error.ElementAlreadyParented;
             for (children[0..i]) |previous| if (previous.index == child.index) return error.DuplicateChild;
@@ -164,22 +222,31 @@ pub const Ui = struct {
         for (indices) |index| ui.frame.nodes.items[index].parent = parent.index;
         return parent;
     }
-    pub fn styled(ui: *Ui, element: elements.Element, style: styles.Style) !elements.Element {
+    pub fn styled(ui: *Ui, value: anytype, style: styles.Style) !elements.Element {
+        const element = try resolveElement(value);
         _ = try ui.frame.get(element);
         try style.validate();
         ui.frame.nodes.items[element.index].style = style;
         return element;
     }
-    pub fn key(ui: *Ui, value: elements.Key, element: elements.Element) !elements.Element {
+    pub fn key(ui: *Ui, value: elements.Key, child: anytype) !elements.Element {
+        const element = try resolveElement(child);
         _ = try ui.frame.get(element);
-        const owned: elements.Key = switch (value) {
+        ui.frame.nodes.items[element.index].key = try ui.copyKey(value);
+        return element;
+    }
+    fn copyKey(ui: *Ui, value: elements.Key) !elements.Key {
+        return switch (value) {
             .number => value,
             .string => |s| .{ .string = try ui.frame.allocator().dupe(u8, s) },
         };
-        ui.frame.nodes.items[element.index].key = owned;
-        return element;
     }
 };
+fn resolveElement(value: anytype) !elements.Element {
+    if (@TypeOf(value) == elements.Element) return value;
+    if (@typeInfo(@TypeOf(value)) == .error_union and @typeInfo(@TypeOf(value)).error_union.payload == elements.Element) return try value;
+    @compileError("UI child must be Element or !Element");
+}
 pub fn render(app: *runtime.App, handle: anytype, frame: *tree.Frame) !elements.Element {
     const T = @TypeOf(handle).State;
     comptime adapter.requireView(T);

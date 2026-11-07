@@ -288,9 +288,9 @@ const PayloadView = struct {
     value: u32 = 0,
     pub fn render(self: *const PayloadView, b: *ui.Ui) !ui.Element {
         var payload: u32 = self.value + 7;
-        const button = try b.button(.{ .label = "Choose", .on_click = try b.onClickWith(payload, chosen), .style = .{ .height = .{ .px = 40 } } });
+        const button = try b.button(.{ .label = "Choose", .on_click = try b.onClickWith(chosen, payload), .style = .{ .height = .{ .px = 40 } } });
         payload = 999;
-        return b.listen(button, .{ .on_input = try b.onInputWith(@as(u32, 9), key), .focusable = true });
+        return b.listen(button, .{ .on_input = try b.onInputWith(key, @as(u32, 9)), .focusable = true });
     }
     fn chosen(self: *PayloadView, _: *ui.Event(ui.Click), cx: *ui.Context(PayloadView), value: u32) void {
         self.value = value;

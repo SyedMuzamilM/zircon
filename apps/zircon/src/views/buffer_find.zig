@@ -11,13 +11,13 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     try top.append(b.allocator(), try button(b, c, .replace, "Toggle replace", if (self.find.replace) .chevron_down else .chevron_right, self.find.replace));
     var input = try b.styled(try b.key(.{ .string = "buffer-query" }, try b.view(fields.find_query)), .{ .flex_grow = 1, .min_width = .{ .px = 60 }, .height = .{ .px = 30 }, .flex_shrink = 1 });
     input = try b.requestFocus(input, if (self.find.focus_replacement) 0 else self.find.focus);
-    input = try b.listen(try b.div(.{ .flex_grow = 1, .min_width = .{ .px = 60 }, .height = .{ .px = 30 }, .flex_shrink = 1 }, &.{input}), .{ .on_capture = try b.onInputWith(false, fieldKeys) });
+    input = try b.listen(try b.div(.{ .flex_grow = 1, .min_width = .{ .px = 60 }, .height = .{ .px = 30 }, .flex_shrink = 1 }, &.{input}), .{ .on_capture = b.onInputWith(fieldKeys, false) });
     try top.append(b.allocator(), input);
     inline for (.{ .{ Option.case_sensitive, "Aa", "Match case" }, .{ Option.whole_word, "Wd", "Whole word" }, .{ Option.regex, ".*", "Regular expression" } }) |option| {
         var style = v.iconButtonStyle(c, @field(self.find, @tagName(option[0])));
         style.width = .{ .px = 27 };
         style.text = .{ .size = 12, .color = c.text };
-        try top.append(b.allocator(), try b.button(.{ .label = option[2], .tooltip = option[2], .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.text(b, option[1], c.text, 12)}, .on_click = try b.onClickWith(option[0], toggle), .style = style }));
+        try top.append(b.allocator(), try b.button(.{ .label = option[2], .tooltip = option[2], .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.text(b, option[1], c.text, 12)}, .on_click = b.onClickWith(toggle, option[0]), .style = style }));
     }
     try top.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .find_previous, "Previous match", .chevron_left, false), try v.iconButton(b, c, .find_next, "Next match", .chevron_right, false) });
     const count = if (self.find.result) |r| r.value.matches.len else 0;
@@ -37,7 +37,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.find.replace) {
         var replacement = try b.styled(try b.key(.{ .string = "buffer-replacement" }, try b.view(fields.replacement)), .{ .flex_grow = 1, .min_width = .{ .px = 60 } });
         replacement = try b.requestFocus(replacement, if (self.find.focus_replacement) self.find.focus else 0);
-        replacement = try b.listen(try b.div(.{ .flex_grow = 1, .min_width = .{ .px = 60 } }, &.{replacement}), .{ .on_capture = try b.onInputWith(true, fieldKeys) });
+        replacement = try b.listen(try b.div(.{ .flex_grow = 1, .min_width = .{ .px = 60 } }, &.{replacement}), .{ .on_capture = b.onInputWith(fieldKeys, true) });
         try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 38 }, .flex_shrink = 0, .align_items = .center, .gap = 6, .padding = .{ .left = 28 } }, &.{ replacement, try v.actionButton(b, c, .replace_one, "Replace", false), try v.actionButton(b, c, .replace_all, "Replace all", false) }));
     }
     if (self.find.error_text.len > 0) try rows.append(b.allocator(), try v.text(b, self.find.error_text, c.warning, 11));
@@ -46,7 +46,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     return b.listen(try b.key(.{ .string = "buffer-find" }, try b.column(.{ .flex_shrink = 0, .padding = .{ .left = 8, .right = 8 }, .background = c.document, .overflow = .hidden }, rows.items)), .{ .on_capture = b.onInput(inputKeys) });
 }
 fn button(b: *ui.Ui, c: v.Palette, option: Option, label: []const u8, name: v.Icon, selected: bool) !ui.Element {
-    return b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, name, c.muted, 14)}, .on_click = try b.onClickWith(option, toggle), .style = v.iconButtonStyle(c, selected) });
+    return b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, name, c.muted, 14)}, .on_click = b.onClickWith(toggle, option), .style = v.iconButtonStyle(c, selected) });
 }
 fn toggle(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), option: Option) !void {
     switch (option) {
