@@ -1,5 +1,7 @@
 # Framework implementation plan
 
+For the editor gap-remediation sequence and active terminal/UI ownership, use the [editor roadmap](editor-roadmap.md) and [task checklist](editor-todo.md). This document remains the framework implementation reference.
+
 The controlling specification is [framework-api-v0.1.md](specification/framework-api-v0.1.md), supplied by the user on 2026-11-05. It is preserved unchanged, including the original placeholder name and source formatting. Its SHA-256 is `211152c1d6558dcecf7ac0f2e41b4d64e8c3f1f35b40bff4708e065edd78f19a`.
 
 The product name remains **Zircon UI**, imported as `zircon_ui`. The framework lives in `packages/zircon_ui` and follows the specification's subsystem structure inside that package. Zig 0.17.1 is the implementation target. Native adapters use direct Zig bindings to system APIs. No NanoUI or GPUI implementation is a dependency.
