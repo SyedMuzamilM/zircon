@@ -236,3 +236,7 @@ test "binary edit cannot replace a file that the workspace would refuse to reope
     defer t.allocator.free(bytes);
     try t.expectEqualStrings("text", bytes);
 }
+
+test {
+    _ = @import("recovery.zig");
+}

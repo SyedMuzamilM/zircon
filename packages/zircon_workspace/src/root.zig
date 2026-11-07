@@ -8,6 +8,7 @@ const tree = @import("tree.zig");
 pub const Entry = tree.Entry;
 pub const deinitEntries = tree.deinitEntries;
 pub const DiskStamp = persistence.DiskStamp;
+pub const recovery = @import("recovery.zig");
 pub const max_file_bytes = persistence.max_file_bytes;
 pub const DocumentId = struct { workspace: u64, slot: u32, generation: u32 };
 var next_workspace = std.atomic.Value(u64).init(1);
@@ -103,6 +104,26 @@ pub const Workspace = struct {
         const id = try workspace.insert(record);
         workspace.next_untitled += 1;
         return id;
+    }
+    /// Restore checkpoint bytes without adopting the current disk stamp. The
+    /// original baseline keeps later external writes protected by save conflicts.
+    pub fn restore(workspace: *Workspace, bytes: []const u8, path: ?[]const u8, dirty_value: bool, disk: ?DiskStamp, untitled_name: []const u8) !DocumentId {
+        try validateText(bytes);
+        if (bytes.len > max_file_bytes) return error.FileTooLarge;
+        if (path) |value| {
+            if (!std.fs.path.isAbsolute(value) or std.mem.indexOfScalar(u8, value, 0) != null or !std.unicode.utf8ValidateSlice(value)) return error.InvalidPath;
+            for (workspace.slots.items) |slot| if (slot.record) |record| if (record.path) |existing| if (std.mem.eql(u8, existing, value)) return error.DocumentAlreadyOpen;
+        }
+        var document = try text.Document.init(workspace.allocator, bytes);
+        errdefer document.deinit();
+        const owned_path = if (path) |value| try workspace.allocator.dupe(u8, value) else null;
+        errdefer if (owned_path) |value| workspace.allocator.free(value);
+        const title = try workspace.allocator.dupe(u8, untitled_name);
+        errdefer workspace.allocator.free(title);
+        const record = try workspace.allocator.create(Record);
+        errdefer workspace.allocator.destroy(record);
+        record.* = .{ .doc = document, .path = owned_path, .saved_state = if (dirty_value) null else document.stateId(), .disk = disk, .untitled_name = title };
+        return workspace.insert(record);
     }
     pub fn save(workspace: *Workspace, id: DocumentId, save_as: ?[]const u8) !void {
         const record = try workspace.get(id);
