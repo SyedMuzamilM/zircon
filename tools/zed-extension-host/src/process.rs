@@ -1,10 +1,58 @@
 //! Bounded subprocess output and time, shared by native setup hooks.
 use anyhow::{bail, Result};
 use std::{
+    fs::{self, File, OpenOptions},
     io::Read,
+    path::Path,
     process::{Command, Output, Stdio},
     time::{Duration, Instant},
 };
+/// Keep one resolver writing a server's shared install directory. The owned
+/// handle releases the cross-process lock on return, failure or process exit.
+pub fn lock_work_directory(work: &Path) -> Result<File> {
+    fs::create_dir_all(work)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(work.join(".zircon-resolve.lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolver_installation_has_one_writer_per_directory() -> Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "zircon-resolver-lock-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let first = lock_work_directory(&root)?;
+        let next = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(root.join(".zircon-resolve.lock"))?;
+        assert!(matches!(
+            next.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        let other = lock_work_directory(&root.join("other"))?;
+        drop(first);
+        next.try_lock()?;
+        drop(next);
+        drop(other);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+}
+
 pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
     #[cfg(unix)]
     {

@@ -180,7 +180,7 @@ pub fn resolve(server: &str, root: &Path, work: &Path, settings: Option<&Path>) 
             json!({"command":binary,"args":options["binary"]["arguments"].as_array().cloned().unwrap_or_default(),"cwd":root,"initialization_options":options["initialization_options"],"workspace_configuration":options["settings"]}),
         );
     }
-    fs::create_dir_all(work)?;
+    let _work_lock = crate::process::lock_work_directory(work)?;
     let mut args: Vec<String> = Vec::new();
     let command = match server {
         "clangd" => which("clangd")

@@ -13,6 +13,7 @@ jobs:
           version: 0.17.1
       - run: ./tools/zig build check
       - run: python3 -B tools/test_zig_stdlib_overlay.py
+      - run: cargo test --release --locked --manifest-path tools/zed-extension-host/Cargo.toml
       - name: Verify Darwin child handle isolation
         if: runner.os == 'macOS'
         run: ./tools/zig run tools/verify_spawn_isolation.zig -lc

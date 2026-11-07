@@ -515,7 +515,7 @@ pub fn resolve(
     work: &Path,
     settings: Option<&Path>,
 ) -> Result<Value> {
-    fs::create_dir_all(work)?;
+    let _work_lock = crate::process::lock_work_directory(work)?;
     let root = root.canonicalize()?;
     let work = work.canonicalize()?;
     let mut config = wasmtime::Config::new();
