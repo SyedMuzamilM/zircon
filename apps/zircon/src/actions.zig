@@ -775,6 +775,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             if (self.pending) |pending| switch (pending) {
                 .tab => |i| try closeTab(self, i, .discard),
                 .window => {
+                    if (self.recovery) |*store| try store.discard();
                     self.allow_close = true;
                     try cx.app.requestCloseWindow(self.window.?);
                 },

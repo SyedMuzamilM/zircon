@@ -79,6 +79,7 @@ pub const Shell = struct {
     colors: @import("theme.zig").Palette = .{},
     editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: @import("services/git.zig").Model = .{},
+    recovery: ?@import("zircon_workspace").recovery.Store = null,
     search: @import("services/search.zig").Model = .{},
     find: @import("services/buffer_find.zig").Model = .{},
     catalog: @import("services/catalog.zig").Model = .{},
@@ -127,6 +128,7 @@ pub const Shell = struct {
         }
         self.file_index.deinit(self.allocator);
         self.allocator.free(self.status);
+        if (self.recovery) |*store| store.deinit();
         self.git.deinit();
         self.search.deinit();
         self.find.deinit(self.allocator);
@@ -154,6 +156,16 @@ pub const Shell = struct {
         self.settings = cx.app.createEntity(Settings, value) catch |err| {
             value.deinit(self.allocator);
             return err;
+        };
+    }
+    /// Opens a private crash-recovery session. Checkpoint publication is wired
+    /// separately; keeping the lock here lets discard close the right session.
+    pub fn initRecovery(self: *Shell, cx: *ui.Context(Shell), home: []const u8) !void {
+        if (self.recovery != null) return;
+        self.recovery = @import("zircon_workspace").recovery.Store.init(self.allocator, self.workspace.io, home, self.workspace.root_path) catch |err| {
+            try self.reportError(err);
+            cx.notify();
+            return;
         };
     }
     pub fn loadExtensions(self: *Shell, cx: *ui.Context(Shell), home: []const u8) !void {

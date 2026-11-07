@@ -7,3 +7,5 @@ Storage uses one lock per persistent window session beneath a hash of the worksp
 Workspace.restore creates a buffer directly from checkpoint bytes and the original DiskStamp, avoiding adoption of a newer disk baseline. A real external rewrite causes DiskConflict on save, preserving recovered content. Process-crash storage consistency is the scope; file sync does not prove power-loss directory durability.
 
 Remaining acceptance includes UI-owned snapshot capture and cleanup, a single background writer, coalescing and errors, startup restore of both pane groups/selection/layout/language, discard hooks before acknowledgment, normal close/save policy and a real SIGKILL/restart journey. No crash recovery guarantee is exposed to users before these pass.
+
+A follow-up hook now opens one locked recovery session for native launches and tombstones it before an explicit window-level Don't Save close. This prevents a future restore pass from resurrecting an explicitly discarded session. Checkpoint capture and startup restore are still not wired, so this hook alone is not TEXT-05 acceptance.
