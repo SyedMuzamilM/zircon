@@ -1,0 +1,16 @@
+{
+  "profiled": true,
+  "cases": [],
+  "failures": [
+    {
+      "case": "1048576-wrap-services-1",
+      "returncode": 1,
+      "disk_unchanged": true
+    }
+  ],
+  "load_end": [
+    2.31201171875,
+    2.62060546875,
+    2.73388671875
+  ]
+}

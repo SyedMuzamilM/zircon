@@ -1,0 +1,1 @@
+NSWindow.sendEvent through the real first responder; foreground queue tested separately.

@@ -1,0 +1,10 @@
+zircon-ed 57710 syedmuzamilm   10   PIPE 0xc1a9cf8cc6b4ad34     65536                     ->0xa64f4c1992680c71
+zircon-ed 57710 syedmuzamilm   12   PIPE 0x7c924d2e2125a31d     16384                     ->0x78aea37baab4ef0c
+zircon-ed 57710 syedmuzamilm   14   PIPE 0xca626ee0a6a14846     65536                     ->0xc32a365305f585a
+Python    57712 syedmuzamilm    0   PIPE 0xa64f4c1992680c71     65536                     ->0xc1a9cf8cc6b4ad34
+Python    57712 syedmuzamilm    1   PIPE 0x78aea37baab4ef0c     16384                     ->0x7c924d2e2125a31d
+Python    57712 syedmuzamilm    2   PIPE  0xc32a365305f585a     65536                     ->0xca626ee0a6a14846
+Python    57712 syedmuzamilm   16   PIPE 0x1a68fa9713beaf47     16384                     ->0xfe4c4ef78b99dee9
+Python    57712 syedmuzamilm   17   PIPE 0x1ac83bdd2a8b50b6     65536                     ->0xd63350752235ce08
+Python    57712 syedmuzamilm   18   PIPE 0xd63350752235ce08     65536                     ->0x1ac83bdd2a8b50b6
+Python    57712 syedmuzamilm   19   PIPE 0xfe4c4ef78b99dee9     16384                     ->0x1a68fa9713beaf47

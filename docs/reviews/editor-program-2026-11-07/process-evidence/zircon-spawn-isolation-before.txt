@@ -1,0 +1,5 @@
+unrelated pipe handles inherited: [128, 129]
+error: UnrelatedPipeInherited
+/Users/syedmuzamilm/work/expirements/zigpui/tools/verify_spawn_isolation.zig:39:33: 0x104edc7f3 in main (verify_spawn_isolation)
+    if (!result.term.success()) return error.UnrelatedPipeInherited;
+                                ^

@@ -1,0 +1,6 @@
+Build Summary: 4/4 steps succeeded
+capture-ui-review success
++- run exe zircon-ui-review success 2s
+   +- compile exe zircon-ui-review debug native success 4s MaxRSS:688M
+      +- options cached
+

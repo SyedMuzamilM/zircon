@@ -1,0 +1,45 @@
+
+RUN 1
+Build Summary: 4/4 steps succeeded; 9/9 tests passed
+test-native-window success
++- run test 9 pass (9 total) 280ms MaxRSS:110M
+   +- compile test debug native cached 49ms MaxRSS:32M
+      +- options cached
+
+PASSED: foreground NSApplication queue delivered to the current key window after focus changed.
+
+RUN 2
+Build Summary: 4/4 steps succeeded; 9/9 tests passed
+test-native-window success
++- run test 9 pass (9 total) 298ms MaxRSS:110M
+   +- compile test debug native cached 48ms MaxRSS:32M
+      +- options cached
+
+PASSED: foreground NSApplication queue delivered to the current key window after focus changed.
+
+RUN 3
+Build Summary: 4/4 steps succeeded; 9/9 tests passed
+test-native-window success
++- run test 9 pass (9 total) 280ms MaxRSS:110M
+   +- compile test debug native cached 46ms MaxRSS:32M
+      +- options cached
+
+PASSED: foreground NSApplication queue delivered to the current key window after focus changed.
+
+RUN 4
+Build Summary: 4/4 steps succeeded; 9/9 tests passed
+test-native-window success
++- run test 9 pass (9 total) 266ms MaxRSS:110M
+   +- compile test debug native cached 45ms MaxRSS:32M
+      +- options cached
+
+PASSED: foreground NSApplication queue delivered to the current key window after focus changed.
+
+RUN 5
+Build Summary: 4/4 steps succeeded; 9/9 tests passed
+test-native-window success
++- run test 9 pass (9 total) 269ms MaxRSS:110M
+   +- compile test debug native cached 46ms MaxRSS:32M
+      +- options cached
+
+PASSED: foreground NSApplication queue delivered to the current key window after focus changed.

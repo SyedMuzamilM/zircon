@@ -1,0 +1,20 @@
+{
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "cpu_count": 8,
+  "load_start": [
+    2.3466796875,
+    2.689453125,
+    2.76611328125
+  ],
+  "model": "Mac15,12",
+  "memory_bytes": "17179869184",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0\nBuildVersion:\t\t26A428",
+  "zig": "0.17.1",
+  "commit": "cc199756e303012e4f6dcee0330568fd6d8b2831",
+  "worktree_status": "M .github/workflows/framework.yml\n M README.md\n M apps/zircon/src/actions.zig\n M apps/zircon/src/commands.zig\n M apps/zircon/src/panes.zig\n M apps/zircon/src/services/catalog.zig\n M apps/zircon/src/services/extensions.zig\n M apps/zircon/src/services/language.zig\n M apps/zircon/src/services/search.zig\n M apps/zircon/src/settings/store.zig\n M apps/zircon/src/shell.zig\n M apps/zircon/src/view.zig\n M apps/zircon/src/views/chrome.zig\n M apps/zircon/src/views/extensions.zig\n M apps/zircon/src/views/git_controls.zig\n M apps/zircon/src/views/image.zig\n M apps/zircon/tests/settings_native.zig\n M apps/zircon/tests/workspace_polish_tests.zig\n M assets/icons/SOURCE.md\n M build.zig\n M docs/editor-guide.md\n M docs/implementation-plan.md\n M docs/status.md\n M packages/zircon_editor/src/canvas.zig\n M packages/zircon_editor/src/folding.zig\n M packages/zircon_editor/src/wrap.zig\n M packages/zircon_editor/tests/all.zig\n M packages/zircon_git/src/process.zig\n M packages/zircon_git/src/root.zig\n M packages/zircon_language/src/client.zig\n M packages/zircon_language/tests/all.zig\n M packages/zircon_ui/README.md\n M packages/zircon_ui/src/controls/icon_paths.zig\n M packages/zircon_ui/src/platform/macos/window_test.zig\n M tools/generate_icons.py\n?? apps/zircon/src/recent.zig\n?? apps/zircon/src/terminal.zig\n?? apps/zircon/src/views/workspace_controls.zig\n?? assets/icons/language_server.svg\n?? assets/icons/terminal.svg\n?? assets/icons/warning.svg\n?? docs/benchmarks/editor-method.md\n?? docs/editor-roadmap.md\n?? docs/editor-todo.md\n?? docs/native-verification.md\n?? docs/progress/\n?? docs/research/evidence/\n?? docs/research/zed-current-capabilities-2026-11-06.md\n?? docs/research/zircon-vs-zed-audit-2026-11-06.md\n?? docs/research/zircon-vs-zed-overview-2026-11-06.html\n?? docs/zircon-ui-usage.md\n?? docs/zircon-ui.md\n?? tools/__pycache__/\n?? tools/bench_editor.zig\n?? tools/run_editor_baseline.py",
+  "driver_sha256": "05a4527ca7a797c76eb985808aca3971f5f01f13759508590363bfae4d2c049b",
+  "worker_sha256": "697c55f577e4f08abebd3ffe3f7cf87e7c6f8010ccda9864a4ffffcfeb7e2975",
+  "measurement": "Synthetic Shell input dispatch through App.step/native submission, not scanout",
+  "memory": "Sampled sum of driver/descendant RSS at about 100 ms; lower bound on peak; shared pages counted per process",
+  "services": "Real local Git, built-in Python Tree-sitter worker and deterministic stdio LSP fixture; no network"
+}

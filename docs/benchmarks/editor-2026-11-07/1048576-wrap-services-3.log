@@ -1,0 +1,5 @@
+Wait state: status=Extension host: Timeout; error=true; git_busy=false; syntax_waiting=false
+syntax pending=false revision=0
+LSP version=0 diagnostics=true
+editor grammar revision=null
+error: BackgroundTimeout

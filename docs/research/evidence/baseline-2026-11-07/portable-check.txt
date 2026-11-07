@@ -1,0 +1,40 @@
+    Finished `release` profile [optimized] target(s) in 0.42s
+Build Summary: 32/32 steps succeeded
+check success
++- run test cached
+|  +- compile test debug native cached 84ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 88ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 64ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 46ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 84ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 84ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 65ms MaxRSS:31M
++- contracts success
+|  +- compile test debug native success 182ms MaxRSS:102M
+|  |  +- options cached
+|  +- compile test debug native success 339ms MaxRSS:100M
+|  |  +- options (reused)
+|  +- compile test debug native success 182ms MaxRSS:101M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 87ms MaxRSS:31M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 84ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 85ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 61ms MaxRSS:31M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 64ms MaxRSS:31M
+|  |  +- options (reused)
+|  +- run cargo success 529ms
++- zig fmt --check success
+

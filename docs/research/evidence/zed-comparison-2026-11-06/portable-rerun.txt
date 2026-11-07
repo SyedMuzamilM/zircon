@@ -1,0 +1,369 @@
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig fmt --check build.zig packages apps examples
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug -Mroot=packages/zircon_git/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_extensions --dep zircon_text -Mroot=packages/zircon_extensions/tests/all.zig -Odebug --dep oxide_manifest -Mzircon_extensions=packages/zircon_extensions/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig -Moxide_manifest=packages/zircon_extensions/examples/oxide/extension.json --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_text -Mroot=packages/zircon_text/tests/all.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_markdown --dep zircon_text -Mroot=packages/zircon_markdown/tests/all.zig -Odebug -Mzircon_markdown=packages/zircon_markdown/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_language --dep zircon_text -Mroot=packages/zircon_language/tests/all.zig -Odebug --dep zircon_text -Mzircon_language=packages/zircon_language/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_search --dep zircon_text -Mroot=packages/zircon_search/tests/all.zig -Odebug --dep zircon_text -Mzircon_search=packages/zircon_search/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_editor --dep zircon_text --dep zircon_ui -Mroot=packages/zircon_editor/tests/all.zig -Odebug --dep zircon_text --dep zircon_ui -Mzircon_editor=packages/zircon_editor/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_ui -Mroot=packages/zircon_ui/tests/all.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep agent_fixture --dep language_fixture --dep image_fixture -Mroot=apps/zircon/tests/all.zig -Odebug --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep zircon_editor --dep zircon_git --dep zircon_extensions --dep zircon_search --dep zircon_language --dep zircon_markdown --dep zircon_agent -Mzircon=apps/zircon/src/root.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig -Odebug --dep zircon_text -Mzircon_workspace=packages/zircon_workspace/src/root.zig -Magent_fixture=packages/zircon_agent/tests/fixture.py -Mlanguage_fixture=packages/zircon_language/tests/fixture.py -Mimage_fixture=packages/zircon_extensions/tests/fixtures/pixel.png -Odebug --dep zircon_text --dep zircon_ui -Mzircon_editor=packages/zircon_editor/src/root.zig -Odebug -Mzircon_git=packages/zircon_git/src/root.zig -Odebug --dep oxide_manifest -Mzircon_extensions=packages/zircon_extensions/src/root.zig -Odebug --dep zircon_text -Mzircon_search=packages/zircon_search/src/root.zig -Odebug --dep zircon_text -Mzircon_language=packages/zircon_language/src/root.zig -Odebug -Mzircon_markdown=packages/zircon_markdown/src/root.zig -Odebug -Mzircon_agent=packages/zircon_agent/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -Moxide_manifest=packages/zircon_extensions/examples/oxide/extension.json --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_workspace -Mroot=packages/zircon_workspace/tests/all.zig -Odebug --dep zircon_text -Mzircon_workspace=packages/zircon_workspace/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_git --dep zircon_text -Mroot=packages/zircon_git/tests/all.zig -Odebug -Mzircon_git=packages/zircon_git/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_agent --dep zircon_text -Mroot=packages/zircon_agent/tests/all.zig -Odebug -Mzircon_agent=packages/zircon_agent/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): cargo build --release --locked --manifest-path ./tools/zed-extension-host/Cargo.toml
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_ui -Mroot=packages/zircon_ui/tests/compile_fail/mutable_render.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -fno-emit-bin --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_ui -Mroot=packages/zircon_ui/tests/compile_fail/borrowed_read.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -fno-emit-bin --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+info(verbose): /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon_ui -Mroot=packages/zircon_ui/tests/compile_fail/invalid_handler.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -fno-emit-bin --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name test --zig-lib-dir .tools/zig-aarch64-macos-0.17.1/lib/ --listen=-
+    Finished `release` profile [optimized] target(s) in 0.42s
+
+RUN -Mroot=packages/zircon_git/src/root.zig
+1/6 root.test_0...OK
+2/6 parser_tests.test.history hunks retain separate file headings including spaces and deletions...OK
+3/6 parser_tests.test.machine parsers retain path bytes and release allocation failures...OK
+4/6 parser_tests.test.invalid machine data refuses without leaking partial history entries...OK
+5/6 parser_tests.test.line changes account for missing final newlines and preserve equal suffixes...OK
+6/6 parser_tests.test.large unrelated blocks use documented bounded conservative range...OK
+All 6 tests passed.
+
+RUN -Mroot=packages/zircon_extensions/tests/all.zig
+1/11 all.test.theme color parsing preserves alpha and rejects malformed values...OK
+2/11 all.test.install resolves real theme icon language and server and activation persists...OK
+3/11 all.test.invalid manifests and duplicate contributions preserve effective installed generation...OK
+4/11 all.test.contribution paths cannot escape a bundle or traverse symlinks...OK
+5/11 all.test.missing PNG asset and unsupported schema fail before installation...OK
+6/11 all.test.asset bytes survive uninstall in a retained snapshot...OK
+7/11 all.test.activation disk failure preserves previous effective snapshot and install rollback...OK
+8/11 all.test.install allocation failures retain old registry and clean owned snapshots...OK
+9/11 all.test.install refuses a source containing the managed home and malformed PNG headers...OK
+10/11 all.test.upgrade preserves activation and retained snapshots and rolls back publication failure...OK
+11/11 all.test.converted icon mappings share encoded assets and language suffixes support multipart names...OK
+All 11 tests passed.
+
+RUN -Mroot=packages/zircon_text/tests/all.zig
+1/16 all.test_0...OK
+2/16 document_tests.test.UTF8 document snapshots preserve text across edits undo and redo...OK
+3/16 document_tests.test.line indexing retains CRLF bytes and UTF16 mapping refuses surrogate interiors...OK
+4/16 document_tests.test.batch edits map affinities and publish one atomic content state...OK
+5/16 document_tests.test.typing groups coalesce history while state identities and redo branches remain exact...OK
+6/16 document_tests.test.invalid stale overlapping and no-op edits preserve revision history and snapshots...OK
+7/16 document_tests.test.streaming search matches across leaves and supports reverse and explicit ASCII folding...OK
+8/16 document_tests.test.random Unicode replacements match flat reference with retained snapshots and indexed metrics...OK
+9/16 document_tests.test.tiny insertions reuse bounded leaves instead of retaining one leaf per character...OK
+10/16 document_tests.test.initial construction and multi-edit undo lifecycle release every allocation failure...OK
+11/16 document_tests.test.OOM while preparing replacement preserves content revision state and undo history...OK
+12/16 document_tests.test.snapshot may outlive its document and read immutable text on another thread...OK
+13/16 document_tests.test.sustained local edits rebalance a large shared rope without flattening storage...OK
+14/16 document_tests.test.later invalid batch input and failed undo preparation leave all earlier state intact...OK
+15/16 document_tests.test.zero history limit retains only current content and no-op empty documents stay valid...OK
+16/16 document_tests.test.multi-byte original chunks split only at code points and index every line...OK
+All 16 tests passed.
+
+RUN -Mroot=packages/zircon_markdown/tests/all.zig
+1/5 all.test.blocks preserve UTF8 CRLF ranges and parse headings paragraphs lists quotes and fences...OK
+2/5 all.test.inline styles links images code escapes and unmatched delimiters are explicit...OK
+3/5 all.test.tables parse alignment source cells escaped pipes and inline code pipes...OK
+4/5 all.test.setext rules and unterminated fences remain valid source blocks...OK
+5/5 all.test.document copies caller memory and frees all partial parse allocations...OK
+All 5 tests passed.
+
+RUN -Mroot=packages/zircon_language/tests/all.zig
+1/5 all.test.framing handles fragmented headers multiple bodies and rejects invalid lengths...OK
+2/5 all.test.protocol coordinates are exact UTF16 and reject split surrogate pairs...OK
+3/5 all.test.client fails missing executable without leaking process resources...OK
+4/5 all.test.actual fragmented stdio server initializes publishes versioned diagnostics and completes out of order...OK
+5/5 all.test.malformed and unresponsive owned servers terminate without blocked reader joins...OK
+All 5 tests passed.
+
+RUN -Mroot=packages/zircon_search/tests/all.zig
+1/11 all.test.unsaved buffers override canonical disk duplicates and include untitled text...OK
+2/11 all.test.Unicode and multiline match coordinates retain exact merged source context...OK
+3/11 all.test.case folding and whole-word matching use an explicit non-overlapping policy...OK
+4/11 all.test.disk fingerprints and buffer versions reject stale source activation...OK
+5/11 all.test.cancellation is checked during long streaming searches not only matches...OK
+6/11 all.test.source failures and explicit search limits are reported without losing valid groups...OK
+7/11 all.test.search matches across rope leaf boundaries and merges neighboring contexts...OK
+8/11 all.test.allocation failures release all result and scratch ownership...OK
+9/11 all.test.disk aliases deduplicate and source budget bounds failed input records...OK
+10/11 all.test.disk search allocation failures release snapshots excerpts paths and scratch...OK
+11/11 all.test.worker reads a retained old buffer snapshot and results outlive its document...OK
+All 11 tests passed.
+
+RUN -Mroot=packages/zircon_editor/tests/all.zig
+1/40 all.test.blame details never displace source rows or caret geometry...OK
+2/40 all.test.extension lexical profiles classify keywords strings and line comments...OK
+3/40 all.test.Unicode typing movement grouped undo and redo preserve selections...OK
+4/40 all.test.multi-cursor insert normalizes overlap and maps peer view positions...OK
+5/40 all.test.line indentation newline CRLF and selection movement use original byte endings...OK
+6/40 all.test.literal find wraps and replace all is one undoable transaction...OK
+7/40 all.test.revisioned composition replaces marked text and commits one history group...OK
+8/40 all.test.tab display mapping and lexical states remain source-byte accurate...OK
+9/40 all.test.custom canvas paints visible lines and owns a bounded committed IME excerpt...OK
+10/40 all.test.editing allocations fail without corrupting document state...OK
+11/40 all.test.ordinary native replacements retain typing undo group and duplicate cursors...OK
+12/40 all.test.lexical cache invalidates undo and converges after changed comment state...OK
+13/40 all.test.long lines are preserved and canvas reports its explicit rendering limit...OK
+14/40 all.test.editor pointer drag and clipboard go through the committed custom element...OK
+15/40 all.test.failed native replacement must preserve selection...OK
+16/40 all.test.canceling unchanged composition must not undo previous committed typing...OK
+17/40 all.test.adjacent modified rows paint one continuous Git gutter marker...OK
+18/40 all.test.expanded removed rows map to current source across start middle and EOF hunks...OK
+19/40 all.test.macOS command and option delete respect line and word boundaries...OK
+20/40 all.test.Vim counts operators register paste and history use document transactions...OK
+21/40 all.test.Vim visual reversal linewise and block operations select inclusive characters...OK
+22/40 all.test.Vim native stale edits cannot insert in Normal and Insert preserves composition...OK
+23/40 all.test.multiline selections fill continuous rows and Normal mode suppresses native insertion...OK
+24/40 all.test.Vim change and open line undo together with typed text and final-line deletion stays linewise...OK
+25/40 all.test.Vim dot repeats word operations and inserted text in one undo transaction...OK
+26/40 all.test.Vim block registers paste by row and block insertion edits every selected line...OK
+27/40 all.test.Vim search repeats literals and word motion follows shaped tab columns...OK
+28/40 all.test.modal input remains valid across empty Unicode CRLF and mixed command sequences...OK
+29/40 all.test.macOS line deletion consumes CRLF at boundaries and merges multicursor ranges...OK
+30/40 all.test.default selection is distinct from active line and gutter labels retain contrast...OK
+31/40 all.test.narrow editor advertises horizontal overflow and scrolls to reveal source...OK
+32/40 all.test.word wrapping preserves UTF8 source boundaries and reuses its visual map...OK
+33/40 all.test.wrapped canvas paints continuation rows and pointer and arrow navigation use them...OK
+34/40 all.test.wrapped edits reshape changed lines and retain UTF8 mappings in the suffix...OK
+35/40 all.test.wrapped Git deletion blocks map to the changed source and unwrap clamps scroll...OK
+36/40 all.test.Cmd slash toggles selected lines with indentation and undo while gcc comments the current line...OK
+37/40 all.test.comments use extension delimiters and block-only profiles with CRLF and multiple cursors...OK
+38/40 all.test.folding hides body rows without wrapping and revealing a hidden cursor unfolds it...OK
+39/40 all.test.folded wrapped buffers keep row mappings and Vim vertical motion skips folded text...OK
+40/40 all.test.folds survive edits before a header and unfolding restores all wrapped source rows...OK
+All 40 tests passed.
+
+RUN -Mroot=packages/zircon_ui/tests/all.zig
+1/105 all.test_0...OK
+2/105 external_tests.test.external inbox deduplicates registration and retires destroyed recipient...OK
+3/105 image_tests.test.image assets copy once premultiply alpha and retain immutable identity...OK
+4/105 image_tests.test.image limits reject overflow invalid byte lengths and invalid identities...OK
+5/105 image_tests.test.image fit geometry clips contain cover and stretch without copying pixels...OK
+6/105 image_tests.test.image construction allocation failure leaves source ownership unchanged...OK
+7/105 entity_tests.test.typed read/update and notifications use one scheduled frame...OK
+8/105 entity_tests.test.stale handles, foreign applications and forged types are refused...OK
+9/105 entity_tests.test.reentrant mutation and reads during mutation are refused, then borrow releases...OK
+10/105 entity_tests.test.scope destruction releases children before parents and invalidates all handles...OK
+11/105 entity_tests.test.entity allocations remain stable while the slot registry grows...OK
+12/105 entity_tests.test.destroying a borrowed subtree refuses atomically and context destruction defers...OK
+13/105 entity_tests.test.copied contexts expire at the end of their callback...OK
+14/105 entity_tests.test.entity creation allocation failures do not leak or consume the caller's value...OK
+15/105 entity_tests.test.many generation reuse cycles cannot revive an old handle...OK
+16/105 entity_tests.test.immutable borrow blocks a mutable update until the read returns...OK
+17/105 entity_tests.test.destruction refuses a borrowed child without partially destroying its parent...OK
+18/105 entity_tests.test.generation exhaustion retires entity and scope slots instead of wrapping...OK
+19/105 entity_tests.test.entity access from a worker is rejected before touching the registry...OK
+20/105 entity_tests.test.destructors cannot reenter the application while ownership is being released...OK
+21/105 frame_tests.test.retiring a temporary large frame releases capacity above the pool budget...OK
+22/105 frame_tests.test.const entity rendering builds inspectable frame-owned trees and typed handlers...OK
+23/105 frame_tests.test.failed staging keeps the committed tree and handler alive...OK
+24/105 frame_tests.test.element epochs reject retired and foreign frame handles...OK
+25/105 frame_tests.test.active dispatch pins the committed frame and prevents replacement...OK
+26/105 frame_tests.test.tree copies text, logical keys and child handles before caller memory changes...OK
+27/105 frame_tests.test.tree rejects multiple parents duplicate children and duplicate keys...OK
+28/105 frame_tests.test.identical keys in separate keyed scopes are legal and string/number keys differ...OK
+29/105 frame_tests.test.frame cleanup hooks run once in reverse order on retirement and failure...OK
+30/105 frame_tests.test.a committed frame's typed handler cannot access a destroyed entity...OK
+31/105 frame_tests.test.invalid dimensions and malformed UTF8 fail at the builder seam...OK
+32/105 frame_tests.test.frame construction allocation failures clean all owned storage...OK
+33/105 frame_tests.test.allocation failure in a new staging arena preserves the previous successful frame...OK
+34/105 layout_tests.test.rows account for padding gaps and equally shared growth...OK
+35/105 layout_tests.test.growth redistributes after a maximum size freezes one child...OK
+36/105 layout_tests.test.shrink redistributes around minimum widths without negative geometry...OK
+37/105 layout_tests.test.columns honor margins and center alignment on both axes...OK
+38/105 layout_tests.test.percentage and rem lengths resolve in the parent's content box...OK
+39/105 layout_tests.test.text measurement is injected and identical constraints give identical bounds...OK
+40/105 layout_tests.test.invalid measurements and arithmetic overflow are reported...OK
+41/105 layout_tests.test.layout results cannot be reused for another frame epoch...OK
+42/105 layout_tests.test.layout scratch allocation failures release every temporary allocation...OK
+43/105 animation_tests.test.tweens sample an injected clock and stop scheduling at their target...OK
+44/105 animation_tests.test.easing and zero duration have observable deterministic values...OK
+45/105 animation_tests.test.interrupted tween starts at its sampled position without a jump...OK
+46/105 animation_tests.test.springs converge for under critical and over damping independently of frame count...OK
+47/105 animation_tests.test.spring interruption preserves velocity at the new target...OK
+48/105 animation_tests.test.discarded animation targets never replace the committed target...OK
+49/105 animation_tests.test.reduced motion snaps active and new tracks without timers...OK
+50/105 animation_tests.test.successful frames prune absent keys while discarded frames retain them...OK
+51/105 animation_tests.test.animation rejects invalid inputs without mutating committed state...OK
+52/105 window_tests.test.bare button labels honor centered control alignment...OK
+53/105 window_tests.test.composed button activates across decorative children and by keyboard...OK
+54/105 window_tests.test.hover paints composed control ancestors and becomes idle after pointer settles...OK
+55/105 window_tests.test.window uses one committed layout scene and input path and remains idle...OK
+56/105 window_tests.test.failed window staging retains displayed geometry handlers and keys...OK
+57/105 window_tests.test.window handles enforce ownership and closing releases scoped root...OK
+58/105 window_tests.test.input capture target bubble and pointer capture use committed tree...OK
+59/105 window_tests.test.custom element executes layout prepaint paint and records clipped scene...OK
+60/105 window_tests.test.window animation renders final value then stops requesting frames...OK
+61/105 window_tests.test.window construction and prepared frames release storage on allocation failure...OK
+62/105 window_tests.test.typed handler payloads copy immutable values out of the render stack...OK
+63/105 window_tests.test.custom element takes resource ownership only after successful construction...OK
+64/105 window_tests.test.modal autofocus traps Tab and outside clicks and restores previous focus...OK
+65/105 window_tests.test.a root handler can queue close without reborrowing its mutable state...OK
+66/105 window_tests.test.custom deadlines coalesce and stop when the native window loses focus...OK
+67/105 window_tests.test.event window geometry uses current logical runtime size after synthetic resize...OK
+68/105 window_tests.test.opening a window transfers entity ownership only on success...OK
+69/105 control_tests.test.themed search fields center text and use the same inset for hit testing...OK
+70/105 control_tests.test.text field edits Unicode selection clipboard and revisioned composition through window dispatch...OK
+71/105 control_tests.test.virtual list range and scrolling keep render work proportional to viewport...OK
+72/105 control_tests.test.typed keymap shares semantic commands and rejects ambiguous bindings...OK
+73/105 control_tests.test.shared SVG icons retain filled shapes and source opacity under theme tinting...OK
+74/105 control_tests.test.search fields honor macOS command and option deletion on UTF8 boundaries...OK
+75/105 painter_tests.test.painter copies UTF8 applies nested clipping opacity and rejects invalid commands...OK
+76/105 painter_tests.test.stack layers share layout bounds and dispatch to the last painted hit...OK
+77/105 task_tests.test.background work runs off thread and completion borrows output on creator thread...OK
+78/105 task_tests.test.canceling completed work delivers cancellation and still disposes its result...OK
+79/105 task_tests.test.cooperative cancellation reaches a running worker...OK
+80/105 task_tests.test.worker errors and completion errors release job storage exactly once...OK
+81/105 task_tests.test.shutdown cancels joins and discards without invoking UI completion...OK
+82/105 task_tests.test.task generations and queue identity reject stale foreign and cross-thread access...OK
+83/105 task_tests.test.completion may enqueue follow-up work but cannot recursively drain...OK
+84/105 task_tests.test.allocation failure leaves caller-owned job intact and closes queued workers...OK
+85/105 owned_task_tests.test.entity-owned worker completes through a fresh UI update and discards output...OK
+86/105 owned_task_tests.test.destroying a task owner cancels its worker and suppresses completion...OK
+87/105 reactive_tests.test.observers run after the outer borrow and coalesce repeated notifications...OK
+88/105 reactive_tests.test.chained observers settle after each callback releases its mutation borrow...OK
+89/105 reactive_tests.test.destroying either endpoint suppresses pending effects and stale generations stay dead...OK
+90/105 reactive_tests.test.subscription slots reuse storage while old handles cannot unsubscribe replacements...OK
+91/105 reactive_tests.test.observer callbacks can unsubscribe themselves grow the registry and defer destruction...OK
+92/105 reactive_tests.test.observer failures report once and effect cycles terminate without recursive callbacks...OK
+93/105 reactive_tests.test.typed events deliver owned values after source mutation returns...OK
+94/105 reactive_tests.test.an event callback replacing another subscription cannot receive the older queued event...OK
+95/105 reactive_tests.test.events clone borrowed input and release it even when a subscriber fails...OK
+96/105 reactive_tests.test.Ui.view and watch record committed dependencies and failed render retains the old set...OK
+97/105 reactive_tests.test.reactive registrations and cloned event storage clean up under allocation failure...OK
+98/105 reactive_tests.test.presence keeps an exiting element until fade completion and then stops scheduling...OK
+99/105 reactive_tests.test.geometry channels interpolate together and spring color channels remain valid...OK
+100/105 text_input_tests.test.focused prepaint copies a validated text snapshot into frame storage...OK
+101/105 text_input_tests.test.text snapshots reject malformed UTF8 codepoint splits and invalid caret geometry...OK
+102/105 text_input_tests.test.text edits bind replacement and inserted selection to the exact revision...OK
+103/105 text_input_tests.test.window publishes only focused committed snapshots and retains them on failed staging...OK
+104/105 text_input_tests.test.bounded surrounding text validates absolute edits and rejects base overflow...OK
+105/105 text_input_tests.test.dirty close requests target the root and can be canceled before teardown...OK
+All 105 tests passed.
+
+RUN -Mroot=apps/zircon/tests/all.zig
+1/56 all.test_0...OK
+2/56 agent_tests.test.native agent workspace sends multiline text gates edits and restores project conversation history...OK
+3/56 workspace_polish_tests.test.all directional splits arrange the new pane in the requested direction and resize...OK
+4/56 workspace_polish_tests.test.sidebar can shrink to 120 pixels while Git retains its own width...OK
+5/56 workspace_polish_tests.test.system appearance updates fields and canvases while explicit themes ignore it...OK
+6/56 workspace_polish_tests.test.persisted shortcut overrides drive splits and menus show their effective binding...OK
+7/56 workspace_polish_tests.test.settings reject unsafe unknown and ambiguous shortcut configuration...OK
+8/56 workspace_polish_tests.test.split popover anchors to the clicked pane control and clamps inside a narrow window...OK
+9/56 workspace_polish_tests.test.Vim slash search uses the focused find field and returns to Normal...OK
+10/56 workspace_polish_tests.test.compact command palette preserves query height, source visibility and outside dismissal...OK
+11/56 workspace_polish_tests.test.opened nested source reveals only its project ancestors...OK
+12/56 workspace_polish_tests.test.breadcrumb returns focus to the pane that supplied its document...OK
+13/56 workspace_polish_tests.test.language install suggestions translate suffixes and exact filenames into catalog terms...OK
+14/56 workspace_polish_tests.test.small windows keep editor canvases above the status bar...OK
+15/56 workspace_polish_tests.test.narrow command palette gives long commands room and stays within the window...OK
+16/56 workspace_polish_tests.test.only the focused split paints the active line and focus moves with a click...OK
+17/56 experience_tests.test.completion identity includes server session and document URI...OK
+18/56 experience_tests.test.dragging reorders tabs and opens a different file in the split pane...OK
+19/56 experience_tests.test.Markdown preview shares the editable source revision and closes safely...OK
+20/56 experience_tests.test.installed server publishes diagnostics applies Unicode completion and stops on disable...OK
+21/56 experience_tests.test.native image viewer decodes a real file without creating a text document...SKIP
+22/56 experience_tests.test.Git panel stages unstages commits and shows unsaved gutters and inline blame...OK
+23/56 experience_tests.test.extension controls activate real themes icons and syntax...OK
+24/56 experience_tests.test.project search captures unsaved buffers and opens the real source selection...OK
+25/56 experience_tests.test.automatic blame waits for the current line and keeps source geometry unchanged...OK
+26/56 experience_tests.test.gutter click expands removed lines inline without changing buffer selection or dirty state...OK
+27/56 experience_tests.test.Git controls create branches stash changes and reload clean open documents...OK
+28/56 experience_tests.test.light Markdown code keeps theme colors indentation and long tokens inside a narrow preview...OK
+29/56 buffer_controls_tests.test.icon theme decodes filename-stem assets as well as extension assets...SKIP
+30/56 buffer_controls_tests.test.settings icon picker updates the project and tab immediately and persists the choice...OK
+31/56 buffer_controls_tests.test.inline buffer search navigates queued results and applies Unicode regex replacements with undo...OK
+32/56 buffer_controls_tests.test.icon tooltips wait then clamp to the window and disappear when the pointer leaves...OK
+33/56 buffer_controls_tests.test.gutter fold clicks hide source rows and buffer search reveals a match inside the fold...OK
+34/56 buffer_controls_tests.test.light buffer search stays inside a native narrow window with bordered inputs...OK
+35/56 settings_tests.test.settings update persists atomically retains unknown keys and refuses invalid values...OK
+36/56 settings_tests.test.nested settings sections collapse independently and gutter controls update the editor live...OK
+37/56 settings_tests.test.settings search scroll hit geometry and JSON editing persist real user changes...OK
+38/56 settings_tests.test.separate settings child changes shared editor appearance and closes independently...OK
+39/56 settings_tests.test.settings choice search filters independently and commits only with Enter...OK
+40/56 settings_tests.test.installed font identities and Vim bindings persist without borrowed settings bytes...OK
+41/56 settings_tests.test.opening Light settings styles search fields before reading the borrowed workspace...OK
+42/56 view_tests.test.palette filtering is deterministic ASCII case-insensitive substring matching...OK
+43/56 view_tests.test.workspace chrome leaves the canvas room and focuses the editor initially...OK
+44/56 view_tests.test.chrome controls fit inside their bars without clipped hover targets...OK
+45/56 view_tests.test.utility tabs keep their close and split controls visible in narrow windows...OK
+46/56 view_tests.test.long status messages leave settings and panel controls inside the window...OK
+47/56 view_tests.test.palette uses an editable focused query and Escape restores canvas focus...OK
+48/56 view_tests.test.compact workspace hides sidebar and still arranges an editable canvas...OK
+49/56 view_tests.test.split ratio controls actual arranged canvas widths...OK
+50/56 view_tests.test.many tabs keep the active document visible and navigation reaches hidden tabs...OK
+51/56 view_tests.test.revisioned typing follows focus from editor to search and command fields...OK
+52/56 shell_tests.test.shell opens an untitled document and builds its real custom editor...OK
+53/56 shell_tests.test.clicking a tab must return keyboard editing to its document...OK
+54/56 shell_tests.test.save as writes actual bytes and saving separates later typing undo history...OK
+55/56 shell_tests.test.dirty native-close policy cancel preserves state and discard closes...OK
+56/56 shell_tests.test.quick open uses real background-indexed files and returns typing focus...OK
+54 passed; 2 skipped; 0 failed.
+
+RUN -Mroot=packages/zircon_workspace/tests/all.zig
+1/12 all.test.open canonical paths deduplicates symlinks and preserves CRLF bytes...OK
+2/12 all.test.atomic save preserves permissions and undo to saved content clears dirty state...OK
+3/12 all.test.external disk changes refuse saving without changing disk or saved marker...OK
+4/12 all.test.save as publishes new files and leaves untitled identity intact on failure...OK
+5/12 all.test.dirty close decisions protect documents and generational ids reject replacements...OK
+6/12 all.test.project listing is lazy sorted directory first and excludes build internals...OK
+7/12 all.test.invalid UTF8 and binary files are explicit load errors...OK
+8/12 all.test.failed preparation releases all workspace and document ownership...OK
+9/12 all.test.real permission failure leaves original file and unsaved document intact...OK
+10/12 all.test.document identities cannot resolve in a different workspace...OK
+11/12 all.test.oversized files are refused before loading sparse content...OK
+12/12 all.test.binary edit cannot replace a file that the workspace would refuse to reopen...OK
+All 12 tests passed.
+
+RUN -Mroot=packages/zircon_git/tests/all.zig
+1/12 all.test.unborn repository status staging and unstaging preserve file bytes...OK
+2/12 all.test.status diff history blame and explicit commits use actual repository state...OK
+3/12 all.test.rename and detached HEAD preserve exact paths and report branch mode...OK
+4/12 all.test.failed operations retain files and reject escaping paths...OK
+5/12 all.test.line diff maps insert modification deletion and EOF without quadratic unbounded work...OK
+6/12 all.test.bare repositories have no worktree and are not accepted as editor repositories...OK
+7/12 all.test.literal pathspecs stage only the named file even when its name resembles Git magic...OK
+8/12 all.test.failed commit hook leaves index and worktree available for retry...OK
+9/12 all.test.untracked baselines are empty and path conversion rejects sibling directories...OK
+10/12 all.test.branch stash and network workflows use real repositories and a local bare remote...OK
+11/12 all.test.combined review includes staged unstaged and untracked files including an unborn repository...OK
+12/12 all.test.conflicting stash pop preserves its stash and reports the failed apply...OK
+All 12 tests passed.
+
+RUN -Mroot=packages/zircon_agent/tests/all.zig
+1/3 all.test.ACP and Codex stream Unicode and preserve permission decisions over real subprocesses...OK
+2/3 all.test.JSONL decoder handles fragmented messages and blank lines...OK
+3/3 all.test.rejection and cancellation leave files untouched in both protocols...OK
+All 3 tests passed.
+
+RUN -Mroot=packages/zircon_ui/tests/compile_fail/mutable_render.zig
+packages/zircon_ui/src/ui/adapter.zig:87:137: error: render must receive (*const Self, *Ui)
+    if (info != .@"fn" or info.@"fn".param_types.len != 2 or info.@"fn".param_types[0] != *const T or info.@"fn".param_types[1] != *Ui) @compileError("render must receive (*const Self, *Ui)");
+                                                                                                                                        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+packages/zircon_ui/src/ui/ui.zig:179:33: note: called at comptime here
+    comptime adapter.requireView(T);
+             ~~~~~~~~~~~~~~~~~~~^~~
+referenced by:
+    render__func_1014: packages/zircon_ui/src/testing/headless.zig:21:40
+    test.mutable render is rejected: packages/zircon_ui/tests/compile_fail/mutable_render.zig:11:23
+
+RUN -Mroot=packages/zircon_ui/tests/compile_fail/borrowed_read.zig
+packages/zircon_ui/src/app/app.zig:443:21: error: read/update results cannot borrow pointers or slices; copy into a caller-owned output argument
+        .pointer => @compileError("read/update results cannot borrow pointers or slices; copy into a caller-owned output argument"),
+                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+packages/zircon_ui/src/app/app.zig:287:28: note: called at comptime here
+            requireSnapshot(Payload(@TypeOf(function)));
+            ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+referenced by:
+    test.borrowed access result is rejected: packages/zircon_ui/tests/compile_fail/borrowed_read.zig:12:21
+
+RUN -Mroot=packages/zircon_ui/tests/compile_fail/invalid_handler.zig
+packages/zircon_ui/src/ui/adapter.zig:35:40: error: onClick requires fn (*Self, *Event(Click), *Context(Self)) !void
+    if (info.param_types.len != count) @compileError(message);
+                                       ^~~~~~~~~~~~~~~~~~~~~~
+packages/zircon_ui/src/ui/adapter.zig:43:32: note: called at comptime here
+    const T = comptime validate(E, @TypeOf(callback), 3);
+                       ~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+referenced by:
+    click__func_1038: packages/zircon_ui/src/ui/adapter.zig:20:16
+    onClick__func_1030: packages/zircon_ui/src/ui/ui.zig:49:29
+    6 reference(s) hidden; use '-freference-trace=8' to see all references

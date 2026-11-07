@@ -1,0 +1,149 @@
+{
+  "captured_utc": "2026-11-07T04:49:47.941223+00:00",
+  "application_source_head": "dc56004",
+  "runtime_fix": "0b73351",
+  "native_client_area": true,
+  "reference": "../zed-ui/evidence; identical installed Zed binary but historical clean reference captures",
+  "files": [
+    {
+      "file": "zircon-dark-commands.png",
+      "bytes": 108674,
+      "sha256": "43ee47830c56332c5f892c26d180b6d2a62ad1c6a1c92159a897d45538d6e0ec"
+    },
+    {
+      "file": "zircon-dark-editor.png",
+      "bytes": 121009,
+      "sha256": "c5272cc5e4d9622c295c13bf1bd6691117e1dc9c30f5753608f0f936f6c6e113"
+    },
+    {
+      "file": "zircon-dark-font-picker.png",
+      "bytes": 87955,
+      "sha256": "9eb422535e1196326926c0d1b1a9deeeb29e218bf3383096c13bc0506cf53f0c"
+    },
+    {
+      "file": "zircon-dark-git.png",
+      "bytes": 193786,
+      "sha256": "d6657b87616cf5ece6292aa7377cbbf4c6f5ab2f46491995016fa180b624d85a"
+    },
+    {
+      "file": "zircon-dark-markdown.png",
+      "bytes": 161241,
+      "sha256": "2ee0f20f58f98d716553f5386e8e5fe2b999404209dd7bd5c2c9ea36c9761093"
+    },
+    {
+      "file": "zircon-dark-narrow-commands.png",
+      "bytes": 70229,
+      "sha256": "79dd12d660688c46c989208c6786f3f0475a1e0b46f98349c75cc20c8fde215d"
+    },
+    {
+      "file": "zircon-dark-narrow-editor.png",
+      "bytes": 84875,
+      "sha256": "ac7d3b3b7fcddfa02b671d4bbdb2d99ea0ea7585c2ac31d0fecf8a542b908667"
+    },
+    {
+      "file": "zircon-dark-search.png",
+      "bytes": 202260,
+      "sha256": "d28f3206fd2bf3df4493312099cadddf5cb56e312283258794b5d0bbb16eac3d"
+    },
+    {
+      "file": "zircon-dark-selection.png",
+      "bytes": 120411,
+      "sha256": "462942bb2ba4afb246027c393dc2fc8ebde72dd17d7a2ed46956707d50b4b693"
+    },
+    {
+      "file": "zircon-dark-settings.png",
+      "bytes": 85514,
+      "sha256": "37a087483fd4d07103dccb1af8fe0981bed1adc9544280170e68fd585f005532"
+    },
+    {
+      "file": "zircon-dark-split-menu.png",
+      "bytes": 129311,
+      "sha256": "b6c41501beeff494430502b795630c45c4e2475c6af586556e0dea9f4d66b149"
+    },
+    {
+      "file": "zircon-dark-split.png",
+      "bytes": 129502,
+      "sha256": "afe6ce6014c5736584ad610a61d015d6783edd6e4ba3d1654c2559dadf4439be"
+    },
+    {
+      "file": "zircon-dark-theme-picker.png",
+      "bytes": 90736,
+      "sha256": "2c11e56da1549750cfdd09863b1298400aa2d29a8b93bac13ea2b297ec300af5"
+    },
+    {
+      "file": "zircon-dark-workspace-menu.png",
+      "bytes": 133965,
+      "sha256": "619919be9a200f334c6133ae4ddc8396c0dcef2b43b8bb87454bd91eb1c59026"
+    },
+    {
+      "file": "zircon-light-commands.png",
+      "bytes": 111928,
+      "sha256": "be4c56ce06e51dee44f586dbcde448f392d0566a4ffd57f145d1d95731d20332"
+    },
+    {
+      "file": "zircon-light-editor.png",
+      "bytes": 124892,
+      "sha256": "c78995e756c5b4fd7a1c1bc1218721d2acf2d918d2c1bc507e5377b09e78ef7b"
+    },
+    {
+      "file": "zircon-light-font-picker.png",
+      "bytes": 90135,
+      "sha256": "7aa770ff38328c8d5004f32fb9ed0661073c12144f71648a6c4629e94eab70f0"
+    },
+    {
+      "file": "zircon-light-git.png",
+      "bytes": 200242,
+      "sha256": "3537d9254c9c69b71b6b2474fecc1b0ee4b877d347133ac594d5866b6a32013a"
+    },
+    {
+      "file": "zircon-light-markdown.png",
+      "bytes": 167122,
+      "sha256": "624fc2ca84f629b987858a21c3e1267ba8343d7802e57e6c70e05c35acaa95c0"
+    },
+    {
+      "file": "zircon-light-narrow-commands.png",
+      "bytes": 72352,
+      "sha256": "f82ae2e7a0ecb1af498bb6f4c7fdee17cdeadbd21d221567e6027718ea095ab7"
+    },
+    {
+      "file": "zircon-light-narrow-editor.png",
+      "bytes": 88311,
+      "sha256": "131852491749214e3ff589585a7fd7225a0059912ecb0cbfeaeb36445aac3349"
+    },
+    {
+      "file": "zircon-light-search.png",
+      "bytes": 209736,
+      "sha256": "3896043c5986d1cb3f161bced46d36c3949bfc315624bcffe7af63b76012848c"
+    },
+    {
+      "file": "zircon-light-selection.png",
+      "bytes": 124741,
+      "sha256": "fd5fafcab2a5f083f939a8676817df53ae8d8efe91feff1ca2f367f2b58485bc"
+    },
+    {
+      "file": "zircon-light-settings.png",
+      "bytes": 87470,
+      "sha256": "3adae76fe4cbdaabe26091569f26b162c24533441be511d8cba4c858edd7753a"
+    },
+    {
+      "file": "zircon-light-split-menu.png",
+      "bytes": 133868,
+      "sha256": "b5fcb9740f4bc8acb23aee5934bf03b58721d3cc9451adfd807a0e518f781f8a"
+    },
+    {
+      "file": "zircon-light-split.png",
+      "bytes": 133860,
+      "sha256": "95884778f94a6ddf380dadbb98943855782b28f04c62c27715e1d9ae95c712d8"
+    },
+    {
+      "file": "zircon-light-theme-picker.png",
+      "bytes": 93222,
+      "sha256": "4e7a2d503b8ee4052569915f9a840e4bbcf2d290e0332f79fd80e4fe0146446a"
+    },
+    {
+      "file": "zircon-light-workspace-menu.png",
+      "bytes": 139151,
+      "sha256": "d1e0d3df496e2737f2954e959a5f44d08a767c44939f534e8bdc561b48cc56fc"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ Each implementation unit must have a reproduced behavior or explicit requirement
 - [x] Read pstack principles and runtime/model mapping; route the broad request with ask-matt.
 - [x] Phase A: Frame. Capture the starting checkout and reference version; preserve prior work and existing evidence.
 - [x] Phase B: Design the workflow. Keep the existing 88-task inventory as the dependency map; introduce no competing feature list.
-- [ ] Phase C: Run the loop. Verify and commit one unit at a time. First resolve baseline service failures; next recovery/document propagation; then measured Git/LSP scheduling and settings/font/extension/Vim improvements.
+- [ ] Phase C: Run the loop. Verify and commit one unit at a time. Baseline process isolation is fixed and a complete40-case workload passes. Correct the language-picker lifecycle next, then recovery/document propagation and measured Git/LSP scheduling; keep settings/font/extension/Vim work tied to accepted journeys.
 - [ ] Phase D: Keep the audit trail. Append decisions to decisions.tsv as evidence is produced.
 - [ ] Phase E: Verify and hand back. Fresh native checks, repeatable performance work, independent review and honest remaining-gap inventory.
 
@@ -27,6 +27,6 @@ UI/workflow fidelity; correctness and data safety; text/IME/Unicode; performance
 
 ## First concrete delivery
 
-`bad2152` commits the already verified continuation indentation and gutter-color corrections with their behavioral regressions. Existing terminal/pane/UI work remains untouched and uncommitted until separately reconciled. Framework documentation files owned by another thread are excluded from these commits.
+`bad2152` commits the already verified continuation indentation and gutter-color corrections with their behavioral regressions. The already delivered terminal/pane/UI work is preserved in `dc56004` after fresh verification. Framework documentation files owned by another thread are excluded from these commits.
 
-BASE-03 remains in verify status after 34 of 40 attempts passed. Four grammar readiness timeouts and two unknown work-counter failures must be diagnosed; twelve subsequent diagnostic passes did not resolve them. Preserve the failed batch rather than selecting retries.
+BASE-03 passes after a complete new40/40 batch with Darwin child isolation. The original34/40 batch remains unchanged, including its four grammar timeouts and two unknown-counter failures. Live stacks and pipe endpoints explain the captured timeout; no cause is assigned retrospectively to unknown counters.

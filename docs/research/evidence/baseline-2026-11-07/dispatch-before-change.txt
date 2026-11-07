@@ -1,0 +1,60 @@
+
+RUN 1
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 2
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 3
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 4
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 5
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 6
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 7
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 8
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 9
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.
+
+RUN 10
+1/2 native_test_root.test_0...OK
+2/2 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...OK
+All 2 tests passed.
+MODE Queued application events with native foreground focus.

@@ -1,0 +1,42 @@
+1/41 all.test.blame details never displace source rows or caret geometry...OK
+2/41 all.test.extension lexical profiles classify keywords strings and line comments...OK
+3/41 all.test.Unicode typing movement grouped undo and redo preserve selections...OK
+4/41 all.test.multi-cursor insert normalizes overlap and maps peer view positions...OK
+5/41 all.test.line indentation newline CRLF and selection movement use original byte endings...OK
+6/41 all.test.literal find wraps and replace all is one undoable transaction...OK
+7/41 all.test.revisioned composition replaces marked text and commits one history group...OK
+8/41 all.test.tab display mapping and lexical states remain source-byte accurate...OK
+9/41 all.test.custom canvas paints visible lines and owns a bounded committed IME excerpt...OK
+10/41 all.test.editing allocations fail without corrupting document state...OK
+11/41 all.test.ordinary native replacements retain typing undo group and duplicate cursors...OK
+12/41 all.test.lexical cache invalidates undo and converges after changed comment state...OK
+13/41 all.test.long lines are preserved and canvas reports its explicit rendering limit...OK
+14/41 all.test.editor pointer drag and clipboard go through the committed custom element...OK
+15/41 all.test.failed native replacement must preserve selection...OK
+16/41 all.test.canceling unchanged composition must not undo previous committed typing...OK
+17/41 all.test.adjacent modified rows paint one continuous Git gutter marker...OK
+18/41 all.test.expanded removed rows map to current source across start middle and EOF hunks...OK
+19/41 all.test.macOS command and option delete respect line and word boundaries...OK
+20/41 all.test.Vim counts operators register paste and history use document transactions...OK
+21/41 all.test.Vim visual reversal linewise and block operations select inclusive characters...OK
+22/41 all.test.Vim native stale edits cannot insert in Normal and Insert preserves composition...OK
+23/41 all.test.multiline selections fill continuous rows and Normal mode suppresses native insertion...OK
+24/41 all.test.Vim change and open line undo together with typed text and final-line deletion stays linewise...OK
+25/41 all.test.Vim dot repeats word operations and inserted text in one undo transaction...OK
+26/41 all.test.Vim block registers paste by row and block insertion edits every selected line...OK
+27/41 all.test.Vim search repeats literals and word motion follows shaped tab columns...OK
+28/41 all.test.modal input remains valid across empty Unicode CRLF and mixed command sequences...OK
+29/41 all.test.macOS line deletion consumes CRLF at boundaries and merges multicursor ranges...OK
+30/41 all.test.default selection is distinct from active line and gutter labels retain contrast...OK
+31/41 all.test.narrow editor advertises horizontal overflow and scrolls to reveal source...OK
+32/41 all.test.word wrapping preserves UTF8 source boundaries and reuses its visual map...OK
+33/41 all.test.wrapped canvas paints continuation rows and pointer and arrow navigation use them...OK
+34/41 all.test.active source line has the same background across every wrapped row...OK
+35/41 all.test.wrapped edits reshape changed lines and retain UTF8 mappings in the suffix...OK
+36/41 all.test.wrapped Git deletion blocks map to the changed source and unwrap clamps scroll...OK
+37/41 all.test.Cmd slash toggles selected lines with indentation and undo while gcc comments the current line...OK
+38/41 all.test.comments use extension delimiters and block-only profiles with CRLF and multiple cursors...OK
+39/41 all.test.folding hides body rows without wrapping and revealing a hidden cursor unfolds it...OK
+40/41 all.test.folded wrapped buffers keep row mappings and Vim vertical motion skips folded text...OK
+41/41 all.test.folds survive edits before a header and unfolding restores all wrapped source rows...OK
+All 41 tests passed.

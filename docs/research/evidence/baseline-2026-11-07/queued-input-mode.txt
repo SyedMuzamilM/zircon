@@ -1,0 +1,1 @@
+PASSED: foreground NSApplication queue delivered to the current key window after focus changed.

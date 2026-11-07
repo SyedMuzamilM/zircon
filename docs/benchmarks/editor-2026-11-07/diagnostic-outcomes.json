@@ -1,0 +1,233 @@
+{
+  "workload": "1 MiB wrap/services; no RSS sampler; timing excluded",
+  "attempts": [
+    {
+      "attempt": 1,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 2,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 3,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 4,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 5,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 6,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 7,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 8,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 9,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 10,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216401,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 11,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216421,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    },
+    {
+      "attempt": 12,
+      "returncode": 0,
+      "revision": 20,
+      "counts": {
+        "git_commands": 80,
+        "git_status": 20,
+        "git_history": 20,
+        "git_errors": 0,
+        "lsp_messages": 20,
+        "lsp_bytes": 21216421,
+        "lsp_changes": 20,
+        "syntax_jobs": 1,
+        "wrap_builds": 20,
+        "shaped_lines": 20,
+        "fold_scanned_bytes": 20971530
+      },
+      "errors": 0
+    }
+  ]
+}

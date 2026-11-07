@@ -1,0 +1,13 @@
+{
+  "packages/zircon_editor/src/wrap.zig": "2a2634778594384cd8b4a719a803efb7fcd2f3139f6153456d0b8f12cd17acd4",
+  "packages/zircon_editor/src/canvas.zig": "b5bdd44bd0aefc401073cf27bf1425a0335daf475eb8b8618b66d47a88657aa3",
+  "packages/zircon_editor/src/folding.zig": "9d83e29701bcdc241de94df2e57009ffff5853ef86543f2ba0dac2092a0ffb79",
+  "packages/zircon_editor/tests/all.zig": "0e0c7aef0c76bbb74381c34ad249f1d07147bd6de93e395cf21c1519e8616f29",
+  "packages/zircon_git/src/process.zig": "de2f9e2ba4bedc3fb969d5ef19fb859733caae197604450e967e8227a6c8af1f",
+  "packages/zircon_language/src/client.zig": "29ada7864dde6c44de0cd103352a1f054ebf469f496d23d5ba43f86b8be46783",
+  "apps/zircon/src/services/language.zig": "600f2264114bca69a170e37ea1849b2e940b9f264e96baef54bdb707d9abde3a",
+  "build.zig": "a0ece8ce33ba5d5a1ed3f94ec6e31d7e0a77282eec4601af15a7f5da503ececa",
+  "tools/bench_editor.zig": "eeca0d517b3323b69eedf070a8a1f5df4f7d2435e9c1258ea3c64f7f77575f38",
+  "tools/run_editor_baseline.py": "8144dc09e1eccd614b620739898889a52be2be957887cb070d38cee7bc5e4f42",
+  "zig-out/bin/zircon": "8a2b1ce3fe4ecd9cb0312cb145b64d6fd61ed81bc6f691623a29103801214a4e"
+}

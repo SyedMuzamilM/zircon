@@ -1,0 +1,97 @@
+
+RUN packages/zircon_ui/src/native_test_root.zig
+1/7 native_test_root.test_0...OK
+2/7 platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events...FAIL (TextDispatchFailed)
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/platform/macos/window_test.zig:68:41: 0x1048f439f in test.native window presents and routes queued pointer, text, resize and close events (test)
+    if (log.keys != 1 or log.text != 1) return error.TextDispatchFailed;
+                                        ^
+3/7 platform.macos.window_test.test.native window rejects invalid dimensions before creating operating system objects...OK
+4/7 platform.macos.window_test.test.native text snapshots convert UTF16 replacements and queue composition until revision refresh...OK
+5/7 platform.macos.window_test.test.native replacement rejects a UTF16 range splitting an emoji surrogate pair...OK
+6/7 platform.macos.window_test.test.native surrounding text bases preserve global UTF16 and absolute byte coordinates...OK
+7/7 text.shaping.test.native UTF-16 ranges preserve accented code points and surrogate pairs...OK
+6 passed; 0 skipped; 1 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/c77d24709706618c85230c3574447421/test --seed=0x76c235a0
+
+RUN packages/zircon_ui/tests/native_all.zig
+1/24 native_all.test_0...OK
+2/24 native_image_tests.test.ImageIO decodes PNG JPEG and GIF first frames into top-left RGBA...OK
+3/24 native_image_tests.test.ImageIO preserves premultiplied alpha and rejects decode allocation failure...OK
+4/24 native_image_tests.test.Metal image sampling preserves orientation alpha clipping and painter order...OK
+5/24 native_image_tests.test.ImageIO applies JPEG EXIF orientation before publishing dimensions...OK
+6/24 native_image_tests.test.Metal image cache eviction keeps earlier batches and in-flight textures alive...OK
+7/24 native_image_tests.test.failed image scene preparation releases retained batch textures...OK
+8/24 native_runtime_tests.test.worker wake interrupts the native idle wait...OK
+9/24 native_runtime_tests.test.public App native window handles queued click resize snapshot and close...OK
+10/24 native_text_tests.test.bundled regular faces resolve without a system fallback...OK
+11/24 native_text_tests.test.ligature preferences change native glyph substitution and invalidate cached lines...OK
+12/24 native_text_tests.test.native shaping measures text and reuses one owned layout...OK
+13/24 native_text_tests.test.monospaced caret geometry and hit testing agree on ASCII code...OK
+14/24 native_text_tests.test.fallback glyph runs preserve Unicode measurement and code point boundaries...OK
+15/24 native_text_tests.test.layout cache evicts by both entry count and bounded estimated cost...OK
+16/24 native_text_tests.test.oversized lines are transient and do not empty the bounded cache...OK
+17/24 native_text_tests.test.font cache retains shaped runs when font slots are recycled...OK
+18/24 native_text_tests.test.invalid text is refused and native metrics sanitize nonfinite values...OK
+19/24 native_text_tests.test.Zig allocation failures release native layouts and preserve cached entries...OK
+20/24 native_text_tests.test.UTF-16 native ranges round at supplementary and UTF-8 code point boundaries...OK
+21/24 native_text_tests.test.installed families are discoverable and selecting one changes actual CoreText faces...OK
+22/24 native_renderer_tests.test.fractional Metal glyph coverage matches direct CoreText rasterization...OK
+23/24 native_renderer_tests.test.Metal preserves clipping painter order rounding and native glyph rendering...OK
+24/24 native_renderer_tests.test.renderer allocation failure unwinds native resource initialization...OK
+All 24 tests passed.
+
+RUN apps/zircon/tests/native_journey.zig
+1/44 native_journey.test_0...OK
+2/44 native_journey.test.native editor edits finds replaces splits saves and protects dirty close...OK
+3/44 native_journey.test.native search and palette typing refresh replacement ranges between keystrokes...OK
+4/44 native_journey.test.native Vim commands block insertion and switch native input with Insert and Visual modes...OK
+5/44 agent_tests.test.native agent workspace sends multiline text gates edits and restores project conversation history...OK
+6/44 workspace_polish_tests.test.all directional splits arrange the new pane in the requested direction and resize...OK
+7/44 workspace_polish_tests.test.sidebar can shrink to 120 pixels while Git retains its own width...OK
+8/44 workspace_polish_tests.test.system appearance updates fields and canvases while explicit themes ignore it...OK
+9/44 workspace_polish_tests.test.persisted shortcut overrides drive splits and menus show their effective binding...OK
+10/44 workspace_polish_tests.test.settings reject unsafe unknown and ambiguous shortcut configuration...OK
+11/44 workspace_polish_tests.test.split popover anchors to the clicked pane control and clamps inside a narrow window...OK
+12/44 workspace_polish_tests.test.Vim slash search uses the focused find field and returns to Normal...OK
+13/44 workspace_polish_tests.test.compact command palette preserves query height, source visibility and outside dismissal...OK
+14/44 workspace_polish_tests.test.opened nested source reveals only its project ancestors...OK
+15/44 workspace_polish_tests.test.breadcrumb returns focus to the pane that supplied its document...OK
+16/44 workspace_polish_tests.test.language install suggestions translate suffixes and exact filenames into catalog terms...OK
+17/44 workspace_polish_tests.test.small windows keep editor canvases above the status bar...OK
+18/44 workspace_polish_tests.test.narrow command palette gives long commands room and stays within the window...OK
+19/44 workspace_polish_tests.test.only the focused split paints the active line and focus moves with a click...OK
+20/44 experience_tests.test.completion identity includes server session and document URI...OK
+21/44 experience_tests.test.dragging reorders tabs and opens a different file in the split pane...OK
+22/44 experience_tests.test.Markdown preview shares the editable source revision and closes safely...OK
+23/44 experience_tests.test.installed server publishes diagnostics applies Unicode completion and stops on disable...OK
+24/44 experience_tests.test.native image viewer decodes a real file without creating a text document...OK
+25/44 experience_tests.test.Git panel stages unstages commits and shows unsaved gutters and inline blame...OK
+26/44 experience_tests.test.extension controls activate real themes icons and syntax...OK
+27/44 experience_tests.test.project search captures unsaved buffers and opens the real source selection...OK
+28/44 experience_tests.test.automatic blame waits for the current line and keeps source geometry unchanged...OK
+29/44 experience_tests.test.gutter click expands removed lines inline without changing buffer selection or dirty state...OK
+30/44 experience_tests.test.Git controls create branches stash changes and reload clean open documents...OK
+31/44 experience_tests.test.light Markdown code keeps theme colors indentation and long tokens inside a narrow preview...OK
+32/44 buffer_controls_tests.test.icon theme decodes filename-stem assets as well as extension assets...OK
+33/44 buffer_controls_tests.test.settings icon picker updates the project and tab immediately and persists the choice...OK
+34/44 buffer_controls_tests.test.inline buffer search navigates queued results and applies Unicode regex replacements with undo...OK
+35/44 buffer_controls_tests.test.icon tooltips wait then clamp to the window and disappear when the pointer leaves...OK
+36/44 buffer_controls_tests.test.gutter fold clicks hide source rows and buffer search reveals a match inside the fold...OK
+37/44 buffer_controls_tests.test.light buffer search stays inside a native narrow window with bordered inputs...OK
+38/44 settings_tests.test.settings update persists atomically retains unknown keys and refuses invalid values...OK
+39/44 settings_tests.test.nested settings sections collapse independently and gutter controls update the editor live...OK
+40/44 settings_tests.test.settings search scroll hit geometry and JSON editing persist real user changes...OK
+41/44 settings_tests.test.separate settings child changes shared editor appearance and closes independently...OK
+42/44 settings_tests.test.settings choice search filters independently and commits only with Enter...OK
+43/44 settings_tests.test.installed font identities and Vim bindings persist without borrowed settings bytes...OK
+44/44 settings_tests.test.opening Light settings styles search fields before reading the borrowed workspace...OK
+All 44 tests passed.
+
+RUN apps/zircon/tests/settings_native.zig
+1/1 settings_native.test.settings opens across a synchronous native workspace blur notification...OK
+All 1 tests passed.
+
+RUN apps/zircon/tests/clangd_journey.zig
+1/1 clangd_journey.test.real clangd completion replaces a prefix in the original editor document...OK
+All 1 tests passed.

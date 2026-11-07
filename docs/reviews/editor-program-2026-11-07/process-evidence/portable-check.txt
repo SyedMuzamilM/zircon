@@ -1,0 +1,40 @@
+    Finished `release` profile [optimized] target(s) in 0.42s
+Build Summary: 32/32 steps succeeded; 295/299 tests passed (4 skipped)
+check success
++- run test 12 pass (12 total) 4s MaxRSS:6M
+|  +- compile test debug native success 2s MaxRSS:262M
++- run test 11 pass (11 total) 632ms MaxRSS:4M
+|  +- compile test debug native success 2s MaxRSS:312M
++- run test 11 pass (11 total) 650ms MaxRSS:3M
+|  +- compile test debug native success 2s MaxRSS:262M
++- run test 6 pass (6 total) 1s MaxRSS:16M
+|  +- compile test debug native success 3s MaxRSS:313M
++- run test 3 pass (3 total) 718ms MaxRSS:15M
+|  +- compile test debug native success 2s MaxRSS:278M
++- run test 5 pass (5 total) 566ms MaxRSS:3M
+|  +- compile test debug native success 2s MaxRSS:277M
++- run test 6 pass (6 total) 777ms MaxRSS:3M
+|  +- compile test debug native success 2s MaxRSS:252M
++- contracts success
+|  +- compile test debug native success 261ms MaxRSS:102M
+|  |  +- options cached
+|  +- compile test debug native success 243ms MaxRSS:100M
+|  |  +- options (reused)
+|  +- compile test debug native success 243ms MaxRSS:103M
+|     +- options (reused)
++- run test 105 pass (105 total) 1s MaxRSS:28M
+|  +- compile test debug native success 4s MaxRSS:383M
+|     +- options (reused)
++- run test 16 pass (16 total) 5s MaxRSS:37M
+|  +- compile test debug native success 2s MaxRSS:251M
++- run test 12 pass (12 total) 625ms MaxRSS:3M
+|  +- compile test debug native success 2s MaxRSS:261M
++- run test 45 pass (45 total) 1s MaxRSS:13M
+|  +- compile test debug native success 2s MaxRSS:351M
+|     +- options (reused)
++- run test 63 pass, 4 skip (67 total) 9s MaxRSS:265M
+|  +- compile test debug native success 6s MaxRSS:733M
+|  |  +- options (reused)
+|  +- run cargo success 500ms
++- zig fmt --check success
+

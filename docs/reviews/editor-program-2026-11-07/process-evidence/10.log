@@ -1,0 +1,11 @@
+Sampling process 57713 for 1 second with 1 millisecond of run time between samples
+Sampling completed, processing symbols...
+Sample analysis of process 57713 written to file /tmp/zircon-worker-live-rss/10-57713.sample
+Sampling process 57710 for 1 second with 1 millisecond of run time between samples
+Sampling completed, processing symbols...
+Sample analysis of process 57710 written to file /tmp/zircon-worker-live-rss/10-57710.sample
+Wait state: status=Timeout; error=true; git_busy=false; syntax_waiting=false
+syntax pending=false revision=0
+LSP version=0 diagnostics=true
+editor grammar revision=null
+error: BackgroundTimeout
