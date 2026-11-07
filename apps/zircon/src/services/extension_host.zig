@@ -3,7 +3,7 @@ const std = @import("std");
 const ui = @import("zircon_ui");
 const Shell = @import("../shell.zig").Shell;
 const a = std.heap.page_allocator;
-pub const Stamp = struct { generation: u64 = 0, index: usize = 0, document: ?@import("zircon_workspace").DocumentId = null, revision: u64 = 0 };
+pub const Stamp = struct { generation: u64 = 0, epoch: u64 = 0, index: usize = 0, document: ?@import("zircon_workspace").DocumentId = null, revision: u64 = 0 };
 pub const SearchMatch = struct { start: usize, end: usize, replacement: []const u8 };
 pub const SearchResult = struct { matches: []const SearchMatch, truncated: bool };
 pub const Highlights = struct { spans: []const @import("zircon_editor").syntax.Span, bytes: usize };

@@ -6,11 +6,7 @@ const t = std.testing;
 const native = ui.testing.native;
 const objc = native.objc;
 test {
-    _ = @import("agent_tests.zig");
-    _ = @import("workspace_polish_tests.zig");
-    _ = @import("experience_tests.zig");
-    _ = @import("buffer_controls_tests.zig");
-    _ = @import("settings_tests.zig");
+    _ = @import("journeys.zig");
 }
 fn bytes(self: *const zircon.Shell, a: std.mem.Allocator, out: *[]u8) !void {
     const tab = self.tabs.items[self.active];

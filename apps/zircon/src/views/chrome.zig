@@ -124,9 +124,10 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
     try items.append(b.allocator(), try statusIcon(b, c, .project_search, "Project search", .search, self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search));
     var unhealthy = false;
     for (self.language.sessions.items) |session| {
+        if (session.retired) continue;
         if (session.resolving or session.client == null or !session.client.?.ready()) unhealthy = true;
     }
-    try items.append(b.allocator(), try b.button(.{ .label = "Language servers", .tooltip = "Language server status", .children = &.{ try v.icon(b, .language_server, c.muted, 14), try b.div(.{ .width = .{ .px = 5 }, .height = .{ .px = 5 }, .radius = 3, .background = if (self.language.sessions.items.len == 0) c.muted else if (unhealthy) c.warning else c.added }, &.{}) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.language_servers, Shell.onCommand), .style = .{ .direction = .row, .width = .{ .px = 26 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .gap = 1 } }));
+    try items.append(b.allocator(), try b.button(.{ .label = "Language servers", .tooltip = "Language server status", .children = &.{ try v.icon(b, .language_server, c.muted, 14), try b.div(.{ .width = .{ .px = 5 }, .height = .{ .px = 5 }, .radius = 3, .background = if (self.language.activeSessions() == 0) c.muted else if (unhealthy) c.warning else c.added }, &.{}) }, .on_click = try b.onClickWith(@import("../commands.zig").Command.language_servers, Shell.onCommand), .style = .{ .direction = .row, .width = .{ .px = 26 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .gap = 1 } }));
     var issues: usize = 0;
     for (self.language.documents.items) |doc| if (doc.diagnostics) |message| {
         issues += message.data.diagnostics.items.len;

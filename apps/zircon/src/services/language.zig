@@ -6,8 +6,8 @@ const lsp = @import("zircon_language");
 const text = @import("zircon_text");
 const ws = @import("zircon_workspace");
 const Shell = @import("../shell.zig").Shell;
-const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false };
-const SyntaxDocument = struct { id: ws.DocumentId, revision: ?u64 = null, observed: ?u64 = null, changed_at: f64 = 0, pending: bool = false };
+const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false, scope: ?ws.DocumentId = null, retired: bool = false, epoch: u64 = 0 };
+const SyntaxDocument = struct { id: ws.DocumentId, revision: ?u64 = null, observed: ?u64 = null, changed_at: f64 = 0, pending: bool = false, epoch: u64 = 0, scoped: bool = false };
 const host = @import("extension_host.zig");
 const Document = struct {
     id: ws.DocumentId,
@@ -28,6 +28,13 @@ pub const Model = struct {
     completions: ?lsp.Message = null,
     completion_index: usize = 0,
     pending: ?Pending = null,
+    pub fn activeSessions(self: *const Model) usize {
+        var count: usize = 0;
+        for (self.sessions.items) |session| if (!session.retired) {
+            count += 1;
+        };
+        return count;
+    }
     /// Request IDs are local to a server. Both its session and document URI
     /// participate in identity before a response can reach an editor.
     pub fn expects(self: *const Model, session: usize, uri: []const u8, request_id: u64, revision: u64) bool {
@@ -59,33 +66,89 @@ pub const Model = struct {
         self.* = .{ .generation = self.generation +% 1 };
     }
 };
+fn syntaxDocument(self: *Shell, id: ws.DocumentId) !usize {
+    for (self.language.syntax_documents.items, 0..) |doc, i| if (std.meta.eql(doc.id, id)) return i;
+    try self.language.syntax_documents.append(self.allocator, .{ .id = id });
+    return self.language.syntax_documents.items.len - 1;
+}
+fn retireUnused(self: *Shell, index: usize) void {
+    for (self.language.documents.items) |doc| if (doc.session == index) return;
+    const session = &self.language.sessions.items[index];
+    if (session.client) |client| client.deinit();
+    session.client = null;
+    session.resolving = false;
+    session.retired = true;
+}
+fn cancelCompletion(self: *Shell, id: ws.DocumentId) void {
+    if (self.language.pending) |pending| if (std.meta.eql(pending.document, id)) {
+        if (pending.session < self.language.sessions.items.len) if (self.language.sessions.items[pending.session].client) |client| client.cancel(pending.request) catch {};
+        self.language.clearCompletion();
+    };
+}
+fn closeDocument(self: *Shell, index: usize) !void {
+    const doc = &self.language.documents.items[index];
+    cancelCompletion(self, doc.id);
+    const session_index = doc.session;
+    if (self.language.sessions.items[session_index].client) |client| if (client.ready() and doc.version != null) try client.didClose(doc.uri);
+    if (doc.diagnostics) |*value| value.deinit();
+    self.allocator.free(doc.uri);
+    self.allocator.free(doc.path);
+    _ = self.language.documents.orderedRemove(index);
+    retireUnused(self, session_index);
+}
+/// A language rebind gets its own server session because late unversioned
+/// diagnostics cannot distinguish two languages opened at the same URI/version.
+/// Other documents retain their clients and diagnostics; retired slots keep
+/// resolver indices stable and are reused only with a new epoch.
+pub fn invalidateDocument(self: *Shell, id: ws.DocumentId) !void {
+    cancelCompletion(self, id);
+    const i = try syntaxDocument(self, id);
+    const tracked = &self.language.syntax_documents.items[i];
+    tracked.epoch = std.math.add(u64, tracked.epoch, 1) catch return error.LanguageEpochExhausted;
+    tracked.scoped = true;
+    tracked.revision = null;
+    tracked.observed = null;
+    tracked.pending = false;
+    var index: usize = 0;
+    while (index < self.language.documents.items.len) {
+        if (std.meta.eql(self.language.documents.items[index].id, id)) try closeDocument(self, index) else index += 1;
+    }
+}
 fn wake(_: ?*anyopaque) void {
     ui.App.wake();
 }
-fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const @import("zircon_extensions").Server) !usize {
-    for (self.language.sessions.items, 0..) |session, index| if (std.mem.eql(u8, session.id, server.id)) return index;
+fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const @import("zircon_extensions").Server, scope: ?ws.DocumentId) !usize {
+    for (self.language.sessions.items, 0..) |session, index| if (!session.retired and std.meta.eql(session.scope, scope) and std.mem.eql(u8, session.id, server.id)) return index;
     const id = try self.allocator.dupe(u8, server.id);
     errdefer self.allocator.free(id);
-    try self.language.sessions.ensureUnusedCapacity(self.allocator, 1);
+    var slot: ?usize = null;
+    for (self.language.sessions.items, 0..) |session, index| if (session.retired) {
+        slot = index;
+        break;
+    };
+    if (slot == null) try self.language.sessions.ensureUnusedCapacity(self.allocator, 1);
+    const index = slot orelse self.language.sessions.items.len;
+    const epoch = if (slot) |i| std.math.add(u64, self.language.sessions.items[i].epoch, 1) catch return error.LanguageEpochExhausted else 0;
+    var next: Session = .{ .id = id, .client = null, .scope = scope, .epoch = epoch };
     if (server.zed_wasm != null or std.mem.eql(u8, server.command, "@zircon-builtin")) {
         const root = self.extensions.?.home;
         const work = try std.fs.path.join(self.allocator, &.{ root, ".work", server.id });
         defer self.allocator.free(work);
-        const index = self.language.sessions.items.len;
         var settings_path: ?[]u8 = null;
         if (self.settings) |settings| try cx.read(settings, @import("../settings/model.zig").Settings.copyPath, .{ self.allocator, &settings_path });
         defer if (settings_path) |path| self.allocator.free(path);
         const argv: []const []const u8 = if (server.zed_wasm) |wasm| &.{ "resolve", wasm, server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" } else &.{ "resolve-builtin", server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" };
-        try host.start(self, cx, argv, null, .{ .generation = self.language.generation, .index = index }, resolved);
-        self.language.sessions.appendAssumeCapacity(.{ .id = id, .client = null, .resolving = true });
-        return index;
-    }
-    const client = lsp.Client.start(self.allocator, self.workspace.io, .{ .command = server.command, .args = server.args, .cwd = self.workspace.root_path, .wake = .{ .notify = wake } }) catch |err| blk: {
+        try host.start(self, cx, argv, null, .{ .generation = self.language.generation, .epoch = epoch, .index = index }, resolved);
+        next.resolving = true;
+    } else next.client = lsp.Client.start(self.allocator, self.workspace.io, .{ .command = server.command, .args = server.args, .cwd = self.workspace.root_path, .wake = .{ .notify = wake } }) catch |err| blk: {
         try self.reportError(err);
         break :blk null;
     };
-    self.language.sessions.appendAssumeCapacity(.{ .id = id, .client = client });
-    return self.language.sessions.items.len - 1;
+    if (slot) |i| {
+        self.allocator.free(self.language.sessions.items[i].id);
+        self.language.sessions.items[i] = next;
+    } else self.language.sessions.appendAssumeCapacity(next);
+    return index;
 }
 /// Reconciles the real open-document set before draining protocol messages.
 /// Full text is serialized only for didOpen or a newer document revision.
@@ -99,12 +162,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         const doc = &self.language.documents.items[i];
         const record = self.workspace.getConst(doc.id) catch null;
         if (record == null or record.?.path == null or !std.mem.eql(u8, doc.path, record.?.path.?)) {
-            const session = self.language.sessions.items[doc.session];
-            if (session.client) |client| if (client.ready() and doc.version != null) client.didClose(doc.uri) catch {};
-            if (doc.diagnostics) |*value| value.deinit();
-            self.allocator.free(doc.uri);
-            self.allocator.free(doc.path);
-            _ = self.language.documents.orderedRemove(i);
+            try closeDocument(self, i);
             changed = true;
             continue;
         }
@@ -127,7 +185,9 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             break;
         };
         const index = found orelse blk: {
-            const session = try sessionFor(self, cx, server);
+            const tracking = try syntaxDocument(self, tab.document);
+            const session = try sessionFor(self, cx, server, if (self.language.syntax_documents.items[tracking].scoped) tab.document else null);
+            errdefer retireUnused(self, session);
             const uri = try lsp.fileUri(self.allocator, path);
             errdefer self.allocator.free(uri);
             const owned_path = try self.allocator.dupe(u8, path);
@@ -150,7 +210,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         } else try client.didOpen(doc.uri, if (snapshot.languageForPath(self.languagePath(tab.document, path))) |language| language.lsp_id orelse language.id else language_id, source);
         doc.version = source.revision();
     }
-    for (self.language.sessions.items, 0..) |session, session_index| if (session.client) |client| {
+    for (self.language.sessions.items, 0..) |session, session_index| if (!session.retired) if (session.client) |client| {
         const messages = try client.drain(self.allocator);
         defer lsp.deinitMessages(self.allocator, messages);
         for (messages) |*raw| {
@@ -275,6 +335,7 @@ fn resolved(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void
     defer result.deinit();
     if (result.stamp.generation != self.language.generation or result.stamp.index >= self.language.sessions.items.len) return;
     const session = &self.language.sessions.items[result.stamp.index];
+    if (session.retired or session.epoch != result.stamp.epoch) return;
     session.resolving = false;
     if (!result.success) {
         try self.setStatus(try self.allocator.dupe(u8, result.stderr));
@@ -303,15 +364,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         const record = try self.workspace.getConst(tab.document);
         const language = snapshot.languageForPath(self.languagePath(tab.document, record.path orelse "")) orelse continue;
         const grammar = language.grammar orelse continue;
-        var index: ?usize = null;
-        for (self.language.syntax_documents.items, 0..) |entry, i| if (std.meta.eql(entry.id, tab.document)) {
-            index = i;
-            break;
-        };
-        const i = index orelse blk: {
-            try self.language.syntax_documents.append(self.allocator, .{ .id = tab.document });
-            break :blk self.language.syntax_documents.items.len - 1;
-        };
+        const i = try syntaxDocument(self, tab.document);
         const tracked = &self.language.syntax_documents.items[i];
         if (tracked.revision == record.doc.revision()) continue;
         if (tracked.observed != record.doc.revision()) {
@@ -328,7 +381,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (source.byteLen() > 8 * 1024 * 1024) continue;
         const bytes = try source.copy(self.allocator, .{ .start = 0, .end = source.byteLen() });
         defer self.allocator.free(bytes);
-        try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
+        try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
         self.language.syntax_jobs +%= 1;
         tracked.pending = true;
         tracked.revision = source.revision();
@@ -343,14 +396,16 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
     var result = box.take();
     defer result.deinit();
     if (result.stamp.generation != self.language.generation or result.stamp.index >= self.language.syntax_documents.items.len) return;
-    self.language.syntax_documents.items[result.stamp.index].pending = false;
+    const tracked = &self.language.syntax_documents.items[result.stamp.index];
+    const document = result.stamp.document orelse return;
+    if (!std.meta.eql(tracked.id, document) or tracked.epoch != result.stamp.epoch) return;
+    tracked.pending = false;
     if (!result.success) {
         try self.setStatus(try self.allocator.dupe(u8, result.stderr));
         self.status_is_error = true;
         cx.notify();
         return;
     }
-    const document = result.stamp.document orelse return;
     const record = self.workspace.getConst(document) catch return;
     if (record.doc.revision() != result.stamp.revision) {
         try pollSyntax(self, cx);

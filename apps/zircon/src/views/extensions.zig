@@ -53,7 +53,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             for (entry.languages) |language| try content.append(b.allocator(), try label(b, try std.fmt.allocPrint(b.allocator(), "{s} syntax highlighting", .{language.name}), c.muted, 12));
             for (entry.language_servers) |server| {
                 var status: []const u8 = "Starts when a matching file opens";
-                for (self.language.sessions.items) |session| if (std.mem.eql(u8, session.id, server.id)) {
+                for (self.language.sessions.items) |session| if (!session.retired and std.mem.eql(u8, session.id, server.id)) {
                     status = if (session.resolving) "Installing / starting…" else if (session.client) |client| switch (client.status()) {
                         .ready => "Running",
                         .starting => "Starting…",

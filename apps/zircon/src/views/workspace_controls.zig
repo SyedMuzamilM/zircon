@@ -38,6 +38,8 @@ pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choi
     const path = try self.allocator.dupe(u8, choice.path);
     errdefer self.allocator.free(path);
     const name = try self.allocator.dupe(u8, choice.name);
+    errdefer self.allocator.free(name);
+    try @import("../services/language.zig").invalidateDocument(self, current.id);
     for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, current.id)) {
         if (tab.language_path) |old| self.allocator.free(old);
         if (tab.language_name) |old| self.allocator.free(old);
@@ -46,6 +48,11 @@ pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choi
         @import("../services/extensions.zig").applyLanguage(self, &tab.editor, path);
         tab.editor.syntax_cache.clear();
         tab.editor.grammar_revision = null;
+        if (tab.secondary_state) |*state| {
+            @import("../services/extensions.zig").applyLanguage(self, state, path);
+            state.syntax_cache.clear();
+            state.grammar_revision = null;
+        }
         if (self.secondary) |*pane| if (std.meta.eql(pane.document, current.id)) {
             @import("../services/extensions.zig").applyLanguage(self, &pane.editor, path);
             pane.editor.syntax_cache.clear();
@@ -53,7 +60,6 @@ pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choi
         };
         break;
     };
-    self.language.deinit(self.allocator);
     self.popup = .none;
     self.editor_focus_request +%= 1;
     cx.notify();
@@ -132,11 +138,12 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     } else if (self.popup == .servers) {
         height = 12 + 22;
         try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 20 }, .flex_shrink = 0, .align_items = .center, .padding = .{ .left = 4 } }, &.{try v.text(b, std.fs.path.basename(self.workspace.root_path), c.muted, 12)}));
-        if (self.language.sessions.items.len == 0) {
+        if (self.language.activeSessions() == 0) {
             try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .padding = .{ .left = 8 } }, &.{try v.text(b, if (self.language_stopped) "Language servers stopped" else "No language servers running", c.muted, 12)}));
             height += 24;
         }
         for (self.language.sessions.items) |session| {
+            if (session.retired) continue;
             const status: []const u8 = if (session.resolving) "Starting" else if (session.client) |client| (if (client.ready()) "Running" else "Initializing") else "Failed";
             try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 8, .right = 8 }, .overflow = .hidden }, &.{ try b.div(.{ .width = .{ .px = 6 }, .height = .{ .px = 6 }, .radius = 3, .background = if (std.mem.eql(u8, status, "Running")) c.added else c.warning }, &.{}), try v.text(b, session.id, c.text, 13), try b.div(.{ .flex_grow = 1 }, &.{}), try v.text(b, status, c.muted, 11) }));
             height += 24;
