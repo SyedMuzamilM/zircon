@@ -1,6 +1,8 @@
 # Editor, framework and platform delivery
 
-Started 2026-11-07. This program implements the [source-backed recommendations](../research/zed-gpui-actions-2026-11-07.md), a smaller documented UI syntax, and native Linux and Windows support. The [editor checklist](../editor-todo.md) remains the task-status record. Decisions and evidence are recorded in [the decision log](../progress/editor-platform-decisions.tsv).
+Started 2026-11-07. New implementation code is Zig. Native libraries may be called through Zig bindings. The expanded scope includes native and library menus, application/window icons, and a GPUI-style fluent styling API with documented examples. GPU rendering is required on the new desktop backends.
+
+This program implements the [source-backed recommendations](../research/zed-gpui-actions-2026-11-07.md), a smaller documented UI syntax, and native Linux and Windows support. The [editor checklist](../editor-todo.md) remains the task-status record. Decisions and evidence are recorded in [the decision log](../progress/editor-platform-decisions.tsv).
 
 ## Definition of done
 
@@ -14,7 +16,8 @@ There is no self-assigned quality score. Each area passes demonstrated behavior 
 | Input | Grapheme movement/deletion, clipboard, native IME, keyboard layouts, Vim and terminal focus preserve text and history. |
 | Performance | Equivalent release workloads demonstrate bounded foreground work, latest-result freshness, process lifecycle and resource behavior. No comparative speed claim without a controlled Zed run. |
 | Framework API | Shorter caller syntax preserves const rendering, generational ownership, safe callbacks, snapshots, layout validation and failed-frame rollback. Examples compile and document the supported contract. |
-| Interaction/accessibility | Context shortcuts, lists, menus, dialogs and primary workflows have keyboard focus and real platform accessibility semantics. Failed frames retain the previous semantic tree. |
+| Interaction/accessibility | Native application menus, library menus, context shortcuts, lists, dialogs and primary workflows have keyboard focus and real platform accessibility semantics. Failed frames retain the previous semantic tree. |
+| App integration | Application/window icons have explicit ownership and platform packaging. Native menu actions and shortcuts reach the same typed commands as in-window controls. |
 | Coding workflow | Project search/replace, file operations, build/test output navigation, hunk staging and conflict handling operate on the right buffer/disk/index identities. |
 | Platforms | Native macOS, Linux and Windows windows render real text/scenes, accept native input, run the event loop and workers, support clipboard/dialogs and package required resources. Platform-specific verification records unsupported behavior explicitly. |
 | Documentation/distribution | Public APIs, examples, platform requirements, feature limits, recovery policy and reproducible checks match the implementation. Packaged editor launches from a clean supported setup. |
@@ -46,6 +49,6 @@ Starting commit is `560dc2a9d9111012ebfa93fb2243515ac5339753`, plus pre-existing
 
 TEXT-05 [application recovery](../progress/2026-11-07-recovery-integration.md) is delivered in `c4ce46e`. The [compact UI syntax](ui-syntax.md) adds eager tuple composition and typed callback inference with compiled documentation. Independent design/review readers inherit the session model; model diversity is reduced and the unconfigured different-family arena judge is omitted. Passing tests do not substitute for required independent implementation review.
 
-Shared document changes now transfer their owned mappings into bounded Shell history without a post-commit allocation. [Negotiated LSP synchronization](../progress/2026-11-07-lsp-incremental.md) handles exact UTF-16 insertions, deletions, replacements and disjoint batches, with retained-snapshot resynchronization after missing history or undo. Language, Git and recovery still need broader event consumption and some edit origins need migration. Linux and Windows portable target compilation passes. Native backend execution and packaging remain open. The local Linux Docker daemon is available; Windows native execution is not yet established.
+Shared document changes now transfer their owned mappings into bounded Shell history without a post-commit allocation. [Negotiated LSP synchronization](../progress/2026-11-07-lsp-incremental.md) handles exact UTF-16 insertions, deletions, replacements and disjoint batches, with retained-snapshot resynchronization after missing history or undo. Language, Git and recovery still need broader event consumption and some edit origins need migration. Linux and Windows portable target compilation passes. The uncommitted C/Cairo native prototype was removed after the user required Zig-only implementation and GPU scene rendering. Native backend execution and packaging remain open. The local Linux Docker daemon is available; Windows native execution is not yet established.
 
 Later slices retain their original checklist status until their acceptance gate passes. Linux and Windows execution availability must be established before claiming those platforms verified.

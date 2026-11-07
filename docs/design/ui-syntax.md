@@ -43,3 +43,10 @@ The application migrated to callback-first payload inference. The two counters, 
 Entity results and callback payloads now share one recursive copied-value guard. Compile-fail fixtures reject pointers hidden in error-union fields as well as direct pointers. The nested entity-result fixture compiled before the fix, reproducing an escape from the documented contract; it now fails with the expected ownership diagnostic.
 
 Final validation passed all 42 check steps, 112 framework checks, all 117 fresh native checks, all five recovery subprocess cases and all 14 Linux portable compilation steps. Some unaffected suites were cached. Independent source review accepted the core ownership/callback design after fixes for stack allocation and array-to-slice recursion; lexical migration findings have dedicated tests. [Preserved logs](../reviews/editor-program-2026-11-07/ui-composition-evidence/README.md) record the verification scope.
+
+
+## Requested fluent styling
+
+The next API design must provide GPUI-style fluent composition and Tailwind-like typed style methods. The current eager tuple syntax remains implemented. A fluent design is not implemented yet.
+
+Acceptance requires real editor examples for containers, text, buttons, listeners, menus and icons. Compare call-site size and readability while preserving const render, frame lifetimes, fallible composition, pointer-free callback payloads and failed-frame rollback. Prefer typed methods over runtime class-string parsing. Document the spacing scale, pixel units, conditional styles, theme tokens and precedence. Avoid keeping two unrelated style systems.

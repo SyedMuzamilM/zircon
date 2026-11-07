@@ -284,6 +284,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **PLATFORM-02: Native Linux and Windows adapters.**
   Depends: PLATFORM-01 readiness, TEXT-02/03/06, UX-05/06, DEV-01. Scope: window/render/input/clipboard/IME/accessibility/filesystem/process/distribution per OS. Done: actual supported desktop journeys pass on each declared OS; portable compilation remains separately labeled; resource recovery and platform limitations are documented.
+  Constraint: new implementation is Zig, with native libraries allowed through Zig bindings. GPU rendering is required. The discarded C/Cairo prototype does not count as delivered support. Vulkan/platform research is in progress.
   Progress: [platform plan](design/native-platforms.md) selects SDL3 for the first shared window/event backend while preserving macOS. Linux and Windows target compilation now pass 14/14 steps each. Native execution, text-system parity, PTY transport, dialogs, accessibility and packaging remain open.
 
 - [ ] **PLATFORM-03: Full bidi and broader encoding behavior.**
@@ -342,3 +343,10 @@ Append a dated note when claiming or completing work. Use task IDs so ownership 
 | 2026-11-07 | BASE-03 | Done, controlled local baseline | [Complete 40-case batch](benchmarks/editor-2026-11-07-isolated-spawn/README.md), `0b73351` process fix | Real-server cost and long sessions remain PERF-06/QA-02; earlier failures retained. |
 
 | 2026-11-07 | LANG-02/08 lifecycle correction | Delivered, broader IDs remain open | `e08fdc5`, `1f8f99e`; [native lifecycle evidence](reviews/editor-program-2026-11-07/language-evidence/README.md) | General diagnostic freshness, asynchronous shutdown, persistent grammar workers and recovery remain open. |
+
+
+## Additional framework requirements from 2026-11-07
+
+- [ ] Native application menu bar and library menus share typed actions, shortcuts, enabled/checked state, focus, teardown and platform ownership. Integrate the editor's File, Edit, View, Window and Help actions where supported.
+- [ ] Application and window icons support owned image assets and correct native/distribution resources on macOS, Linux and Windows.
+- [ ] A documented GPUI-style fluent API provides typed Tailwind-like styling while retaining the eager frame lifetime and rollback guarantees. Verify against real editor views and compiling examples.

@@ -6,13 +6,19 @@ The editor currently has a macOS AppKit, CoreText and Metal backend. Portable Li
 
 The pinned GPUI source at commit `b5cd310b3b54dfc659fcc06453e6358843dfe216` selects separate macOS, Windows and Linux platform crates. The Windows path uses D3D11, DirectWrite, `WM_CHAR` and `WM_IME_*`. The Linux path has separate Wayland and X11 behavior and uses WGPU plus Cosmic Text. Zircon should keep this separation at the platform boundary, while keeping its smaller typed frame API and explicit staging rollback.
 
-## First backend choice
+## Current implementation constraints
 
-Use SDL3 for the first Linux and Windows window/event backend. It supplies real X11, Wayland and Win32 windows, clipboard, UTF-8 text and composition events, IME-area updates, resize/DPI events, parent windows, dialogs, renderer reset events, and a thread-safe custom-event wake path. Pin SDL, SDL_ttf and SDL_image source revisions in the build and ship their zlib notices.
+The user requires new implementation source to be Zig. Zig bindings may call native Vulkan, windowing and font libraries. No authored C or C++ wrappers are accepted. New GPU rendering must issue GPU commands, rather than rasterizing the entire scene on the CPU and uploading one image.
 
-Keep the current macOS backend. SDL is a smaller way to bring up both new desktop targets, but it does not solve the whole platform task. SDL_ttf does not expose all OpenType features and cannot establish exact ligature caret behavior or the existing ligatures setting. The text system must share shaped clusters between measurement, drawing and hit testing. A complete backend should use shared HarfBuzz and FreeType shaping, with Fontconfig fallback on Linux and DirectWrite discovery on Windows, or document SDL_ttf as a limited preview mode.
+Keep the current macOS Metal/CoreText backend. Evaluate Vulkan for Linux and Windows against Zed's actual platform choices. Zed uses WGPU on Linux and a separate DirectX renderer on Windows at the pinned revision. Using the same rendering architecture does not require selecting the same API on every platform.
 
-The backend seam remains:
+The uncommitted SDL/Pango/Cairo prototype was removed after this requirement. Its Linux Xvfb tests demonstrated native window, shaping, caret, clipboard and event behavior, but that code is not part of the implementation. Those results do not establish current Linux or Windows support. The earlier SDL debug-font draft was also discarded.
+
+SDL3 remains a possible window/event library through Zig declarations. It must not own the scene rasterizer. Native text libraries may shape and rasterize glyphs into a GPU atlas, while the GPU draws the text quads. Measurement, hit testing and drawing must share the same shaped cluster positions and font generation. SDL_ttf's feature limits still prevent promising the existing ligature setting through that API alone.
+
+The Vulkan evaluation must establish Zig 0.17.1 bindings, loader/surface creation, swapchain rebuilds, synchronization, uploads, atlas lifetime, clipping, images and premultiplied alpha, device loss, DPI and packaging. Shader generation is part of the Zig-only design decision. Do not introduce authored GLSL, HLSL or WGSL files without resolving that constraint.
+
+The platform seam remains:
 
 ```zig
 open(allocator, WindowOptions, Sink) !Surface
@@ -21,9 +27,18 @@ wake() void
 now() f64
 ```
 
-`Surface.measurer()` and `Surface.present()` must use the same text cache and display-scale generation. A native path must draw all current scene primitives, preserve clip order and premultiplied image alpha, and map logical coordinates consistently into rendering, hit testing and IME rectangles.
+CPU frame commit still follows successful validation and GPU submission staging. Renderer resets and failed presentation must schedule bounded retries without replacing the committed handlers or sleeping forever. Native dialog callbacks require an owned request/result inbox with a window generation, delivered through the application wake path.
 
-SDL dialogs are asynchronous. Their callback can run on another thread, so they cannot be implemented by nested event dispatch while a Shell borrow is active. Add an owned request/result inbox with a window generation and deliver it through `App.wake`, like worker completions.
+## Findings retained from the discarded prototype
+
+- Pango's signed 32-bit coordinates use 1/1024-pixel units. Very long unwrapped lines can overflow even below a 1 MiB text limit. Bound or segment geometry before publication.
+- Fontconfig application fonts require an explicit per-map configuration. Adding temporary fonts through the process-global configuration can poison later maps after the files disappear.
+- Color glyphs can ignore solid-source alpha. GPU color-glyph sampling must multiply inherited opacity, just like images and monochrome text.
+- Image sampling must clamp at texture edges. Transparent border sampling changes both opacity and edge colors.
+- A bounded event drain must stop before polling the next event, including ignored-event paths.
+- A device-reset event must invalidate idle windows. A retry needs a deadline that affects the native wait.
+
+These are requirements for the replacement, not evidence that it has been implemented.
 
 ## Platform work outside the window
 
@@ -44,4 +59,4 @@ Then add PTY transport, dialogs, file paths, IME, accessibility and packaging. C
 
 ## Current evidence
 
-`./tools/zig build test-build -Dtarget=x86_64-linux-gnu` passes 14/14 portable compilation steps. `./tools/zig build test-build -Dtarget=x86_64-windows-gnu` now also passes 14/14 after replacing POSIX-only permission constructors with platform-aware values. No Linux or Windows native window journey has run. Docker Desktop currently provides a running Linux/aarch64 daemon. An earlier session observed it stopped; that observation is superseded. No Windows execution environment is linked.
+`./tools/zig build test-build -Dtarget=x86_64-linux-gnu` passes 14/14 portable compilation steps. `./tools/zig build test-build -Dtarget=x86_64-windows-gnu` now also passes 14/14 after replacing POSIX-only permission constructors with platform-aware values. No retained Linux or Windows backend has passed a native window journey. The discarded C/Cairo prototype passed Linux checks before removal and does not count as current support. Docker Desktop currently provides a running Linux/aarch64 daemon. An earlier session observed it stopped; that observation is superseded. No Windows execution environment is linked.
