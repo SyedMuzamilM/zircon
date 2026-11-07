@@ -1,0 +1,19 @@
+    Finished `release` profile [optimized] target(s) in 0.40s
+test-app
++- run test 66 pass, 4 skip, 1 fail (71 total)
+error: 'language_lifecycle_tests.test.language picker preserves unrelated clients and isolates same revision secondary rebinding' failed:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:584:14: 0x1050af1c7 in expect (test)
+           if (!ok) return error.TestUnexpectedResult;
+                    ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/language_lifecycle_tests.zig:155:33: 0x1051254ab in test.language picker preserves unrelated clients and isolates same revision secondary rebinding (test)
+               if (item.kind == .text) try t.expect(std.mem.indexOf(u8, item.text, "fixture · Unavailable") == null);
+                                       ^
+failed command: ./.zig-cache/o/d4486f6cc2b15549ae0a6b1b207fad7c/test --cache-dir=./.zig-cache --seed=0xa59ebc34 --listen=-
+
+Build Summary: 3/5 steps succeeded (1 failed); 66/71 tests passed (4 skipped, 1 failed)
+test-app transitive failure
++- run test 66 pass, 4 skip, 1 fail (71 total)
+   +- compile test debug native success 5s MaxRSS:737M
+   |  +- options cached
+   +- run cargo success 473ms
+

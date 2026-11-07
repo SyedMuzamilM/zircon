@@ -1,4 +1,4 @@
-//! Bounded subprocess output and time, shared by native setup hooks.
+//! Resolver directory ownership and bounded subprocess output for setup hooks.
 use anyhow::{bail, Result};
 use std::{
     fs::{self, File, OpenOptions},

@@ -1,0 +1,12 @@
+{
+  "attempts": 40,
+  "passed": 40,
+  "failures": 0,
+  "input_events": 800,
+  "source_bytes_restored": true,
+  "disk_unchanged": true,
+  "effective_wrapping_verified": true,
+  "current_diagnostics_and_grammar_required": true,
+  "current_git_gutter_revision_and_no_pending_refresh_required_by_driver": true,
+  "driver_and_worker_hashes_unchanged": true
+}

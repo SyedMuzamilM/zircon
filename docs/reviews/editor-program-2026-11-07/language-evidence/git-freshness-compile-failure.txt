@@ -1,0 +1,19 @@
+build-bench-editor
++- install zircon-editor-bench
+   +- compile exe zircon-editor-bench fast native 1 errors
+tools/bench_editor.zig:62:45: error: comparison of 'u64' with null
+                if (tab.editor.git_revision == null or tab.editor.git_revision.? != record.doc.revision()) return false;
+                    ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~
+referenced by:
+    read__func_153: packages/zircon_ui/src/app/app.zig:296:16
+    settle: tools/bench_editor.zig:109:62
+    5 reference(s) hidden; use '-freference-trace=7' to see all references
+error: 1 compilation errors
+failed command: /Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig build-exe -Ofast --dep zircon --dep zircon_ui --dep zircon_git -Mroot=tools/bench_editor.zig -Ofast --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep zircon_editor --dep zircon_git --dep zircon_extensions --dep zircon_search --dep zircon_language --dep zircon_markdown --dep zircon_agent -Mzircon=apps/zircon/src/root.zig -lobjc -Ofast --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Ofast -Mzircon_git=packages/zircon_git/src/root.zig -Ofast -Mzircon_text=packages/zircon_text/src/root.zig -Ofast --dep zircon_text -Mzircon_workspace=packages/zircon_workspace/src/root.zig -Ofast --dep zircon_text --dep zircon_ui -Mzircon_editor=packages/zircon_editor/src/root.zig -Ofast --dep oxide_manifest -Mzircon_extensions=packages/zircon_extensions/src/root.zig -Ofast --dep zircon_text -Mzircon_search=packages/zircon_search/src/root.zig -Ofast --dep zircon_text -Mzircon_language=packages/zircon_language/src/root.zig -Ofast -Mzircon_markdown=packages/zircon_markdown/src/root.zig -Ofast -Mzircon_agent=packages/zircon_agent/src/root.zig -Mzircon_options=.zig-cache/o/dc3b23fa10286225dcdbf86921d27d00/options.zig -Moxide_manifest=packages/zircon_extensions/examples/oxide/extension.json -framework AppKit -framework Metal -framework QuartzCore -framework CoreText -framework CoreGraphics -framework ImageIO -framework CoreFoundation -framework Foundation -lc --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name zircon-editor-bench --zig-lib-dir .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/ --listen=-
+
+Build Summary: 1/4 steps succeeded (1 failed)
+build-bench-editor transitive failure
++- install zircon-editor-bench transitive failure
+   +- compile exe zircon-editor-bench fast native 1 errors
+      +- options cached
+

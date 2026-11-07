@@ -1,0 +1,28 @@
+{
+  "profiled": false,
+  "cases": [
+    {
+      "source_bytes": 32768,
+      "wrap": true,
+      "services": true,
+      "runs": 1,
+      "p95_submit_median_ms": 1.3767499767709523,
+      "p95_submit_range_ms": [
+        1.3767499767709523,
+        1.3767499767709523
+      ],
+      "dispatch_p95_median_ms": 0.3164999943692237,
+      "step_p95_median_ms": 1.0802919859997928,
+      "sampled_tree_peak_median_kib": 118560,
+      "raw_cases": [
+        "32768-wrap-services-1"
+      ]
+    }
+  ],
+  "failures": [],
+  "load_end": [
+    3.82275390625,
+    4.35791015625,
+    4.001953125
+  ]
+}

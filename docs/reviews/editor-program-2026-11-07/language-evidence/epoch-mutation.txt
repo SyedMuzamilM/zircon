@@ -1,0 +1,521 @@
+    Finished `release` profile [optimized] target(s) in 0.54s
+test-app
++- run test 53 pass, 4 skip, 2 fail, 11 crash (70 total)
+error: 'language_lifecycle_tests.test.same revision language changes reject delayed grammar failures and highlights' failed:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:584:14: 0x102a2712b in expect (test)
+           if (!ok) return error.TestUnexpectedResult;
+                    ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/language_lifecycle_tests.zig:246:5: 0x102b1e3b3 in test.same revision language changes reject delayed grammar failures and highlights (test)
+           try t.expect(try app.read(owner, GrammarOps.pending, .{}));
+           ^
+error: 'language_lifecycle_tests.test.retired resolver callbacks cannot restart reused slots or strand another document' failed:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:584:14: 0x102a2712b in expect (test)
+           if (!ok) return error.TestUnexpectedResult;
+                    ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/language_lifecycle_tests.zig:323:5: 0x102b18e13 in test.retired resolver callbacks cannot restart reused slots or strand another document (test)
+           try t.expect(try app.read(owner, ResolverOps.pending, .{}));
+           ^
+error: 'workspace_polish_tests.test.opened nested source reveals only its project ancestors' terminated with signal ABRT with stderr:
+       thread 7763157 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x102617333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x1026339db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x102620073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x10263a7b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1026398af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1026399f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x10263923f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x1026376bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x102a24f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/workspace_polish_tests.zig:230:23: 0x102adea23 in test.opened nested source reveals only its project ancestors (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x10266191f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x102661f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x10265fe77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'workspace_polish_tests.test.terminal tabs survive hiding and docking is persisted' terminated with signal ABRT with stderr:
+       thread 7765445 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1003cb333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x1003e79db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1003d4073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1003ee7b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1003ed8af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1003ed9f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x1003ed23f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x1003eb6bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x1007d8f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/workspace_polish_tests.zig:464:23: 0x1008876a7 in test.terminal tabs survive hiding and docking is persisted (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x10041591f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x100415f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x100413e77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'workspace_polish_tests.test.recent-project menu loads persisted paths and layout selection preserves tabs and terminal sessions' terminated with signal ABRT with stderr:
+       thread 7766789 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x102297333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x1022b39db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1022a0073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1022ba7b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1022b98af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1022b99f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x1022b923f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x1022b76bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x1026a4f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/workspace_polish_tests.zig:634:23: 0x10274ec53 in test.recent-project menu loads persisted paths and layout selection preserves tabs and terminal sessions (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x1022e191f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x1022e1f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x1022dfe77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.dragging reorders tabs and opens a different file in the split pane' terminated with signal ABRT with stderr:
+       thread 7767126 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x100a7f333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x100a9b9db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x100a88073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x100aa27b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x100aa18af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x100aa19f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x100aa123f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x100a9f6bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x100e8cf13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:195:23: 0x100f2f7f3 in test.dragging reorders tabs and opens a different file in the split pane (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x100ac991f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x100ac9f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x100ac7e77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.Markdown preview shares the editable source revision and closes safely' terminated with signal ABRT with stderr:
+       thread 7767390 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1029d3333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x1029ef9db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1029dc073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1029f67b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1029f58af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1029f59f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x1029f523f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x1029f36bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x102de0f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:242:23: 0x102e807a7 in test.Markdown preview shares the editable source revision and closes safely (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x102a1d91f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x102a1df2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x102a1be77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.installed server publishes diagnostics applies Unicode completion and stops on disable' terminated with signal ABRT with stderr:
+       thread 7767416 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x10507f333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x10509b9db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x105088073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1050a27b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1050a18af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1050a19f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x1050a123f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x10509f6bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x10548cf13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:275:23: 0x10552548f in test.installed server publishes diagnostics applies Unicode completion and stops on disable (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x1050c991f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x1050c9f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x1050c7e77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.Git panel stages unstages commits and shows unsaved gutters and inline blame' terminated with signal ABRT with stderr:
+       thread 7767436 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x100d8b333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x100da79db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x100d94073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x100dae7b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x100dad8af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x100dad9f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x100dad23f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x100dab6bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x101198f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:370:23: 0x101229127 in test.Git panel stages unstages commits and shows unsaved gutters and inline blame (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x100dd591f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x100dd5f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x100dd3e77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.extension controls activate real themes icons and syntax' terminated with signal ABRT with stderr:
+       thread 7767456 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1045e3333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x1045ff9db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1045ec073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1046067b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1046058af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1046059f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x10460523f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x1046036bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x1049f0f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:534:23: 0x104a7efe7 in test.extension controls activate real themes icons and syntax (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x10462d91f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x10462df2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x10462be77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.project search captures unsaved buffers and opens the real source selection' terminated with signal ABRT with stderr:
+       thread 7767472 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1007ff333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x10081b9db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x100808073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1008227b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1008218af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1008219f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x10082123f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x10081f6bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x100c0cf13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:566:23: 0x100c98d23 in test.project search captures unsaved buffers and opens the real source selection (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x10084991f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x100849f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x100847e77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.automatic blame waits for the current line and keeps source geometry unchanged' terminated with signal ABRT with stderr:
+       thread 7767501 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x104d0b333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x104d279db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x104d14073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x104d2e7b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x104d2d8af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x104d2d9f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x104d2d23f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x104d2b6bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x105118f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:623:23: 0x1051a2377 in test.automatic blame waits for the current line and keeps source geometry unchanged (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x104d5591f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x104d55f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x104d53e77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+error: 'experience_tests.test.gutter click expands removed lines inline without changing buffer selection or dirty state' terminated with signal ABRT with stderr:
+       thread 7767544 panic: unable to make tmp dir for testing: unable to make and open the tmp dir
+       error return context:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x100597333 in fail__func_623 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:5512:23: 0x1005b39db in dirOpenDirPosix (test)
+                   .NOENT => return syscall.fail(error.FileNotFound),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:1481:9: 0x1005a0073 in fail__func_693 (test)
+               return err;
+               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3416:23: 0x1005ba7b3 in dirCreateDirPosix (test)
+                   .NOSPC => return syscall.fail(error.NoSpaceLeft),
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3593:25: 0x1005b98af in dirCreateDirPath (test)
+                   else => |e| return e,
+                               ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:855:5: 0x1005b99f7 in createDirPathStatus (test)
+           return io.vtable.dirCreateDirPath(io.userdata, dir, sub_path, permissions);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Threaded.zig:3616:17: 0x1005b923f in dirCreateDirPathOpenPosix (test)
+                   _ = try dir.createDirPathStatus(t_io, sub_path, permissions);
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/Io/Dir.zig:874:5: 0x1005b76bf in createDirPathOpen (test)
+           return io.vtable.dirCreateDirPathOpen(io.userdata, dir, sub_path, options.permissions, options.open_options);
+           ^
+       
+       stack trace:
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:620:9: 0x1009a4f13 in tmpDir (test)
+               @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/experience_tests.zig:693:23: 0x100a2c327 in test.gutter click expands removed lines inline without changing buffer selection or dirty state (test)
+           var tmp = t.tmpDir(.{});
+                             ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:143:68: 0x1005e191f in mainServer (test)
+                       const status: TestResults.Status = if (test_fn.func()) |v| s: {
+                                                                          ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/compiler/test_runner.zig:72:26: 0x1005e1f2b in main (test)
+               return mainServer(init) catch |err| panic("internal test runner failure: {t}", .{err});
+                                ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/start.zig:789:88: 0x1005dfe77 in callMain (test)
+           if (fn_info.param_types[0].? == std.process.Init.Minimal) return wrapMain(root.main(.{
+                                                                                              ^
+       ???:?:?: 0x19fd4fe7f in start (/usr/lib/dyld)
+failed command: ./.zig-cache/o/6088b514196af8a406fb49a75649ef0c/test --cache-dir=./.zig-cache --seed=0xc01a5892 --listen=-
+
+Build Summary: 3/5 steps succeeded (1 failed); 53/70 tests passed (4 skipped, 2 failed, 11 crashed)
+test-app transitive failure
++- run test 53 pass, 4 skip, 2 fail, 11 crash (70 total)
+   +- compile test debug native success 6s MaxRSS:730M
+   |  +- options cached
+   +- run cargo success 616ms
+

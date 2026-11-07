@@ -1,0 +1,13 @@
+   Compiling zircon-extension-host v0.1.0 (/Users/syedmuzamilm/work/expirements/zigpui/tools/zed-extension-host)
+    Finished `release` profile [optimized] target(s) in 2.18s
+     Running unittests src/main.rs (tools/zed-extension-host/target/release/deps/zircon_extension_host-d8d76389486aa0fe)
+
+running 5 tests
+test catalog::tests::packages_cannot_escape_their_managed_directory ... ok
+test languages::tests::suffix_search_finds_common_language_providers ... ok
+test process::tests::resolver_installation_has_one_writer_per_directory ... ok
+test search::tests::unicode_whole_words_and_captures ... ok
+test languages::tests::every_bundled_grammar_executes_its_real_highlight_query ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+

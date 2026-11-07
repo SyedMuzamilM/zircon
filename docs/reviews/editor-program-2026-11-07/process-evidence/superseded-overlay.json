@@ -1,0 +1,6 @@
+{
+  "patch": "darwin-spawn-cloexec-default-v1",
+  "source_library": "/Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/lib",
+  "source_sha256": "7d783807ef7ebd04c422995c1611094d57f682c5a4ec86cf40731854dae7b4d4",
+  "patched_sha256": "112699df3bd7ff689dc81a3bbd395a6259992a7bea36e5d51364e4bfb25cc76a"
+}

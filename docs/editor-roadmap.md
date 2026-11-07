@@ -2,7 +2,7 @@
 
 Updated 2026-11-07. This roadmap turns the [Zed comparison audit](research/zircon-vs-zed-audit-2026-11-06.md) into scheduled work. The [editor checklist](editor-todo.md) is the source of truth for task status, ownership and acceptance. The original [framework plan](implementation-plan.md) remains the framework reference.
 
-BASE-01, BASE-02 and the native-test routing correction in TEXT-01 are complete. See the [November 7 progress record](progress/2026-11-07-baseline.md) for current evidence and remaining EXT acceptance. BASE-03 now has a [complete40-case release baseline](benchmarks/editor-2026-11-07-isolated-spawn/README.md). The captured grammar timeout was caused by inherited pipe handles and fixed by Darwin child isolation; the earlier failed batch remains evidence. TEXT-05 recovery remains the next feature slice, with the newly verified language-picker session-lifecycle defect handled as an immediate correctness correction.
+BASE-01, BASE-02 and the native-test routing correction in TEXT-01 are complete. See the [November 7 progress record](progress/2026-11-07-baseline.md) for current evidence and remaining EXT acceptance. BASE-03 now has a [complete 40-case release baseline](benchmarks/editor-2026-11-07-lifecycle-current-git/README.md). The captured grammar timeout was caused by inherited pipe handles and fixed by Darwin child isolation; the earlier failed batch remains evidence. TEXT-05 recovery remains the next feature slice, with the newly verified language-picker session-lifecycle defect handled as an immediate correctness correction.
 
 ## Target
 

@@ -1,0 +1,15 @@
+{
+  "apps/zircon/src/services/language.zig": "ab09a80f033d7bbc4a46642241cecce80e1ce799746b9b37531252d1cab70e65",
+  "apps/zircon/src/services/extension_host.zig": "ef75946d94a0ee5f1955237eb0f6042aa5229a5fc065d67693fe3da52cbe8a2c",
+  "apps/zircon/src/views/workspace_controls.zig": "c35ea9d9e7f3787c0a322028404eccd8cabd80cd544c2983d6d177409080029e",
+  "apps/zircon/src/views/chrome.zig": "fe087b1c289e60fe3d80a6182be44a584f1e17e0268f180a6884f4e6f6801d70",
+  "apps/zircon/src/views/extensions.zig": "a80dbd5e942234ee0380a591cf84f385e0298484bd960e3b0cb163fb1f839d87",
+  "apps/zircon/tests/language_lifecycle_tests.zig": "aa7cfa96f50128eda68d07cddb3af5b4296548303b3844ba7159ac7ae3da95b5",
+  "apps/zircon/tests/journeys.zig": "2317477b3248d8c797097c57f929412ed10e9523269c30a10d45fbd4a5a77794",
+  "tools/zed-extension-host/src/process.rs": "868c67957b62122f77d6c7a95293c2cdd615106b843b781f64956b8579db7d6e",
+  "tools/zig": "6a832ba332fe0c6098178af19d2042d16ba43da6671e82d9684728fb87ef5e40",
+  "tools/bench_editor.zig": "cea70f81fef9599494464e32b62f4e14a64294e43fd6be6b3841abf26d72733b",
+  "zig-out/bin/zircon": "14aaccca420da6621d1140a95a1be5e49ab14ef806dd8f4279fc24bb483ff452",
+  "zig-out/bin/zircon-extension-host": "d0514b7070eef3a70d4bce70549f6b316a2ec737788166a97c25475c63ae8539",
+  "zig-out/bin/zircon-editor-bench": "fe56ce9a692e6af01c3502fe1882468dcab0406411d043f39e8983548ef2314d"
+}

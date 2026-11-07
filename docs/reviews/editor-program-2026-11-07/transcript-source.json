@@ -1,0 +1,16 @@
+{
+  "thread_id": "01a1b179-3169-7c32-9c8a-2104109080d4",
+  "path": "/Users/syedmuzamilm/.codex/sessions/2026/11/06/rollout-2026-11-06T20-57-52-01a1b179-3169-7c32-9c8a-2104109080d4.jsonl",
+  "cwd": "/Users/syedmuzamilm/work/expirements/zigpui",
+  "audit": "Decision trail checked against current workspace transcript tool outputs and retained source artifacts; match counts are discovery evidence, not a replacement for named test logs.",
+  "tool_output_matches": {
+    "bad2152": 5,
+    "unrelated pipe handles inherited": 5,
+    "0b73351": 2,
+    "dc56004": 2,
+    "33ee79c": 2,
+    "NoSpaceLeft": 2,
+    "95/96": 3,
+    "93/94": 1
+  }
+}

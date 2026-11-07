@@ -14,6 +14,8 @@ Use the terminal toolbar's dock button, or the **Terminal: dock at bottom** and 
 
 The status bar shows Vim mode, cursor row and column, and the active document's language. Click the language to open a searchable language picker. The picker includes built-in lexical languages and installed extension languages. Selection changes highlighting and language-server resolution for that document without renaming its file. Use the language-server menu to install additional support.
 
+Changing a document's language keeps unrelated language-server clients running. The rebound document gets a fresh session so late diagnostics from its old language cannot replace current results.
+
 The file-header options menu toggles soft wrap, inline Git blame, line numbers, indent guides, and Vim mode. Layout selection persists in `panel_layout` as `"classic"` or `"agentic"`.
 
 ## Git and search

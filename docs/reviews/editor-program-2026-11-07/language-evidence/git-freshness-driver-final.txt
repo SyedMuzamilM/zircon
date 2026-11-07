@@ -1,0 +1,6 @@
+Build Summary: 4/4 steps succeeded
+build-bench-editor success
++- install zircon-editor-bench success
+   +- compile exe zircon-editor-bench fast native success 29s MaxRSS:1G
+      +- options cached
+

@@ -1,0 +1,2 @@
+32768-wrap-services-1: p95 submit 1.36 ms; Git 48; LSP 668501 bytes
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-program-2026-11-07/language-evidence/git-current-smoke/summary.json

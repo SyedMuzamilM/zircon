@@ -33,6 +33,12 @@ Before timing, wrapped cases must have wrapping enabled in effective settings an
 
 Service cases must have a ready client, current document versions/diagnostics, current grammar spans, twenty queued LSP change messages, a Git status refresh and a syntax job. Failures, missing results, timeout and source mismatch make the runner fail; they are not discarded as fast samples. Git exit codes with valid alternate meanings, such as diff exit 1, are not classified as spawn/runtime errors.
 
+The current driver also waits for the Git gutter revision to match the document
+and for pending Git refreshes to finish. Older batches retain their own archived
+driver and cannot retroactively claim this newer assertion. The
+[current lifecycle matrix](editor-2026-11-07-lifecycle-current-git/README.md)
+passes all forty attempts with that check enabled.
+
 Cheap cumulative counters record Git command/status/history starts and process-run errors, LSP queued framed bytes/messages/changes, grammar jobs, wrap builds/shaped lines and fold-scanned bytes. Git counters are atomic; protocol stats use the transport mutex already protecting enqueue. These counters do not themselves prove precise wall-clock attribution or successful disk/network transfer. Protocol bytes mean queued frames, not wire traffic. The fixture's current diagnostics verify it processed current document text.
 
 ## Repetition, memory and profiling

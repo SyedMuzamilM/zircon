@@ -1,0 +1,29 @@
+    Finished `release` profile [optimized] target(s) in 0.13s
+test-app
++- run test 63 pass, 4 skip, 1 fail (68 total)
+error: 'language_lifecycle_tests.test.language picker preserves unrelated clients and isolates same revision secondary rebinding' failed:
+       expected 4317031600, found 0
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:93:17: 0x1010d735b in expectEqualInner__func_3566 (test)
+                       return error.TestExpectedEqual;
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:57:5: 0x10117517f in expectEqual (test)
+           return expectEqualInner(T, expected, actual);
+           ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:128:17: 0x1011751cf in expectEqualInner__func_3958 (test)
+                       try expectEqual(@field(expected, field_name), @field(actual, field_name));
+                       ^
+       .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:57:5: 0x101176dd3 in expectEqual (test)
+           return expectEqualInner(T, expected, actual);
+           ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/language_lifecycle_tests.zig:104:5: 0x101176ecb in test.language picker preserves unrelated clients and isolates same revision secondary rebinding (test)
+           try t.expectEqual(before, after);
+           ^
+failed command: ./.zig-cache/o/46f7088927dcc569d7d57c4842cea51c/test --cache-dir=./.zig-cache --seed=0x21818820 --listen=-
+
+Build Summary: 3/5 steps succeeded (1 failed); 63/68 tests passed (4 skipped, 1 failed)
+test-app transitive failure
++- run test 63 pass, 4 skip, 1 fail (68 total)
+   +- compile test debug native success 5s MaxRSS:727M
+   |  +- options cached
+   +- run cargo success 168ms
+
