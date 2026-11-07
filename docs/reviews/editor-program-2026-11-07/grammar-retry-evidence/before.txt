@@ -1,0 +1,79 @@
+    Finished `release` profile [optimized] target(s) in 0.32s
+test-app
++- run test 67 pass, 4 skip, 4 fail (75 total)
+error: 'grammar_retry_tests.test.transient grammar failure retries the same revision and clears its error' failed:
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:52:67: 0x104b241cf in wait__func_3637 (test)
+               if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.GrammarRetryTimeout;
+                                                                         ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:109:9: 0x104b261c3 in journey (test)
+               try wait(&app, owner, &now, Ops.recovered);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:121:5: 0x104b2981f in test.transient grammar failure retries the same revision and clears its error (test)
+           try journey("once", false);
+           ^
+error: 'grammar_retry_tests.test.grammar retry recovery preserves a newer unrelated operation error' failed:
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:52:67: 0x104b241cf in wait__func_3637 (test)
+               if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.GrammarRetryTimeout;
+                                                                         ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:109:9: 0x104b261c3 in journey (test)
+               try wait(&app, owner, &now, Ops.recovered);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:124:5: 0x104b297a3 in test.grammar retry recovery preserves a newer unrelated operation error (test)
+           try journey("once", true);
+           ^
+error: 'grammar_retry_tests.test.invalid grammar response retries without requiring a source edit' failed:
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/src/services/language.zig:417:49: 0x1048f2a33 in highlighted (test)
+           if (parsed.value.bytes != source.byteLen()) return error.InvalidHighlights;
+                                                       ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/owned_tasks.zig:36:17: 0x1048f2db3 in deliver (test)
+                       return @call(.auto, callback, .{ value, cx, result });
+                       ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:315:9: 0x1048f1eaf in update__func_2295 (test)
+               return @call(.auto, function, .{ object, &context } ++ args);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/owned_tasks.zig:33:17: 0x1048f16ff in complete (test)
+                       try self.app.update(self.owner, deliver, .{result});
+                       ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/tasks.zig:98:21: 0x1048f18db in finish (test)
+                           try self.job.complete(result);
+                           ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/tasks.zig:143:13: 0x10472c05f in drain (test)
+                   try entry.finish(entry, queue.allocator, true);
+                   ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/owned_tasks.zig:64:13: 0x10472c15f in drain (test)
+               _ = try jobs.queue.drain();
+                   ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:144:9: 0x10473197f in step (test)
+               try app.state.jobs.drain(app);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:44:9: 0x104b23c23 in tick (test)
+           _ = try app.step(now.*);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:51:9: 0x104b2440b in wait__func_3639 (test)
+               try tick(app, now);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:107:9: 0x104b25fbb in journey (test)
+               try wait(&app, owner, &now, Ops.failedOnce);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:127:5: 0x104b29727 in test.invalid grammar response retries without requiring a source edit (test)
+           try journey("invalid", false);
+           ^
+error: 'grammar_retry_tests.test.persistent grammar failures stop retrying and an edit rearms the budget' failed:
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:52:67: 0x104b23ebb in wait__func_3631 (test)
+               if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.GrammarRetryTimeout;
+                                                                         ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:98:9: 0x104b254b7 in journey (test)
+               try wait(&app, owner, &now, Ops.stopped);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:130:5: 0x104b26867 in test.persistent grammar failures stop retrying and an edit rearms the budget (test)
+           try journey("always", false);
+           ^
+failed command: ./.zig-cache/o/0708d78fca310ec1b9cfc5a6c5ef4853/test --cache-dir=./.zig-cache --seed=0x97d52ec0 --listen=-
+
+Build Summary: 3/5 steps succeeded (1 failed); 67/75 tests passed (4 skipped, 4 failed)
+test-app transitive failure
++- run test 67 pass, 4 skip, 4 fail (75 total)
+   +- compile test debug native success 4s MaxRSS:732M
+   |  +- options cached
+   +- run cargo success 378ms
+

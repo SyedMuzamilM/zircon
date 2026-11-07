@@ -93,6 +93,7 @@ pub const Shell = struct {
     preview: ?struct { document: workspace.DocumentId, view: @import("views/markdown.zig").Preview } = null,
     status: []u8 = &.{},
     status_is_error: bool = false,
+    status_origin: union(enum) { general, syntax: workspace.DocumentId } = .general,
     dragging: enum { none, sidebar, split } = .none,
     tab_drag: ?@import("panes.zig").Session = null,
     pub fn init(a: std.mem.Allocator, io: std.Io, root_path: []const u8, initial: ?[]const u8) !Shell {
@@ -674,5 +675,6 @@ pub const Shell = struct {
         self.allocator.free(self.status);
         self.status = owned;
         self.status_is_error = false;
+        self.status_origin = .general;
     }
 };

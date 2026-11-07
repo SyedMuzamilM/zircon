@@ -7,7 +7,18 @@ const text = @import("zircon_text");
 const ws = @import("zircon_workspace");
 const Shell = @import("../shell.zig").Shell;
 const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false, scope: ?ws.DocumentId = null, retired: bool = false, epoch: u64 = 0 };
-const SyntaxDocument = struct { id: ws.DocumentId, revision: ?u64 = null, observed: ?u64 = null, changed_at: f64 = 0, pending: bool = false, epoch: u64 = 0, scoped: bool = false };
+const SyntaxDocument = struct {
+    id: ws.DocumentId,
+    /// Last revision installed in the editors, never merely requested.
+    revision: ?u64 = null,
+    observed: ?u64 = null,
+    changed_at: f64 = 0,
+    pending: bool = false,
+    epoch: u64 = 0,
+    scoped: bool = false,
+    attempts: u8 = 0,
+    retry_at: f64 = 0,
+};
 const host = @import("extension_host.zig");
 const Document = struct {
     id: ws.DocumentId,
@@ -109,6 +120,9 @@ pub fn invalidateDocument(self: *Shell, id: ws.DocumentId) !void {
     tracked.revision = null;
     tracked.observed = null;
     tracked.pending = false;
+    tracked.attempts = 0;
+    tracked.retry_at = 0;
+    clearSyntaxError(self, id);
     var index: usize = 0;
     while (index < self.language.documents.items.len) {
         if (std.meta.eql(self.language.documents.items[index].id, id)) try closeDocument(self, index) else index += 1;
@@ -370,8 +384,14 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (tracked.observed != record.doc.revision()) {
             tracked.observed = record.doc.revision();
             tracked.changed_at = now;
+            tracked.attempts = 0;
+            tracked.retry_at = 0;
         }
-        if (tracked.pending) continue;
+        if (tracked.pending or tracked.attempts >= 3) continue;
+        if (now < tracked.retry_at) {
+            self.language.syntax_waiting = true;
+            continue;
+        }
         if (tracked.revision != null and now - tracked.changed_at < 0.08) {
             self.language.syntax_waiting = true;
             continue;
@@ -384,7 +404,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
         self.language.syntax_jobs +%= 1;
         tracked.pending = true;
-        tracked.revision = source.revision();
+        tracked.attempts += 1;
     }
 }
 fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
@@ -400,24 +420,48 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
     const document = result.stamp.document orelse return;
     if (!std.meta.eql(tracked.id, document) or tracked.epoch != result.stamp.epoch) return;
     tracked.pending = false;
-    if (!result.success) {
-        try self.setStatus(try self.allocator.dupe(u8, result.stderr));
-        self.status_is_error = true;
-        cx.notify();
-        return;
-    }
     const record = self.workspace.getConst(document) catch return;
     if (record.doc.revision() != result.stamp.revision) {
         try pollSyntax(self, cx);
         return;
     }
-    const parsed = result.highlights orelse return error.InvalidHighlights;
+    if (!result.success) return syntaxFailed(self, cx, tracked, result.stderr);
+    const parsed = result.highlights orelse return syntaxFailed(self, cx, tracked, "Invalid grammar response");
     var source = record.doc.snapshot();
     defer source.deinit();
-    if (parsed.value.bytes != source.byteLen()) return error.InvalidHighlights;
-    for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, document)) try tab.editor.setHighlights(source, parsed.value.spans);
-    if (self.secondary) |*pane| if (std.meta.eql(pane.document, document)) try pane.editor.setHighlights(source, parsed.value.spans);
+    if (parsed.value.bytes != source.byteLen()) return syntaxFailed(self, cx, tracked, "Invalid grammar response length");
+    for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, document)) {
+        tab.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
+    };
+    if (self.secondary) |*pane| if (std.meta.eql(pane.document, document)) {
+        pane.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
+    };
+    tracked.revision = result.stamp.revision;
+    clearSyntaxError(self, document);
     cx.notify();
+}
+
+/// Retry only the current source/configuration. The ordinary syntax wake keeps
+/// the UI asleep between attempts and stops after the third failure.
+fn syntaxFailed(self: *Shell, cx: *ui.Context(Shell), tracked: *SyntaxDocument, message: []const u8) !void {
+    const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
+    tracked.retry_at = now + if (tracked.attempts <= 1) @as(f64, 0.25) else @as(f64, 0.5);
+    try self.setStatus(try self.allocator.dupe(u8, message));
+    self.status_is_error = true;
+    self.status_origin = .{ .syntax = tracked.id };
+    try pollSyntax(self, cx);
+    cx.notify();
+}
+fn clearSyntaxError(self: *Shell, document: ws.DocumentId) void {
+    switch (self.status_origin) {
+        .general => {},
+        .syntax => |id| if (std.meta.eql(id, document)) {
+            self.allocator.free(self.status);
+            self.status = &.{};
+            self.status_is_error = false;
+            self.status_origin = .general;
+        },
+    }
 }
 
 const SyntaxWake = struct {

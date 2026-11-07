@@ -6,4 +6,5 @@ test {
     _ = @import("buffer_controls_tests.zig");
     _ = @import("settings_tests.zig");
     _ = @import("language_lifecycle_tests.zig");
+    _ = @import("grammar_retry_tests.zig");
 }
