@@ -19,6 +19,7 @@ const Document = struct {
 };
 pub const Pending = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64, cursor: usize };
 pub const Model = struct {
+    syntax_jobs: u64 = 0,
     generation: u64 = 0,
     syntax_documents: std.ArrayList(SyntaxDocument) = .empty,
     syntax_waiting: bool = false,
@@ -91,6 +92,7 @@ fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const @import("zirc
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     const snapshot = self.extension_snapshot orelse return;
     try pollSyntax(self, cx);
+    if (self.language_stopped) return;
     var changed = false;
     var i: usize = 0;
     while (i < self.language.documents.items.len) {
@@ -111,7 +113,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     for (self.tabs.items) |tab| {
         const record = try self.workspace.getConst(tab.document);
         const path = record.path orelse continue;
-        const language_id = if (snapshot.languageForPath(path)) |language| language.id else switch (tab.editor.language) {
+        const language_id = if (snapshot.languageForPath(self.languagePath(tab.document, path))) |language| language.id else switch (tab.editor.language) {
             .zig => "zig",
             .rust => "rust",
             .json => "json",
@@ -145,7 +147,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             try client.didChange(doc.uri, source);
             if (doc.diagnostics) |*value| value.deinit();
             doc.diagnostics = null;
-        } else try client.didOpen(doc.uri, if (snapshot.languageForPath(path)) |language| language.lsp_id orelse language.id else language_id, source);
+        } else try client.didOpen(doc.uri, if (snapshot.languageForPath(self.languagePath(tab.document, path))) |language| language.lsp_id orelse language.id else language_id, source);
         doc.version = source.revision();
     }
     for (self.language.sessions.items, 0..) |session, session_index| if (session.client) |client| {
@@ -299,7 +301,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
     for (self.tabs.items, 0..) |tab, tab_index| {
         if (tab_index != self.active and (self.secondary == null or !std.meta.eql(self.secondary.?.document, tab.document))) continue;
         const record = try self.workspace.getConst(tab.document);
-        const language = snapshot.languageForPath(record.path orelse "") orelse continue;
+        const language = snapshot.languageForPath(self.languagePath(tab.document, record.path orelse "")) orelse continue;
         const grammar = language.grammar orelse continue;
         var index: ?usize = null;
         for (self.language.syntax_documents.items, 0..) |entry, i| if (std.meta.eql(entry.id, tab.document)) {
@@ -327,6 +329,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         const bytes = try source.copy(self.allocator, .{ .start = 0, .end = source.byteLen() });
         defer self.allocator.free(bytes);
         try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
+        self.language.syntax_jobs +%= 1;
         tracked.pending = true;
         tracked.revision = source.revision();
     }

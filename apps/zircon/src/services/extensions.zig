@@ -63,7 +63,7 @@ pub fn install(self: *Shell, cx: *ui.Context(Shell), path: []const u8) !void {
     };
     _ = try registry.install(path);
     try refresh(self, cx);
-    self.panel = .extensions;
+    self.showTool(.extensions);
 }
 pub fn installBundled(self: *Shell, cx: *ui.Context(Shell)) !void {
     const registry = if (self.extensions) |*value| value else return error.ExtensionsNotConfigured;

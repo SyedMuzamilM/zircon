@@ -30,6 +30,8 @@ pub fn element(b: *ui.Ui, image: Image, style: ui.Style) !ui.Element {
 }
 const Canvas = struct {
     image: Image,
+    zoom: ?f32 = null,
+    scroll: ui.Point = .{},
     pub const LayoutState = void;
     pub const PrepaintState = void;
     pub fn requestLayout(_: *Canvas, cx: *ui.LayoutCx) !ui.LayoutResult(void) {
@@ -39,23 +41,43 @@ const Canvas = struct {
     pub fn paint(self: *Canvas, cx: *ui.PaintCx, bounds: ui.Rect, _: *void, _: *void) !void {
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
-        try cx.painter.drawImage(self.image, bounds, .contain);
+        const size = self.image.size();
+        const rect = if (self.zoom) |zoom| ui.Rect{ .x = bounds.x + @max(0, (bounds.width - size.width * zoom) / 2) - self.scroll.x, .y = bounds.y + @max(0, (bounds.height - size.height * zoom) / 2) - self.scroll.y, .width = size.width * zoom, .height = size.height * zoom } else bounds;
+        try cx.painter.drawImage(self.image, rect, .contain);
     }
     pub fn deinit(self: *Canvas) void {
         self.image.deinit();
     }
 };
+fn zoomElement(b: *ui.Ui, source: Image, zoom: f32, scroll: ui.Point) !ui.Element {
+    var owned = source.clone();
+    errdefer owned.deinit();
+    return b.custom(Canvas, .{ .image = owned, .zoom = zoom, .scroll = scroll }, .{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden });
+}
 pub fn render(self: *const @import("../shell.zig").Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     const asset = self.image orelse return error.NoImage;
     const size = asset.image.size();
-    const view = @import("../view.zig");
-    return b.column(.{ .flex_grow = 1, .background = c.document, .overflow = .hidden }, &.{
-        try b.row(.{ .height = .{ .px = 38 }, .flex_shrink = 0, .gap = 12, .align_items = .center, .padding = .{ .left = 16, .right = 16 }, .background = c.chrome }, &.{
-            try view.commandButton(b, c, .back_to_editor, "Editor", false),
-            try b.styled(try b.text(std.fs.path.basename(asset.path)), .{ .flex_grow = 1, .text = .{ .size = 13, .color = c.text } }),
-            try b.styled(try b.textFmt("{d:.0} × {d:.0} px", .{ size.width, size.height }), .{ .text = .{ .size = 12, .color = c.muted } }),
+    const v = @import("components.zig");
+    const canvas = try zoomElement(b, asset.image, self.image_zoom, self.image_scroll);
+    var path: []const u8 = asset.path;
+    if (std.mem.startsWith(u8, path, self.workspace.root_path)) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
+    return b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .background = c.document, .overflow = .hidden }, &.{
+        try b.row(.{ .height = .{ .px = v.metrics.file_header }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 13, .right = 7 }, .background = c.document }, &.{
+            try b.styled(try v.text(b, path, c.muted, 12), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }),
+            try v.iconButton(b, c, .image_zoom_out, "Zoom image out", .minus, false),
+            try v.actionButton(b, c, .image_zoom_reset, try std.fmt.allocPrint(b.allocator(), "{d:.0}%", .{self.image_zoom * 100}), false),
+            try v.iconButton(b, c, .image_zoom_in, "Zoom image in", .plus, false),
         }),
-        try element(b, asset.image, .{ .flex_grow = 1, .min_height = .{ .px = 0 }, .padding = ui.Insets.all(24), .overflow = .hidden }),
+        try b.listen(try b.key(.{ .string = "image-canvas" }, canvas), .{ .on_input = b.onInput(onInput) }),
+        try b.row(.{ .height = .{ .px = 22 }, .flex_shrink = 0, .padding = .{ .left = 13 }, .align_items = .center }, &.{try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0} × {d:.0} px · {s}", .{ size.width, size.height, std.fs.path.extension(asset.path) }), c.muted, 11)}),
     });
+}
+fn onInput(self: *@import("../shell.zig").Shell, event: *ui.Event(ui.Input), cx: *ui.Context(@import("../shell.zig").Shell)) void {
+    if (event.data != .scroll or self.image == null) return;
+    const size = self.image.?.image.size();
+    self.image_scroll.x = std.math.clamp(self.image_scroll.x + event.data.scroll.x, 0, @max(0, size.width * self.image_zoom - event.bounds.width));
+    self.image_scroll.y = std.math.clamp(self.image_scroll.y + event.data.scroll.y, 0, @max(0, size.height * self.image_zoom - event.bounds.height));
+    event.preventDefault();
+    cx.notify();
 }

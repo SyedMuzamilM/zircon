@@ -145,7 +145,7 @@ pub fn recommend(self: *Shell, cx: *ui.Context(Shell)) !void {
         }
     };
     try cx.update(self.fields.?.extension_query, Set.call, .{suffix});
-    self.panel = .extensions;
+    self.showTool(.extensions);
     self.tool_tabs.extensions = true;
     self.catalog.show_available = true;
     try search(self, cx);

@@ -113,7 +113,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     const task = try cx.spawn(Job, .{ .io = self.workspace.io, .generation = self.search.generation, .query = query, .buffers = buffer_slice, .files = files }, complete);
     self.search.task = task;
     self.search.busy = true;
-    self.panel = .search;
+    self.showTool(.search);
     self.tool_tabs.search = true;
     self.overlay = .none;
     self.search.scroll.offset = 0;
@@ -151,7 +151,10 @@ pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_
                 var snapshot = try self.workspace.snapshot(tab.document);
                 defer snapshot.deinit();
                 if (!group.isCurrentBuffer(source.document_id, snapshot)) return error.StaleSearchResult;
-                self.active = index;
+                if (self.active_pane == .secondary and self.secondary != null) try @import("../panes.zig").selectSecondary(self, index) else {
+                    self.active = index;
+                    self.tabs.items[index].primary = true;
+                }
                 found = true;
                 break;
             };
@@ -169,11 +172,12 @@ pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_
             try self.openPath(source.path);
         },
     }
-    var snapshot = try self.workspace.snapshot(self.tabs.items[self.active].document);
+    const current = try @import("../actions.zig").active(self);
+    var snapshot = try self.workspace.snapshot(current.id);
     defer snapshot.deinit();
-    try self.tabs.items[self.active].editor.setSelection(snapshot, group.matches[match_index].range);
-    self.active_pane = .primary;
-    self.panel = .editor;
+    try current.editor.setSelection(snapshot, group.matches[match_index].range);
+    current.editor.reveal(snapshot);
+    if (self.active_pane == .secondary and self.secondary != null) self.secondary_tool = null else self.panel = .editor;
     self.editor_focus_request +%= 1;
     cx.notify();
 }

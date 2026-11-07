@@ -9,6 +9,17 @@ const model = @import("shell.zig");
 const Shell = model.Shell;
 const Command = @import("commands.zig").Command;
 pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) !void {
+    if (self.settings) |settings| {
+        var path: ?[]u8 = null;
+        try cx.read(settings, @import("settings/model.zig").Settings.copyPath, .{ self.allocator, &path });
+        defer if (path) |value| self.allocator.free(value);
+        if (path) |value| self.recent.load(self.allocator, self.workspace.io, value, self.workspace.root_path) catch |err| try self.reportError(err);
+    }
+    if (self.recent.entries.items.len == 0) {
+        const root = try self.allocator.dupe(u8, self.workspace.root_path);
+        errdefer self.allocator.free(root);
+        try self.recent.entries.append(self.allocator, root);
+    }
     self.window = window;
     if ((try cx.app.window(window)).surface) |surface| self.system_dark = surface.systemDark();
     if (self.settings == null) try self.loadSettings(cx, null);
@@ -119,16 +130,23 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
         const asset = try @import("views/image.zig").Asset.init(self.allocator, self.workspace.io, absolute);
         if (self.image) |*old| old.deinit(self.allocator);
         self.image = asset;
+        self.image_zoom = 1;
+        self.image_scroll = .{};
         self.panel = .image;
         self.overlay = .none;
         return;
     }
-    self.panel = .editor;
+    if (self.active_pane != .secondary or self.secondary == null) self.panel = .editor;
     const id = try self.workspace.open(path);
     if ((try self.workspace.getConst(id)).path) |absolute| revealTreePath(self, absolute) catch {};
     for (self.tabs.items, 0..) |tab, i| if (std.meta.eql(tab.document, id)) {
-        self.active = i;
-        self.active_pane = .primary;
+        if (self.active_pane == .secondary and self.secondary != null) {
+            try @import("panes.zig").selectSecondary(self, i);
+        } else {
+            self.tabs.items[i].primary = true;
+            self.active = i;
+            self.active_pane = .primary;
+        }
         self.editor_focus_request +%= 1;
         self.overlay = .none;
         return;
@@ -142,20 +160,31 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
     defer snapshot.deinit();
     view.synchronize(snapshot);
     try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
-    self.active = self.tabs.items.len - 1;
-    self.active_pane = .primary;
+    if (self.active_pane == .secondary and self.secondary != null) {
+        self.tabs.items[self.tabs.items.len - 1].primary = false;
+        try @import("panes.zig").selectSecondary(self, self.tabs.items.len - 1);
+    } else {
+        self.active = self.tabs.items.len - 1;
+        self.active_pane = .primary;
+    }
     self.editor_focus_request +%= 1;
     self.overlay = .none;
 }
 pub fn newFile(self: *Shell) !void {
+    if (self.active_pane != .secondary or self.secondary == null) self.panel = .editor;
     const id = try self.workspace.untitled("");
     errdefer _ = self.workspace.close(id, .discard) catch {};
     var view = try editing.Editor.init(self.allocator);
     errdefer view.deinit();
     self.configureEditor(&view, "");
     try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
-    self.active = self.tabs.items.len - 1;
-    self.active_pane = .primary;
+    if (self.active_pane == .secondary and self.secondary != null) {
+        self.tabs.items[self.tabs.items.len - 1].primary = false;
+        try @import("panes.zig").selectSecondary(self, self.tabs.items.len - 1);
+    } else {
+        self.active = self.tabs.items.len - 1;
+        self.active_pane = .primary;
+    }
     self.editor_focus_request +%= 1;
 }
 pub fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
@@ -163,7 +192,7 @@ pub fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor
     if (self.tabs.items.len == 0) return error.NoDocument;
     return .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
 }
-fn field(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), a: std.mem.Allocator) ![]u8 {
+pub fn field(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), a: std.mem.Allocator) ![]u8 {
     var bytes: []u8 = undefined;
     try cx.read(handle, ui.controls.TextInput.copy, .{ a, &bytes });
     return bytes;
@@ -245,14 +274,27 @@ fn closeTab(self: *Shell, index: usize, decision: ws.CloseDecision) !void {
         self.preview = null;
         if (self.panel == .markdown) self.panel = .editor;
     };
+    var secondary_closed = false;
     if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
         pane.editor.deinit();
         self.secondary = null;
-        self.active_pane = .primary;
+        secondary_closed = true;
     };
     var removed = self.tabs.orderedRemove(index);
     removed.editor.deinit();
+    if (removed.secondary_state) |*state| state.deinit();
+    if (removed.language_path) |path| self.allocator.free(path);
+    if (removed.language_name) |name| self.allocator.free(name);
     self.active = if (self.tabs.items.len == 0) 0 else @min(self.active, self.tabs.items.len - 1);
+    if (secondary_closed) {
+        var next: ?usize = null;
+        for (self.tabs.items, 0..) |tab, i| if (tab.secondary) {
+            next = i;
+            break;
+        };
+        if (next) |i| try @import("panes.zig").selectSecondary(self, i) else self.active_pane = .primary;
+    }
+    @import("panes.zig").normalizePrimary(self);
     self.overlay = .none;
     self.pending = null;
 }
@@ -278,6 +320,10 @@ pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pan
     for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id) and pane != 0) {
         if (outcome.change) |*change| tab.editor.mapChange(change);
         tab.editor.synchronize(snapshot);
+    };
+    for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) if (tab.secondary_state) |*state| {
+        if (outcome.change) |*change| state.mapChange(change);
+        state.synchronize(snapshot);
     };
     if (self.secondary) |*other| if (std.meta.eql(other.document, id) and pane != 1) {
         if (outcome.change) |*change| other.editor.mapChange(change);
@@ -371,10 +417,82 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 try @import("projects.zig").clone(self, cx, requested, destination);
             } else _ = try @import("projects.zig").open(self, cx, requested, self.open_kind);
         },
+        .recent_projects, .language_picker, .language_servers, .editor_options => {
+            if (which == .language_picker and self.tabs.items.len == 0) return;
+            self.popup = switch (which) {
+                .recent_projects => .recent,
+                .language_picker => .language,
+                .language_servers => .servers,
+                else => .editor,
+            };
+            self.overlay_index = 0;
+            if (self.fields) |fields| {
+                const Picker = struct {
+                    fn style(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput)) void {
+                        input.height = 38;
+                        input.font_size = 14;
+                        input.leading_icon = null;
+                        input.show_focus_border = false;
+                        context.notify();
+                    }
+                };
+                try cx.update(fields.query, Picker.style, .{});
+                try setField(cx, fields.query, "", if (which == .recent_projects) "Search projects…" else "Select a language…");
+            }
+            if (which == .language_picker) {
+                var arena = std.heap.ArenaAllocator.init(self.allocator);
+                defer arena.deinit();
+                const current = try active(self);
+                const record = try self.workspace.getConst(current.id);
+                const choices = try @import("views/workspace_controls.zig").choices(self, arena.allocator(), "");
+                for (choices, 0..) |choice, i| {
+                    const matches = if (self.languageName(current.id)) |name| std.mem.eql(u8, name, choice.name) else std.mem.eql(u8, std.fs.path.extension(record.path orelse ""), std.fs.path.extension(choice.path));
+                    if (matches) {
+                        self.overlay_index = i;
+                        break;
+                    }
+                }
+            }
+        },
+        .stop_language_servers => {
+            self.language_stopped = true;
+            self.language.deinit(self.allocator);
+        },
+        .layout_classic => {
+            self.agent_mode = false;
+            try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{@import("settings/model.zig").Patch{ .panel_layout = .classic }});
+        },
+        .layout_agentic => {
+            if (!self.agent_mode) try execute(self, cx, .agent_mode, null);
+            try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{@import("settings/model.zig").Patch{ .panel_layout = .agentic }});
+        },
+        .toggle_terminal => {
+            if (self.terminal.sessions.items.len == 0) try @import("terminal.zig").create(self) else {
+                self.terminal.visible = !self.terminal.visible;
+                self.terminal.focused = self.terminal.visible;
+                if (self.terminal.visible) self.terminal.focus +%= 1 else self.editor_focus_request +%= 1;
+            }
+        },
+        .new_terminal => try @import("terminal.zig").create(self),
+        .terminal_bottom, .terminal_right => {
+            self.terminal.dock = if (which == .terminal_bottom) .bottom else .right;
+            try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{@import("settings/model.zig").Patch{ .terminal_dock = self.terminal.dock }});
+        },
+        .show_image => {
+            if (self.image != null) self.panel = .image;
+        },
+        .close_image => {
+            if (self.image) |*asset| asset.deinit(self.allocator);
+            self.image = null;
+            if (self.panel == .image) self.panel = .editor;
+        },
+        .image_zoom_in => self.image_zoom = @min(8, self.image_zoom * 1.25),
+        .image_zoom_out => self.image_zoom = @max(0.1, self.image_zoom / 1.25),
+        .image_zoom_reset => self.image_zoom = 1,
         .workspace_menu => self.menu_open = true,
         .project_files => {
+            self.sidebar_visible = !(self.sidebar_visible and self.left_panel == .project);
             self.left_panel = .project;
-            self.sidebar_visible = true;
         },
         .markdown_preview => {
             const current = try active(self);
@@ -389,13 +507,17 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .complete => try @import("services/language.zig").request(self, cx),
         .git_changes => {
+            if (self.sidebar_visible and self.left_panel == .git_changes) {
+                self.sidebar_visible = false;
+                return;
+            }
             self.git.stash_view = false;
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
             std.heap.page_allocator.free(self.git.selected_path);
             self.git.selected_path = &.{};
             self.git.combined = true;
-            self.panel = .git_diff;
+            self.showTool(.git_diff);
             self.left_panel = .git_changes;
             self.git.sidebar_scroll.offset = 0;
             self.sidebar_visible = true;
@@ -459,7 +581,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_path = &.{};
             self.git.selected_commit = &.{};
-            self.panel = .git_diff;
+            self.showTool(.git_diff);
             try @import("services/git.zig").start(self, cx, .all_diff);
         },
         .git_stage => try @import("services/git.zig").start(self, cx, .{ .stage = self.git.selected_path }),
@@ -476,25 +598,29 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.git.combined = false;
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
-            self.panel = .git_diff;
+            self.showTool(.git_diff);
             try @import("services/git.zig").start(self, cx, .{ .diff = .{ .path = self.git.selected_path, .staged = which == .git_staged_diff } });
         },
         .git_open_file => {
             const absolute = try std.fs.path.join(self.allocator, &.{ self.workspace.root_path, self.git.selected_path });
             defer self.allocator.free(absolute);
             try self.openPath(absolute);
-            self.panel = .editor;
         },
-        .back_to_editor => self.panel = .editor,
+        .back_to_editor => {
+            if (self.active_pane == .secondary and self.secondary != null) self.secondary_tool = null else self.panel = .editor;
+        },
         .extensions => {
             self.agent_mode = false;
-            self.panel = .extensions;
+            self.showTool(.extensions);
         },
         .install_extension => try show(self, cx, .extension_path),
         .install_bundled_extension => try @import("services/extensions.zig").installBundled(self, cx),
         .project_search => {
-            self.panel = .search;
-            self.tool_tabs.search = true;
+            if (self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search) {
+                if (self.active_pane == .secondary) self.secondary_tool = null else self.panel = .editor;
+                return;
+            }
+            self.showTool(.search);
             self.overlay = .none;
             self.search_focus_request +%= 1;
         },
@@ -517,9 +643,22 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .replace => try @import("services/buffer_find.zig").open(self, cx, true),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
         .split_menu => self.split_menu_open = !self.split_menu_open,
-        .restart_language_servers => self.language.deinit(self.allocator),
+        .restart_language_servers => {
+            self.language_stopped = false;
+            self.language.deinit(self.allocator);
+        },
         .extension_search => try @import("services/catalog.zig").search(self, cx),
         .install_language_support => try @import("services/catalog.zig").recommend(self, cx),
+        .toggle_vim, .toggle_line_numbers, .toggle_indent_guides, .toggle_inline_blame => {
+            const Patch = @import("settings/model.zig").Patch;
+            const patch: Patch = switch (which) {
+                .toggle_vim => .{ .vim_mode = !self.editor_options.vim_mode },
+                .toggle_line_numbers => .{ .line_numbers = !self.editor_options.line_numbers },
+                .toggle_indent_guides => .{ .indent_guides = !self.editor_options.indent_guides },
+                else => .{ .git_inline_blame = !self.inline_blame_enabled },
+            };
+            try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{patch});
+        },
         .toggle_soft_wrap => try cx.update(self.settings.?, @import("settings/model.zig").Settings.apply, .{@import("settings/model.zig").Patch{ .soft_wrap = if (self.editor_options.soft_wrap == .none) .editor_width else .none }}),
         .git_next_change, .git_previous_change, .git_toggle_hunk => {
             const current = try active(self);
@@ -575,20 +714,9 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .split_left, .split_right, .split_up, .split_down, .close_split, .split => {
             if (self.secondary != null and (which == .split or which == .close_split)) {
-                const pane = &self.secondary.?;
-                pane.editor.deinit();
-                self.secondary = null;
-                self.active_pane = .primary;
+                @import("panes.zig").closeSplit(self);
             } else if (which != .close_split and self.secondary == null) {
-                const current = try active(self);
-                var other = try editing.Editor.init(self.allocator);
-                errdefer other.deinit();
-                const record = try self.workspace.getConst(current.id);
-                self.configureEditor(&other, record.path orelse "");
-                var snapshot = try self.workspace.snapshot(current.id);
-                defer snapshot.deinit();
-                other.synchronize(snapshot);
-                self.secondary = .{ .document = current.id, .editor = other };
+                try @import("panes.zig").selectSecondary(self, self.active);
             }
             if (which != .split and which != .close_split) {
                 self.split_vertical = which == .split_up or which == .split_down;
@@ -609,19 +737,23 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .save_as => try show(self, cx, .save_as),
         .close_tab => {
-            if (self.panel == .image) {
+            const pane: u8 = if (self.active_pane == .secondary) 1 else 0;
+            if (self.currentTool(pane)) |tool| {
+                var click: ui.Event(ui.Click) = .{ .data = .{} };
+                self.onCloseTool(&click, cx, .{ .tool = tool, .pane = pane });
+                return;
+            }
+            if (pane == 1 and self.secondary != null) {
+                const index = try saveTarget(self);
+                if (self.tabs.items[index].primary) @import("panes.zig").closeSecondaryTab(self, index) else try requestTabClose(self, cx, index);
+            } else if (self.panel == .image) {
                 if (self.image) |*asset| asset.deinit(self.allocator);
                 self.image = null;
                 self.panel = .editor;
-            } else if (self.panel != .editor and self.panel != .markdown) {
-                switch (self.panel) {
-                    .search => self.tool_tabs.search = false,
-                    .git_diff => self.tool_tabs.git_diff = false,
-                    .extensions => self.tool_tabs.extensions = false,
-                    else => {},
-                }
-                self.panel = .editor;
-            } else if (self.tabs.items.len > 0) try requestTabClose(self, cx, self.active);
+            } else if (self.tabs.items.len > 0) {
+                const index = try saveTarget(self);
+                if (self.tabs.items[index].secondary) @import("panes.zig").closePrimaryTab(self, index) else try requestTabClose(self, cx, index);
+            }
         },
         .quit => try cx.app.requestCloseWindow(self.window.?),
         .dismiss => {
@@ -708,6 +840,17 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
     }
 }
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (try @import("views/workspace_controls.zig").input(self, e, cx)) return;
+    if (self.popup == .none and self.overlay == .none and self.terminal.visible and self.terminal.focused and e.data == .key_down) {
+        const key = e.data.key_down;
+        if (!key.modifiers.command or key.key == .v or key.key == .c or key.key == .a) return;
+        if (key.modifiers.command and key.key == .w) {
+            try @import("terminal.zig").closeActive(self, cx);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+    }
     @import("editor_git.zig").dismissOutside(self, cx, e);
     if (e.data == .focus and !e.data.focus) self.dragging = .none;
     if (e.data == .appearance) {

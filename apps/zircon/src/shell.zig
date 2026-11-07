@@ -7,7 +7,7 @@ const editor = @import("zircon_editor");
 const command = @import("commands.zig");
 const actions = @import("actions.zig");
 pub const Command = command.Command;
-pub const Tab = struct { document: workspace.DocumentId, editor: editor.Editor };
+pub const Tab = struct { document: workspace.DocumentId, editor: editor.Editor, primary: bool = true, secondary: bool = false, language_path: ?[]u8 = null, language_name: ?[]u8 = null, secondary_state: ?editor.Editor = null };
 pub const Pane = struct { document: workspace.DocumentId, editor: editor.Editor };
 pub const TreeRow = struct { name: []u8, path: []u8, directory: bool, depth: u16 = 0, expanded: bool = false };
 pub const IndexedFile = struct { path: []u8, label: []u8 };
@@ -36,6 +36,15 @@ pub const Shell = struct {
     split_anchor: ui.Rect = .{},
     git_anchor: ui.Rect = .{},
     menu_open: bool = false,
+    popup: enum { none, recent, language, servers, editor } = .none,
+    popup_anchor: ui.Rect = .{},
+    recent: @import("recent.zig").Recent = .{},
+    language_stopped: bool = false,
+    layout_setting: @import("settings/store.zig").PanelLayout = .classic,
+    terminal: @import("terminal.zig").Model = .{},
+    image_zoom: f32 = 1,
+    image_scroll: ui.Point = .{},
+
     split_menu_open: bool = false,
     inline_blame_enabled: bool = true,
     system_dark: bool = true,
@@ -46,7 +55,9 @@ pub const Shell = struct {
     open_kind: @import("projects.zig").Kind = .local_folder,
     cloning: bool = false,
     search_focus_request: u64 = 0,
-    tool_tabs: struct { search: bool = false, git_diff: bool = false, extensions: bool = false } = .{},
+    tool_tabs: ToolTabs = .{},
+    secondary_tools: ToolTabs = .{},
+    secondary_tool: ?Tool = null,
     split_ratio: f32 = 0.5,
     tree: std.ArrayList(TreeRow) = .empty,
     file_index: std.ArrayList(IndexedFile) = .empty,
@@ -93,7 +104,14 @@ pub const Shell = struct {
     }
     pub fn deinit(self: *Shell, _: std.mem.Allocator) void {
         @import("panes.zig").cancel(self);
-        for (self.tabs.items) |*tab| tab.editor.deinit();
+        self.recent.deinit(self.allocator);
+        self.terminal.deinit(self.allocator);
+        for (self.tabs.items) |*tab| {
+            tab.editor.deinit();
+            if (tab.secondary_state) |*state| state.deinit();
+            if (tab.language_path) |path| self.allocator.free(path);
+            if (tab.language_name) |name| self.allocator.free(name);
+        }
         self.tabs.deinit(self.allocator);
         if (self.secondary) |*pane| pane.editor.deinit();
         for (self.tree.items) |row| {
@@ -164,6 +182,12 @@ pub const Shell = struct {
         var values: preferences.Values = undefined;
         try cx.read(settings, preferences.Settings.copy, .{ arena.allocator(), &values });
         self.key_bindings = values.key_bindings;
+        self.terminal.dock = values.terminal_dock;
+        if (self.layout_setting != values.panel_layout) {
+            self.agent_mode = values.panel_layout == .agentic;
+            self.layout_setting = values.panel_layout;
+            if (self.agent_mode) try @import("services/agents.zig").ensure(self);
+        }
         if (values.project_panel_width != self.project_default_width) {
             self.sidebar_width = values.project_panel_width;
             self.project_default_width = values.project_panel_width;
@@ -250,7 +274,7 @@ pub const Shell = struct {
         if (self.preview) |*preview| preview.view.colors = self.previewColors();
         for (self.tabs.items) |*tab| {
             const record = self.workspace.getConst(tab.document) catch unreachable;
-            @import("services/extensions.zig").applyLanguage(self, &tab.editor, record.path orelse "");
+            @import("services/extensions.zig").applyLanguage(self, &tab.editor, self.languagePath(tab.document, record.path orelse ""));
             tab.editor.syntax_cache.clear();
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
@@ -259,7 +283,7 @@ pub const Shell = struct {
         }
         if (self.secondary) |*pane| {
             const record = self.workspace.getConst(pane.document) catch unreachable;
-            @import("services/extensions.zig").applyLanguage(self, &pane.editor, record.path orelse "");
+            @import("services/extensions.zig").applyLanguage(self, &pane.editor, self.languagePath(pane.document, record.path orelse ""));
             pane.editor.syntax_cache.clear();
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
@@ -278,6 +302,14 @@ pub const Shell = struct {
     }
     pub fn panelWidth(self: *const Shell) f32 {
         return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;
+    }
+    pub fn languagePath(self: *const Shell, id: workspace.DocumentId, fallback: []const u8) []const u8 {
+        for (self.tabs.items) |tab| if (std.meta.eql(tab.document, id)) return tab.language_path orelse fallback;
+        return fallback;
+    }
+    pub fn languageName(self: *const Shell, id: workspace.DocumentId) ?[]const u8 {
+        for (self.tabs.items) |tab| if (std.meta.eql(tab.document, id)) return tab.language_name;
+        return null;
     }
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
         const options = self.editor_options;
@@ -307,12 +339,14 @@ pub const Shell = struct {
     pub fn onCommand(self: *Shell, e: *ui.Event(ui.Click), cx: *ui.Context(Shell), which: Command) !void {
         self.rememberPanel();
         switch (which) {
+            .recent_projects, .language_picker, .language_servers, .editor_options => self.popup_anchor = e.bounds,
             .workspace_menu => self.menu_anchor = e.bounds,
             .split_menu => self.split_anchor = e.bounds,
             .git_network_menu, .git_changes_menu, .git_branches, .git_stashes => self.git_anchor = e.bounds,
             else => {},
         }
         self.git.menu = .none;
+        self.popup = .none;
         self.menu_open = false;
         if (which != .split_menu) self.split_menu_open = false;
         if (self.overlay == .palette) self.overlay = .none;
@@ -324,6 +358,7 @@ pub const Shell = struct {
         e.preventDefault();
         cx.notify();
     }
+    pub const ToolTabs = struct { search: bool = false, git_diff: bool = false, extensions: bool = false };
     pub const Tool = enum { search, git_diff, extensions };
     pub fn rememberPanel(self: *Shell) void {
         switch (self.panel) {
@@ -333,23 +368,51 @@ pub const Shell = struct {
             else => {},
         }
     }
-    pub fn onToolTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), tool: Tool) void {
-        self.rememberPanel();
-        self.panel = switch (tool) {
+    pub const ToolTab = struct { tool: Tool, pane: u8 = 0 };
+    pub fn showTool(self: *Shell, tool: Tool) void {
+        if (self.active_pane == .secondary and self.secondary != null) {
+            self.secondary_tool = tool;
+            switch (tool) {
+                .search => self.secondary_tools.search = true,
+                .git_diff => self.secondary_tools.git_diff = true,
+                .extensions => self.secondary_tools.extensions = true,
+            }
+        } else {
+            self.panel = switch (tool) {
+                .search => .search,
+                .git_diff => .git_diff,
+                .extensions => .extensions,
+            };
+            self.rememberPanel();
+        }
+    }
+    pub fn currentTool(self: *const Shell, pane: u8) ?Tool {
+        if (pane == 1) return self.secondary_tool;
+        return switch (self.panel) {
             .search => .search,
             .git_diff => .git_diff,
             .extensions => .extensions,
+            else => null,
         };
+    }
+    pub fn onToolTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: ToolTab) void {
+        self.rememberPanel();
+        self.active_pane = if (target.pane == 1 and self.secondary != null) .secondary else .primary;
+        self.showTool(target.tool);
         self.overlay = .none;
         cx.notify();
     }
-    pub fn onCloseTool(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), tool: Tool) void {
-        switch (tool) {
-            .search => self.tool_tabs.search = false,
-            .git_diff => self.tool_tabs.git_diff = false,
-            .extensions => self.tool_tabs.extensions = false,
+    pub fn onCloseTool(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: ToolTab) void {
+        const opened = if (target.pane == 1) &self.secondary_tools else &self.tool_tabs;
+        switch (target.tool) {
+            .search => opened.search = false,
+            .git_diff => opened.git_diff = false,
+            .extensions => opened.extensions = false,
         }
-        if ((tool == .search and self.panel == .search) or (tool == .git_diff and self.panel == .git_diff) or (tool == .extensions and self.panel == .extensions)) self.panel = .editor;
+        if (target.pane == 1) {
+            if (self.secondary_tool == target.tool) self.secondary_tool = null;
+        } else if (self.currentTool(0) == target.tool) self.panel = .editor;
+        self.editor_focus_request +%= 1;
         cx.notify();
     }
     pub fn onOpenKind(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), kind: @import("projects.zig").Kind) void {
@@ -400,6 +463,7 @@ pub const Shell = struct {
     pub fn onMenuInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data == .pointer_down and e.phase == .target) {
             self.menu_open = false;
+            self.popup = .none;
             self.split_menu_open = false;
             e.preventDefault();
             cx.notify();
@@ -408,6 +472,12 @@ pub const Shell = struct {
     pub fn onGlobal(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         try actions.globalInput(self, e, cx);
     }
+    pub fn onPaneInput(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) void {
+        if (event.data == .pointer_down) {
+            self.active_pane = if (pane == 1) .secondary else .primary;
+            cx.notify();
+        }
+    }
     pub fn onEditor(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !void {
         _ = actions.editorInput(self, e, cx, pane) catch |err| {
             try self.reportError(err);
@@ -415,8 +485,15 @@ pub const Shell = struct {
             return;
         };
     }
-    pub fn onTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+    pub fn onTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: u32) !void {
+        const index = target & 0x7fffffff;
+        if (target & 0x80000000 != 0) {
+            if (index < self.tabs.items.len) try @import("panes.zig").selectSecondary(self, index);
+            cx.notify();
+            return;
+        }
         if (index < self.tabs.items.len) {
+            self.tabs.items[index].primary = true;
             self.active = index;
             self.active_pane = .primary;
             if (self.panel != .markdown) self.panel = .editor;
@@ -425,7 +502,19 @@ pub const Shell = struct {
         }
         cx.notify();
     }
-    pub fn onCloseTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+    pub fn onCloseTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: u32) !void {
+        const index = target & 0x7fffffff;
+        if (index >= self.tabs.items.len) return;
+        if (target & 0x80000000 != 0 and self.tabs.items[index].primary) {
+            @import("panes.zig").closeSecondaryTab(self, index);
+            cx.notify();
+            return;
+        }
+        if (target & 0x80000000 == 0 and self.tabs.items[index].secondary) {
+            @import("panes.zig").closePrimaryTab(self, index);
+            cx.notify();
+            return;
+        }
         actions.requestTabClose(self, cx, index) catch |err| try self.reportError(err);
         if (self.overlay == .none) self.editor_focus_request +%= 1;
         cx.notify();
@@ -444,8 +533,8 @@ pub const Shell = struct {
     pub fn onDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: u8) !void {
         try actions.drag(self, e, cx, kind);
     }
-    pub fn onTabDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), id: workspace.DocumentId) !void {
-        try @import("panes.zig").tabInput(self, e, cx, id);
+    pub fn onTabDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), target: @import("panes.zig").DragTarget) !void {
+        try @import("panes.zig").tabInput(self, e, cx, target);
     }
     pub fn onTreeDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), index: u32) !void {
         try @import("panes.zig").treeInput(self, e, cx, index);
@@ -464,7 +553,7 @@ pub const Shell = struct {
             self.git.selected_path = path;
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
-            self.panel = .git_diff;
+            self.showTool(.git_diff);
             self.rememberPanel();
             if (self.git.combined and self.git.diff != null) {
                 if (@import("views/git_diff.zig").fileOffset(self.git.diff.?, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
@@ -487,7 +576,7 @@ pub const Shell = struct {
         const oid = try std.heap.page_allocator.dupe(u8, self.git.commits[index].oid);
         std.heap.page_allocator.free(self.git.selected_commit);
         self.git.selected_commit = oid;
-        self.panel = .git_diff;
+        self.showTool(.git_diff);
         self.rememberPanel();
         @import("services/git.zig").start(self, cx, .{ .history = oid }) catch |err| try self.reportError(err);
         cx.notify();
@@ -514,6 +603,7 @@ pub const Shell = struct {
             error.WindowNotFound => return,
             else => return err,
         };
+        try @import("terminal.zig").poll(self, cx);
         try @import("services/buffer_find.zig").poll(self, cx);
         try @import("services/agents.zig").poll(self, cx);
         try @import("services/language.zig").poll(self, cx);

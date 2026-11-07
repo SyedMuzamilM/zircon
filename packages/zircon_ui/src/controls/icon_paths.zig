@@ -1,6 +1,6 @@
 //! Generated from assets/icons by tools/generate_icons.py. Do not edit.
 //! Source SVGs and licenses: assets/icons/SOURCE.md and LICENSES.
-pub const Name = enum { folder, folder_open, file, code, zig, markdown, image, chevron_down, chevron_right, chevron_left, plus, close, search, split, sidebar, branch, history, settings, commands, more, check, extension, refresh, arrow_up, arrow_down, square, square_checked, square_mixed, commit, user, diff, minus, copy, stash };
+pub const Name = enum { folder, folder_open, file, code, zig, markdown, image, chevron_down, chevron_right, chevron_left, plus, close, search, split, sidebar, branch, history, settings, commands, more, check, extension, refresh, arrow_up, arrow_down, square, square_checked, square_mixed, commit, user, diff, minus, copy, stash, terminal, language_server, warning };
 pub const Stroke = struct { points: []const [2]f32, width: f32, opacity: f32 };
 pub fn strokes(name: Name) []const Stroke {
     return switch (name) {
@@ -150,6 +150,19 @@ pub fn strokes(name: Name) []const Stroke {
             .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 5.3914, 8.6958 }, .{ 5.3914, 17.7825 }, .{ 5.5172, 18.4148 }, .{ 5.8754, 18.9509 }, .{ 6.4113, 19.3089 }, .{ 7.0436, 19.4346 }, .{ 16.9565, 19.4346 }, .{ 17.5887, 19.3089 }, .{ 18.1246, 18.9509 }, .{ 18.4828, 18.4148 }, .{ 18.6086, 17.7825 }, .{ 18.6086, 8.6958 } } },
             .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 10.3478, 12.0000 }, .{ 13.6521, 12.0000 } } },
         },
+        .terminal => &.{
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 5.0000, 4.0000 }, .{ 19.0000, 4.0000 }, .{ 20.0000, 4.2679 }, .{ 20.7321, 5.0000 }, .{ 21.0000, 6.0000 }, .{ 21.0000, 18.0000 }, .{ 20.7321, 19.0000 }, .{ 20.0000, 19.7321 }, .{ 19.0000, 20.0000 }, .{ 5.0000, 20.0000 }, .{ 4.0000, 19.7321 }, .{ 3.2679, 19.0000 }, .{ 3.0000, 18.0000 }, .{ 3.0000, 6.0000 }, .{ 3.2679, 5.0000 }, .{ 4.0000, 4.2679 }, .{ 5.0000, 4.0000 }, .{ 5.0000, 4.0000 } } },
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 7.0000, 9.0000 }, .{ 10.0000, 12.0000 }, .{ 7.0000, 15.0000 } } },
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 13.0000, 15.0000 }, .{ 17.0000, 15.0000 } } },
+        },
+        .language_server => &.{
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 13.0000, 3.0000 }, .{ 5.0000, 13.0000 }, .{ 11.0000, 13.0000 }, .{ 10.0000, 21.0000 }, .{ 19.0000, 10.0000 }, .{ 13.0000, 10.0000 }, .{ 14.0000, 3.0000 } } },
+        },
+        .warning => &.{
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 12.0000, 3.0000 }, .{ 22.0000, 21.0000 }, .{ 2.0000, 21.0000 }, .{ 12.0000, 3.0000 }, .{ 12.0000, 3.0000 } } },
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 12.0000, 9.0000 }, .{ 12.0000, 14.0000 } } },
+            .{ .width = 1.8000, .opacity = 1.0000, .points = &.{ .{ 12.0000, 17.0000 }, .{ 12.0000, 18.0000 } } },
+        },
     };
 }
 pub fn fills(name: Name) []const [5]f32 {
@@ -188,5 +201,8 @@ pub fn fills(name: Name) []const [5]f32 {
         .minus => &.{},
         .copy => &.{},
         .stash => &.{},
+        .terminal => &.{},
+        .language_server => &.{},
+        .warning => &.{},
     };
 }

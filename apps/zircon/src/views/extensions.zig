@@ -138,7 +138,7 @@ fn available(self: *const Shell, b: *ui.Ui) !ui.Element {
     const v = @import("components.zig");
     const c = self.colors;
     var content: std.ArrayList(ui.Element) = .empty;
-    if (self.fields) |fields| try content.append(b.allocator(), try b.listen(try b.row(.{ .height = .{ .px = 36 }, .flex_shrink = 0, .gap = 8 }, &.{ try b.autofocus(try b.key(.{ .string = "extension-search" }, try b.styled(try b.view(fields.extension_query), .{ .flex_grow = 1, .min_width = .{ .px = 0 } }))), try command(b, .extension_search, if (self.catalog.busy) "Searching…" else "Search", c) }), .{ .on_input = b.onInput(queryInput) }));
+    if (self.fields) |fields| try content.append(b.allocator(), try b.listen(try b.row(.{ .height = .{ .px = 36 }, .flex_shrink = 0, .gap = 8 }, &.{ try b.requestFocus(try b.autofocus(try b.key(.{ .string = "extension-search" }, try b.styled(try b.view(fields.extension_query), .{ .flex_grow = 1, .min_width = .{ .px = 0 } }))), self.editor_focus_request), try command(b, .extension_search, if (self.catalog.busy) "Searching…" else "Search", c) }), .{ .on_input = b.onInput(queryInput) }));
     if (self.catalog.error_text.len > 0) try content.append(b.allocator(), try label(b, self.catalog.error_text, c.warning, 12));
     var entries: []const @import("../services/catalog.zig").Entry = &.{};
     if (self.catalog.parsed) |p| {

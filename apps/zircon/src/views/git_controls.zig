@@ -40,7 +40,7 @@ pub fn stashAction(self: *Shell, cx: *ui.Context(Shell), action: Command) !void 
         const oid = try std.heap.page_allocator.dupe(u8, stash.oid);
         std.heap.page_allocator.free(self.git.selected_commit);
         self.git.selected_commit = oid;
-        self.panel = .git_diff;
+        self.showTool(.git_diff);
         try service.start(self, cx, .{ .stash_show = stash.oid });
     } else try service.start(self, cx, .{ .stash_apply = .{ .oid = stash.oid, .pop = action == .git_stash_pop } });
 }
@@ -116,6 +116,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             try rows.append(b.allocator(), try commandRow(self, b, .git_stashes, "View stashes…", stash));
         },
         .branches, .stashes, .fetch_remote, .push_remote => {
+            if (self.git.menu == .branches or self.git.menu == .stashes) try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .gap = 4 }, &.{ try v.actionButton(b, c, .git_branches, "Branches", self.git.menu == .branches), try v.actionButton(b, c, .git_stashes, "Stashes", self.git.menu == .stashes) }));
             try rows.append(b.allocator(), try v.text(b, switch (self.git.menu) {
                 .branches => "Switch or create branch",
                 .stashes => "Stashes",
@@ -131,7 +132,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                         try options.append(b.allocator(), try b.button(.{ .label = branch.name, .children = &.{ try v.icon(b, if (current) .check else .branch, if (current) c.accent else c.muted, 14), try b.column(.{ .gap = 3, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try v.text(b, branch.name, c.text, 13), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{s} · {s}{s}", .{ branch.author, branch.subject, if (branch.remote) " · remote" else "" }), c.muted, 11) }) }, .on_click = if (self.git.busy) null else try b.onClickWith(Target{ .index = @intCast(i), .generation = self.git.status_generation }, chooseBranch), .style = .{ .direction = .row, .height = .{ .px = 52 }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 8, .right = 8 }, .radius = v.metrics.control_radius, .background = if (options.items.len == self.git.picker_index) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }));
                     };
                     const name = std.mem.trim(u8, query, " ");
-                    if (name.len > 0) try options.append(b.allocator(), try commandRow(self, b, .git_create_branch, try std.fmt.allocPrint(b.allocator(), "Create branch {s}", .{name}), true));
+                    if (canCreate(self, name)) try options.append(b.allocator(), try commandRow(self, b, .git_create_branch, try std.fmt.allocPrint(b.allocator(), "Create branch {s}", .{name}), true));
                 },
                 .stashes => {
                     for (references.stashes, 0..) |entry, i| if (@import("../view.zig").matches(query, entry.subject)) try options.append(b.allocator(), try b.button(.{ .label = entry.subject, .children = &.{ try v.icon(b, .stash, c.muted, 14), try v.text(b, entry.subject, c.text, 12) }, .on_click = if (self.git.busy) null else try b.onClickWith(Target{ .index = @intCast(i), .generation = self.git.status_generation }, chooseStash), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 8 }, .background = if (options.items.len == self.git.picker_index) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }));
@@ -196,7 +197,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
         },
         else => {},
     };
-    const create = self.git.menu == .branches and std.mem.trim(u8, query, " ").len > 0;
+    const create = self.git.menu == .branches and canCreate(self, std.mem.trim(u8, query, " "));
     const count = indices.items.len + @intFromBool(create);
     if (count > 0) {
         self.git.picker_index = @min(self.git.picker_index, count - 1);
@@ -221,5 +222,12 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
     e.preventDefault();
     e.stopPropagation();
     cx.notify();
+    return true;
+}
+
+fn canCreate(self: *const Shell, name: []const u8) bool {
+    if (name.len == 0) return false;
+    const refs = self.git.references orelse return false;
+    for (refs.branches) |branch| if (!branch.remote and std.mem.eql(u8, branch.name, name)) return false;
     return true;
 }

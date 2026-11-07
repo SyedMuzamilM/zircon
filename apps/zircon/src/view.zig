@@ -31,10 +31,12 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
+    if (self.terminal.sessions.items.len > 0) try layers.append(b.allocator(), try @import("terminal.zig").wakeElement(b));
     if (self.find.waiting and !self.find.busy) try layers.append(b.allocator(), try @import("services/language.zig").syntaxWake(b));
     if (self.language.syntax_waiting) try layers.append(b.allocator(), try @import("services/language.zig").syntaxWake(b));
     if (self.git.menu != .none) try layers.append(b.allocator(), try @import("views/git_controls.zig").render(self, b));
     if (self.split_menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").splitMenu(self, b));
+    if (self.popup != .none) try layers.append(b.allocator(), try @import("views/workspace_controls.zig").render(self, b));
     if (self.menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").menu(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlay(self, b));
     if (self.overlay == .none) if (self.language.completions) |message| {
@@ -65,8 +67,18 @@ fn sidebar(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Element {
 }
 
 pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
+    if (!self.terminal.visible or self.terminal.sessions.items.len == 0) return editorContent(self, b, width);
+    const available_height = @max(80, b.viewport().height - toolbar_height - status_height);
+    const right = self.terminal.dock == .right;
+    const terminal_width = if (right) @max(100, width * self.terminal.ratio) else width;
+    const terminal_height = if (right) available_height else @max(60, available_height * self.terminal.ratio);
+    const source = try editorContent(self, b, if (right) @max(100, width - terminal_width - 5) else width);
+    const terminal = try @import("terminal.zig").render(self, b, terminal_width, terminal_height);
+    return b.div(.{ .direction = if (right) .row else .column, .flex_grow = 1, .min_width = .{ .px = 0 }, .min_height = .{ .px = 0 }, .overflow = .hidden }, &.{ source, try b.listen(try b.key(.{ .string = "terminal-divider" }, try b.div(.{ .width = if (right) .{ .px = 5 } else .auto, .height = if (right) .auto else .{ .px = 5 }, .flex_shrink = 0, .background = self.colors.line, .hover_background = self.colors.hover }, &.{})), .{ .on_input = b.onInput(@import("terminal.zig").onDivider) }), terminal });
+}
+fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     const colors = self.colors;
-    if (self.panel != .editor and self.panel != .markdown) {
+    if (self.panel != .editor and self.panel != .markdown and self.secondary == null) {
         const panel = switch (self.panel) {
             .image => try @import("views/image.zig").render(self, b),
             .extensions => try @import("views/extensions.zig").render(self, b),
@@ -77,8 +89,8 @@ pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, &.{ try tabs(self, b, width), panel }));
     }
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try tabs(self, b, width));
     if (self.tabs.items.len == 0) {
+        try children.append(b.allocator(), try tabs(self, b, width));
         try children.append(b.allocator(), try emptyEditor(b, colors));
     } else {
         var panes: std.ArrayList(ui.Element) = .empty;
@@ -87,14 +99,16 @@ pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const available = @max(1, width - if (split_visible) @as(f32, 5) else 0);
         const vertical = self.secondary != null and self.split_vertical and !preview_visible;
         const primary_width = if (split_visible and !vertical) available * std.math.clamp(self.split_ratio, 0.2, 0.8) else width;
-        const primary_height: ui.Length = if (vertical) .{ .px = @max(1, b.viewport().height - toolbar_height - tab_height - status_height - 5) * self.split_ratio } else .auto;
+        const primary_height: ui.Length = if (vertical) .{ .px = @max(1, b.viewport().height - toolbar_height - status_height - 5 - (if (self.terminal.visible and self.terminal.dock == .bottom) (b.viewport().height - toolbar_height - status_height) * self.terminal.ratio else 0)) * self.split_ratio } else .auto;
         const tab = &self.tabs.items[@min(self.active, self.tabs.items.len - 1)];
         const primary_record = try self.workspace.getConst(tab.document);
-        var primary = try tab.editor.render(&primary_record.doc, b);
+        const primary_source = self.panel == .editor or self.panel == .markdown;
+        var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0));
         primary = try b.styled(primary, .{ .width = .{ .px = primary_width }, .flex_grow = 1, .min_height = .{ .px = 0 }, .min_width = .{ .px = 0 }, .overflow = .hidden });
-        primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 0), Shell.onEditor) });
-        primary = try b.requestFocus(if (self.agent_mode) primary else try b.autofocus(primary), if (!self.agent_mode and self.active_pane == .primary) self.editor_focus_request else 0);
-        try panes.append(b.allocator(), try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, primary_record, tab.document, &tab.editor, primary, 0))));
+        if (primary_source) primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 0), Shell.onEditor) });
+        if (self.currentTool(0) == .git_diff) primary = try b.requestFocus(try b.listen(try b.key(.{ .string = "primary-tool" }, primary), .{ .focusable = true }), if (self.active_pane == .primary) self.editor_focus_request else 0);
+        if (primary_source) primary = try b.requestFocus(if (self.agent_mode) primary else try b.autofocus(primary), if (!self.agent_mode and self.active_pane == .primary) self.editor_focus_request else 0);
+        try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, primary_record, tab.document, &tab.editor, primary, 0, primary_width))), .{ .on_capture = try b.onInputWith(@as(u8, 0), Shell.onPaneInput) }));
         if (preview_visible) {
             try panes.append(b.allocator(), try divider(b, colors, 1, false));
             const preview = try b.listen(try b.key(.{ .string = "markdown-preview" }, try self.preview.?.view.render(b)), .{ .focusable = true, .on_input = b.onInput(Shell.onPreview) });
@@ -102,11 +116,13 @@ pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         } else if (self.secondary) |*secondary| {
             try panes.append(b.allocator(), try divider(b, colors, 1, vertical));
             const record = try self.workspace.getConst(secondary.document);
-            var secondary_canvas = try secondary.editor.render(&record.doc, b);
+            const secondary_source = self.secondary_tool == null;
+            var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool);
             secondary_canvas = try b.styled(secondary_canvas, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
-            secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 1), Shell.onEditor) });
-            secondary_canvas = try b.requestFocus(secondary_canvas, if (!self.agent_mode and self.active_pane == .secondary) self.editor_focus_request else 0);
-            try panes.append(b.allocator(), try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, record, secondary.document, &secondary.editor, secondary_canvas, 1))));
+            if (secondary_source) secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = try b.onInputWith(@as(u8, 1), Shell.onEditor) });
+            if (self.secondary_tool == .git_diff) secondary_canvas = try b.requestFocus(try b.listen(try b.key(.{ .string = "secondary-tool" }, secondary_canvas), .{ .focusable = true }), if (self.active_pane == .secondary) self.editor_focus_request else 0);
+            if (secondary_source) secondary_canvas = try b.requestFocus(secondary_canvas, if (!self.agent_mode and self.active_pane == .secondary) self.editor_focus_request else 0);
+            try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, record, secondary.document, &secondary.editor, secondary_canvas, 1, if (vertical) width else available - primary_width))), .{ .on_capture = try b.onInputWith(@as(u8, 1), Shell.onPaneInput) }));
         }
         if (self.secondary != null and self.split_reverse and !preview_visible) std.mem.swap(ui.Element, &panes.items[0], &panes.items[2]);
         try children.append(b.allocator(), try b.key(.{ .string = "panes" }, try b.div(.{ .direction = if (vertical) .column else .row, .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, panes.items)));
@@ -126,10 +142,21 @@ pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     }
     return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, children.items));
 }
-fn paneChildren(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const @import("zircon_editor").Editor, canvas: ui.Element, pane: u8) ![]const ui.Element {
+fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool) !ui.Element {
+    if (tool) |which| return switch (which) {
+        .git_diff => @import("views/git_diff.zig").render(self, b),
+        .search => @import("views/search.zig").render(self, b),
+        .extensions => @import("views/extensions.zig").render(self, b),
+    };
+    return @import("views/image.zig").render(self, b);
+}
+fn paneChildren(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const @import("zircon_editor").Editor, canvas: ui.Element, pane: u8, pane_width: f32) ![]const ui.Element {
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try fileHeading(self, b, record, document, state));
-    if (self.find.visible and self.find.pane == pane and self.find.document != null and std.meta.eql(self.find.document.?, document)) try children.append(b.allocator(), try @import("views/buffer_find.zig").render(self, b));
+
+    try children.append(b.allocator(), try @import("views/chrome.zig").tabsForPane(self, b, pane_width, pane));
+    const source = self.currentTool(pane) == null and (pane == 1 or self.panel == .editor or self.panel == .markdown);
+    if (source) try children.append(b.allocator(), try fileHeading(self, b, record, document, state));
+    if (source and self.find.visible and self.find.pane == pane and self.find.document != null and std.meta.eql(self.find.document.?, document)) try children.append(b.allocator(), try @import("views/buffer_find.zig").render(self, b));
     try children.append(b.allocator(), canvas);
     return children.toOwnedSlice(b.allocator());
 }
