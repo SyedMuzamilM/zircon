@@ -1,0 +1,10 @@
+[
+  {
+    "file": "zircon-dark-git.png",
+    "sha256": "67d941f464ac17a6baaa4a9649f2821df92969bb5672f38298d7bb487fb7066b"
+  },
+  {
+    "file": "zircon-light-git.png",
+    "sha256": "74a69a06c8c1d3e369c059af0edba661d7381af8a07b26c6f58a0255b85a5e41"
+  }
+]

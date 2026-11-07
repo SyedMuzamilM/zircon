@@ -5,3 +5,4 @@ docs/reviews/**/language-evidence/*.txt -whitespace
 docs/reviews/**/grammar-retry-evidence/*.txt -whitespace
 docs/reviews/**/git-ui-evidence/*.txt -whitespace
 docs/reviews/**/recovery-storage-evidence/*.txt -whitespace
+docs/reviews/**/git-tabs-removed/*.txt -whitespace

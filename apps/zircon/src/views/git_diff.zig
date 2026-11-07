@@ -70,24 +70,6 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     }
     try tools.append(b.allocator(), try v.iconButton(b, c, .back_to_editor, "Editor", .close, false));
     try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 38 }, .flex_shrink = 0, .align_items = .center, .gap = 4, .padding = .{ .left = 10, .right = 8 }, .overflow = .hidden }, tools.items));
-    if (self.git.projection) |projection| {
-        var file_tabs: std.ArrayList(ui.Element) = .empty;
-        for (projection.files, 0..) |file, index| {
-            const active = std.mem.eql(u8, self.git.selected_path, file.path);
-            const target: controls.Target = .{ .file = index, .generation = self.git.diff_generation };
-            try file_tabs.append(b.allocator(), try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Git file tab: {s}", .{file.path}), .children = &.{ try v.fileGlyph(self, b, file.path, false, false, 13), try v.text(b, std.fs.path.basename(file.path), c.text, 11), try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d} −{d}", .{ file.added, file.deleted }), if (active) c.text else c.muted, 10) }, .on_click = try b.onClickWith(target, struct {
-                fn call(shell: *Shell, event: *ui.Event(ui.Click), cx: *ui.Context(Shell), value: controls.Target) !void {
-                    _ = event;
-                    const projection_value = shell.git.projection orelse return;
-                    if (value.file >= projection_value.files.len or value.generation != shell.git.diff_generation) return;
-                    try controls.selectFile(shell, projection_value.files[value.file]);
-                    shell.git.diff_scroll.offset = projection_value.fileOffset(&shell.git.diff_view, projection_value.files[value.file].path, shell.editor_options.font_size * shell.editor_options.line_height) orelse 0;
-                    cx.notify();
-                }
-            }.call), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 8, .right = 8 }, .radius = v.metrics.control_radius, .background = if (active) c.selected else null, .hover_background = c.hover, .flex_shrink = 0 } }));
-        }
-        try rows.append(b.allocator(), try b.listen(try b.row(.{ .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 3, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .overflow = .hidden }, file_tabs.items), .{ .on_input = b.onInput(controls.input) }));
-    }
     try rows.append(b.allocator(), try v.rule(b, c));
     var lines: std.ArrayList(ui.Element) = .empty;
     const top = self.git.diff_scroll.offset;
