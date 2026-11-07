@@ -3,7 +3,33 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 local_zig="$root/.tools/zig-aarch64-macos-0.17.1/zig"
-if [ -x "$local_zig" ]; then exec "$local_zig" "$@"; fi
-if command -v zig >/dev/null 2>&1 && [ "$(zig version)" = "0.17.1" ]; then exec zig "$@"; fi
-printf '%s\n' 'Zig 0.17.1 is required. Install it from https://ziglang.org/download/ and add it to PATH.' >&2
-exit 1
+if [ -x "$local_zig" ]; then
+    zircon_compiler="$local_zig"
+elif command -v zig >/dev/null 2>&1 && [ "$(zig version)" = "0.17.1" ]; then
+    zircon_compiler=$(command -v zig)
+else
+    printf '%s\n' 'Zig 0.17.1 is required. Install it from https://ziglang.org/download/ and add it to PATH.' >&2
+    exit 1
+fi
+case "${1-}" in
+    build|run|test|build-exe|build-lib|build-obj|translate-c)
+        if [ "$(uname -s)" = Darwin ]; then
+            for zircon_arg do
+                case "$zircon_arg" in
+                    --zig-lib|--zig-lib=*|--zig-lib-dir|--zig-lib-dir=*)
+                        printf '%s\n' 'tools/zig owns the private standard library; conflicting library overrides are not allowed.' >&2
+                        exit 1
+                        ;;
+                esac
+            done
+            zircon_lib=$(python3 "$root/tools/zig_stdlib_overlay.py" "$zircon_compiler")
+            zircon_command=$1
+            shift
+            if [ "$zircon_command" = build ]; then
+                exec "$zircon_compiler" build --zig-lib="$zircon_lib" "$@"
+            fi
+            exec "$zircon_compiler" "$zircon_command" --zig-lib-dir "$zircon_lib" "$@"
+        fi
+        ;;
+esac
+exec "$zircon_compiler" "$@"
