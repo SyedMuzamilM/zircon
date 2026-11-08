@@ -4,7 +4,7 @@ const g = @import("../layout/geometry.zig");
 const measure = @import("../layout/measure.zig");
 const interface = @import("../platform/interface.zig");
 pub const Input = interface.Input;
-pub const Click = struct { position: g.Point = .{}, button: enum { primary, secondary, middle } = .primary };
+pub const Click = struct { modifiers: interface.Modifiers = .{}, position: g.Point = .{}, button: enum { primary, secondary, middle } = .primary };
 pub const Phase = enum { capture, target, bubble };
 pub fn Event(comptime T: type) type {
     return struct {

@@ -17,9 +17,13 @@ pub const WindowOptions = struct {
     /// Dock icon; other desktop adapters use their native window icon.
     icon: ?images.View = null,
     chrome: enum { system, integrated } = .system,
+    menus: []const Menu = &.{},
     background: g.Color = .{ .r = 0.07, .g = 0.08, .b = 0.1 },
 };
 pub const Modifiers = packed struct(u8) { shift: bool = false, control: bool = false, alt: bool = false, command: bool = false, _padding: u4 = 0 };
+/// Menus are copied by the platform during creation. A null action is a separator.
+pub const MenuItem = struct { label: []const u8 = "", action: ?u32 = null, key: []const u8 = "", modifiers: Modifiers = .{ .command = true } };
+pub const Menu = struct { label: []const u8, items: []const MenuItem };
 pub const Key = enum { slash, comma, left_bracket, right_bracket, unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z };
 pub const Pointer = struct { position: g.Point, button: enum { primary, secondary, middle } = .primary, modifiers: Modifiers = .{}, clicks: u8 = 1 };
 /// Ordered UTF-8 byte range. Neither endpoint may split a code point.
@@ -78,6 +82,8 @@ pub const Input = union(enum) {
     pointer_up: Pointer,
     pointer_move: Pointer,
     pointer_leave,
+    files_hover: struct { position: g.Point, active: bool },
+    files_drop: struct { position: g.Point, paths: []const []const u8 },
     scroll: struct { position: g.Point, x: f32, y: f32, modifiers: Modifiers = .{} },
     key_down: struct { key: Key, modifiers: Modifiers = .{}, repeat: bool = false },
     text: []const u8,
@@ -85,6 +91,7 @@ pub const Input = union(enum) {
     unmark: u64,
     resize: g.Size,
     focus: bool,
+    action: u32,
     appearance: bool, // true for the system dark appearance
     close,
 };
@@ -114,6 +121,7 @@ pub const Surface = struct {
         typography: ?*const fn (*anyopaque, text_typography.Typography) void = null,
         system_dark: ?*const fn (*anyopaque) bool = null,
         set_appearance: ?*const fn (*anyopaque, ?bool) void = null,
+        choose_files: ?*const fn (*anyopaque, std.mem.Allocator) anyerror![][]u8 = null,
         choose_path: ?*const fn (*anyopaque, std.mem.Allocator, PathKind) anyerror!?[]u8 = null,
     };
     pub fn setCursor(s: Surface, cursor: Cursor) void {
@@ -143,6 +151,11 @@ pub const Surface = struct {
     }
     pub fn setTypography(s: Surface, value: text_typography.Typography) void {
         if (s.ops.typography) |function| function(s.context, value);
+    }
+    /// Caller owns the slice and each selected absolute path. Empty means cancel.
+    pub fn chooseFiles(s: Surface, allocator: std.mem.Allocator) ![][]u8 {
+        const function = s.ops.choose_files orelse return error.NativeDialogUnavailable;
+        return function(s.context, allocator);
     }
     pub fn choosePath(s: Surface, allocator: std.mem.Allocator, kind: PathKind) !?[]u8 {
         const function = s.ops.choose_path orelse return error.NativeDialogUnavailable;

@@ -36,6 +36,7 @@ pub const TextInput = struct {
     placeholder: []const u8 = "Type here…",
     appearance: Appearance = .{},
     show_focus_border: bool = true,
+    password: bool = false,
     height: f32 = 30,
     font_size: f32 = 13,
     leading_icon: ?icons.Name = null,
@@ -52,7 +53,7 @@ pub const TextInput = struct {
     }
     pub fn render(self: *const TextInput, b: *Ui) !Element {
         try (TextStyle{ .size = self.font_size }).validate();
-        const field: Field = .{ .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .show_focus_border = self.show_focus_border, .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked, .appearance = self.appearance, .height = self.height, .font_size = self.font_size, .leading_icon = self.leading_icon };
+        const field: Field = .{ .display = if (self.password) try masked(b.allocator(), self.bytes.items) else try b.allocator().dupe(u8, self.bytes.items), .display_cursor = if (self.password) maskedOffset(self.bytes.items, self.cursor) else self.cursor, .display_selection = if (self.password) .{ .start = maskedOffset(self.bytes.items, self.selection().start), .end = maskedOffset(self.bytes.items, self.selection().end) } else self.selection(), .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .show_focus_border = self.show_focus_border, .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked, .appearance = self.appearance, .height = self.height, .font_size = self.font_size, .leading_icon = self.leading_icon };
         return b.fluent().adopt(try b.custom(Field, field, .{ .height = .{ .px = self.height }, .overflow = .hidden })).id(.{ .string = "text-input" }).listeners(.{ .focusable = true, .on_input = b.onInput(onInput) }).build();
     }
     pub fn setAppearance(self: *TextInput, cx: *runtime.Context(TextInput), appearance: Appearance) void {
@@ -65,6 +66,15 @@ pub const TextInput = struct {
     }
     pub fn selection(self: *const TextInput) p.TextRange {
         return .{ .start = @min(self.anchor, self.cursor), .end = @max(self.anchor, self.cursor) };
+    }
+    fn indexAt(self: *const TextInput, metrics: measure.Measurer, x: f32) !usize {
+        if (!self.password) return metrics.index(self.bytes.items, .{ .size = self.font_size }, x);
+        const display = try masked(self.allocator, self.bytes.items);
+        defer self.allocator.free(display);
+        const count = metrics.index(display, .{ .size = self.font_size }, x) / 3;
+        var raw: usize = 0;
+        for (0..count) |_| raw = next(self.bytes.items, raw);
+        return raw;
     }
     fn replace(self: *TextInput, range: p.TextRange, bytes: []const u8) !void {
         if (!validLine(bytes)) return;
@@ -87,7 +97,7 @@ pub const TextInput = struct {
             .pointer_down => |pointer| {
                 if (pointer.button != .primary) return;
                 const metrics = try e.textMetrics();
-                const offset = metrics.index(self.bytes.items, .{ .size = self.font_size }, pointer.position.x - e.bounds.x - textInset(self.leading_icon));
+                const offset = try self.indexAt(metrics, pointer.position.x - e.bounds.x - textInset(self.leading_icon));
                 if (!pointer.modifiers.shift) self.anchor = offset;
                 self.cursor = offset;
                 self.dragging = true;
@@ -98,7 +108,7 @@ pub const TextInput = struct {
             .pointer_move => |pointer| {
                 if (!self.dragging) return;
                 const metrics = try e.textMetrics();
-                self.cursor = metrics.index(self.bytes.items, .{ .size = self.font_size }, pointer.position.x - e.bounds.x - textInset(self.leading_icon));
+                self.cursor = try self.indexAt(metrics, pointer.position.x - e.bounds.x - textInset(self.leading_icon));
                 e.preventDefault();
             },
             .pointer_up => {
@@ -149,6 +159,10 @@ pub const TextInput = struct {
                         self.cursor = self.bytes.items.len;
                     },
                     .c, .x => {
+                        if (self.password) {
+                            e.preventDefault();
+                            return;
+                        }
                         const selected = self.selection();
                         try e.writeClipboard(self.bytes.items[selected.start..selected.end]);
                         if (key.key == .x) try self.replace(selected, "");
@@ -197,6 +211,9 @@ pub const TextInput = struct {
     }
 };
 const Field = struct {
+    display: []const u8,
+    display_cursor: usize,
+    display_selection: p.TextRange,
     show_focus_border: bool,
     text: []const u8,
     placeholder: []const u8,
@@ -215,7 +232,7 @@ const Field = struct {
     }
     pub fn prepaint(self: *Field, cx: *custom.PrepaintCx, bounds: g.Rect, metrics: *LayoutState) !g.Rect {
         const size = try metrics.text(metrics.context, "M", .{ .size = self.font_size });
-        const caret: g.Rect = .{ .x = bounds.x + textInset(self.leading_icon) + metrics.caret(self.text, .{ .size = self.font_size }, self.cursor), .y = bounds.y + @max(0, bounds.height - size.height) / 2, .width = 1, .height = @min(size.height, bounds.height) };
+        const caret: g.Rect = .{ .x = bounds.x + textInset(self.leading_icon) + metrics.caret(self.display, .{ .size = self.font_size }, self.display_cursor), .y = bounds.y + @max(0, bounds.height - size.height) / 2, .width = 1, .height = @min(size.height, bounds.height) };
         if (cx.focused) {
             try cx.setTextInput(.{ .text = self.text, .revision = self.revision, .selection = self.selection, .marked = self.marked, .caret = caret });
             try cx.requestFrameAfter(0.5 - @mod(cx.time, 0.5));
@@ -232,14 +249,29 @@ const Field = struct {
         const inset = textInset(self.leading_icon);
         const content: g.Rect = .{ .x = bounds.x + inset, .y = caret.y, .width = @max(0, bounds.width - inset - 8), .height = caret.height };
         if (self.selection.start != self.selection.end) {
-            const left = metrics.caret(self.text, .{ .size = self.font_size }, self.selection.start);
-            const right = metrics.caret(self.text, .{ .size = self.font_size }, self.selection.end);
+            const left = metrics.caret(self.display, .{ .size = self.font_size }, self.display_selection.start);
+            const right = metrics.caret(self.display, .{ .size = self.font_size }, self.display_selection.end);
             try cx.painter.fillRect(.{ .bounds = .{ .x = content.x + left, .y = content.y, .width = right - left, .height = content.height }, .color = self.appearance.selection });
         }
-        try cx.painter.drawText(.{ .bounds = content, .text = if (self.text.len == 0) self.placeholder else self.text, .style = .{ .size = self.font_size, .color = if (self.text.len == 0) self.appearance.placeholder else self.appearance.foreground } });
+        try cx.painter.drawText(.{ .bounds = content, .text = if (self.text.len == 0) self.placeholder else self.display, .style = .{ .size = self.font_size, .color = if (self.text.len == 0) self.appearance.placeholder else self.appearance.foreground } });
         if (cx.focused and @mod(cx.time, 1.0) < 0.5) try cx.painter.fillRect(.{ .bounds = caret.*, .color = self.appearance.caret });
     }
 };
+fn masked(a: std.mem.Allocator, bytes: []const u8) ![]const u8 {
+    const count = try std.unicode.utf8CountCodepoints(bytes);
+    const display = try a.alloc(u8, count * 3);
+    for (0..count) |i| @memcpy(display[i * 3 ..][0..3], "•");
+    return display;
+}
+fn maskedOffset(bytes: []const u8, offset: usize) usize {
+    var raw: usize = 0;
+    var count: usize = 0;
+    while (raw < offset) {
+        raw = next(bytes, raw);
+        count += 1;
+    }
+    return count * 3;
+}
 fn textInset(leading: ?icons.Name) f32 {
     return if (leading != null) 28 else 8;
 }

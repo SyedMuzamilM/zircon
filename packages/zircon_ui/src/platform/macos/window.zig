@@ -142,6 +142,7 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     _ = objc.send(bool, app, "setActivationPolicy:", .{@as(isize, 0)});
     objc.send(void, app, "finishLaunching", .{});
     try registerView();
+    if (options.menus.len > 0) try installMenus(app, options.menus);
     const renderer = try metal.create(allocator);
     errdefer metal.destroy(renderer);
     const rect: objc.CGRect = .{ .size = .{ .width = options.width, .height = options.height } };
@@ -168,6 +169,9 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     objc.send(void, layer, "setFramebufferOnly:", .{true});
     objc.send(void, layer, "setPresentsWithTransaction:", .{false});
     objc.send(void, layer, "setMaximumDrawableCount:", .{@as(usize, 3)});
+    const drag_types = [_]Id{ objc.string("public.file-url"), objc.string("NSFilenamesPboardType") };
+    const native_types = objc.send(Id, objc.class("NSArray"), "arrayWithObjects:count:", .{ &drag_types, @as(usize, drag_types.len) });
+    objc.send(void, view, "registerForDraggedTypes:", .{native_types});
     objc.send(void, view, "setWantsLayer:", .{true});
     objc.send(void, view, "setLayer:", .{layer});
     objc.send(void, view, "setAutoresizingMask:", .{@as(usize, 2 | 16)});
@@ -196,6 +200,7 @@ const ops: platform.Surface.Ops = .{
     .system_dark = systemDark,
     .set_appearance = setAppearance,
     .choose_path = choosePath,
+    .choose_files = chooseFiles,
     .typography = setTypography,
     .font_families = fontFamilies,
     .deinit = deinit,
@@ -319,6 +324,64 @@ fn setTypography(raw: *anyopaque, value: text_typography.Typography) void {
     state(raw).font_generation +%= 1;
     metal.setTypography(state(raw).renderer, value);
 }
+fn chooseFiles(_: *anyopaque, allocator: std.mem.Allocator) ![][]u8 {
+    const panel = objc.send(Id, objc.class("NSOpenPanel"), "openPanel", .{}) orelse return error.NativeDialogUnavailable;
+    objc.send(void, panel, "setCanChooseDirectories:", .{false});
+    objc.send(void, panel, "setCanChooseFiles:", .{true});
+    objc.send(void, panel, "setAllowsMultipleSelection:", .{true});
+    objc.send(void, panel, "setPrompt:", .{objc.string("Upload")});
+    if (objc.send(isize, panel, "runModal", .{}) != 1) return allocator.alloc([]u8, 0);
+    const urls = objc.send(Id, panel, "URLs", .{});
+    return copyFileUrls(allocator, urls);
+}
+fn copyFileUrls(a: std.mem.Allocator, urls: Id) ![][]u8 {
+    var paths: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (paths.items) |path| a.free(path);
+        paths.deinit(a);
+    }
+    const count = objc.send(usize, urls, "count", .{});
+    for (0..count) |i| {
+        const url = objc.send(Id, urls, "objectAtIndex:", .{i});
+        if (!objc.send(bool, url, "isFileURL", .{})) continue;
+        const path = try a.dupe(u8, objc.fromString(objc.send(Id, url, "path", .{})));
+        errdefer a.free(path);
+        try paths.append(a, path);
+    }
+    return paths.toOwnedSlice(a);
+}
+fn dragPoint(s: *State, sender: Id) geometry.Point {
+    const point = objc.send(objc.CGPoint, sender, "draggingLocation", .{});
+    const local = objc.send(objc.CGPoint, s.view, "convertPoint:fromView:", .{ point, @as(Id, null) });
+    return .{ .x = @floatCast(local.x), .y = @floatCast(local.y) };
+}
+fn dragUrls(sender: Id) Id {
+    const board = objc.send(Id, sender, "draggingPasteboard", .{});
+    const classes = objc.send(Id, objc.class("NSArray"), "arrayWithObject:", .{objc.class("NSURL")});
+    return objc.send(Id, board, "readObjectsForClasses:options:", .{ classes, @as(Id, null) });
+}
+fn dragUpdated(object: Id, _: Sel, sender: Id) callconv(.c) usize {
+    const s = nativeState(object) orelse return 0;
+    const urls = dragUrls(sender);
+    if (objc.send(usize, urls, "count", .{}) == 0) return 0;
+    s.emit(.{ .files_hover = .{ .position = dragPoint(s, sender), .active = true } });
+    return 1;
+}
+fn dragExited(object: Id, _: Sel, sender: Id) callconv(.c) void {
+    const s = nativeState(object) orelse return;
+    s.emit(.{ .files_hover = .{ .position = dragPoint(s, sender), .active = false } });
+}
+fn performDrop(object: Id, _: Sel, sender: Id) callconv(.c) bool {
+    const s = nativeState(object) orelse return false;
+    const paths = copyFileUrls(s.allocator, dragUrls(sender)) catch return false;
+    defer {
+        for (paths) |path| s.allocator.free(path);
+        s.allocator.free(paths);
+    }
+    if (paths.len == 0) return false;
+    s.emit(.{ .files_drop = .{ .position = dragPoint(s, sender), .paths = paths } });
+    return true;
+}
 fn choosePath(_: *anyopaque, allocator: std.mem.Allocator, kind: platform.Surface.PathKind) !?[]u8 {
     const panel = objc.send(Id, objc.class("NSOpenPanel"), "openPanel", .{}) orelse return error.NativeDialogUnavailable;
     objc.send(void, panel, "setCanChooseDirectories:", .{kind == .folder});
@@ -416,8 +479,13 @@ fn registerView() !void {
     try add(pointerMove, "rightMouseDragged:", "v@:@");
     try add(pointerMove, "otherMouseDragged:", "v@:@");
     try add(scroll, "scrollWheel:", "v@:@");
+    try add(dragUpdated, "draggingEntered:", "Q@:@");
+    try add(dragUpdated, "draggingUpdated:", "Q@:@");
+    try add(dragExited, "draggingExited:", "v@:@");
+    try add(performDrop, "performDragOperation:", "B@:@");
     try add(didChangeAppearance, "viewDidChangeEffectiveAppearance", "v@:");
     try add(keyDown, "keyDown:", "v@:@");
+    try add(menuAction, "zirconMenuAction:", "v@:@");
     try add(insertText, "insertText:replacementRange:", "v@:@{_NSRange=QQ}");
     try add(insertSimpleText, "insertText:", "v@:@");
     try add(setMarkedText, "setMarkedText:selectedRange:replacementRange:", "v@:@{_NSRange=QQ}{_NSRange=QQ}");
@@ -438,6 +506,41 @@ fn registerView() !void {
     const protocol = objc_getProtocol("NSTextInputClient");
     if (protocol != null) _ = class_addProtocol(view_class, protocol);
     objc_registerClassPair(view_class);
+}
+fn menuAction(object: Id, _: Sel, sender: Id) callconv(.c) void {
+    const target_state = nativeState(object) orelse return;
+    const tag = objc.send(isize, sender, "tag", .{});
+    if (tag >= 0 and tag <= std.math.maxInt(u32)) target_state.emit(.{ .action = @intCast(tag) });
+}
+fn installMenus(app: Id, menus: []const platform.Menu) !void {
+    const bar = objc.send(Id, objc.class("NSMenu"), "new", .{}) orelse return error.MenuCreationFailed;
+    defer objc.release(bar);
+    for (menus) |menu| {
+        const heading = objc.send(Id, objc.class("NSMenuItem"), "new", .{}) orelse return error.MenuCreationFailed;
+        defer objc.release(heading);
+        objc.send(void, heading, "setTitle:", .{objc.string(menu.label)});
+        const submenu = objc.send(Id, objc.class("NSMenu"), "new", .{}) orelse return error.MenuCreationFailed;
+        defer objc.release(submenu);
+        objc.send(void, submenu, "setTitle:", .{objc.string(menu.label)});
+        // Responder-chain target selection follows the key window. No view
+        // identity from the first window is retained in application-wide menus.
+        for (menu.items) |entry| {
+            if (entry.action == null) {
+                objc.send(void, submenu, "addItem:", .{objc.send(Id, objc.class("NSMenuItem"), "separatorItem", .{})});
+                continue;
+            }
+            const item = objc.send(Id, objc.send(Id, objc.class("NSMenuItem"), "alloc", .{}), "initWithTitle:action:keyEquivalent:", .{ objc.string(entry.label), sel_registerName("zirconMenuAction:"), objc.string(entry.key) }) orelse return error.MenuCreationFailed;
+            defer objc.release(item);
+            objc.send(void, item, "setTag:", .{@as(isize, @intCast(entry.action.?))});
+            const mods = entry.modifiers;
+            const mask: usize = (if (mods.shift) @as(usize, 1 << 17) else 0) | (if (mods.control) @as(usize, 1 << 18) else 0) | (if (mods.alt) @as(usize, 1 << 19) else 0) | (if (mods.command) @as(usize, 1 << 20) else 0);
+            objc.send(void, item, "setKeyEquivalentModifierMask:", .{mask});
+            objc.send(void, submenu, "addItem:", .{item});
+        }
+        objc.send(void, heading, "setSubmenu:", .{submenu});
+        objc.send(void, bar, "addItem:", .{heading});
+    }
+    objc.send(void, app, "setMainMenu:", .{bar});
 }
 fn yes(_: Id, _: Sel) callconv(.c) bool {
     return true;

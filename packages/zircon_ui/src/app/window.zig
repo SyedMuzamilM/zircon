@@ -229,6 +229,8 @@ pub const Window = struct {
         const point: ?g.Point = switch (input) {
             .pointer_down, .pointer_up, .pointer_move => |p| p.position,
             .scroll => |s| s.position,
+            .files_drop => |s| s.position,
+            .files_hover => |s| s.position,
             else => null,
         };
         const route_root = modalRoot(frame) orelse frame.root.?.index;
@@ -280,14 +282,14 @@ pub const Window = struct {
             .close => w.acceptClose(),
             .pointer_up => |p| {
                 const button = buttonTarget(frame, hit);
-                if (p.button == .primary and button != null and w.pressed == button) try w.click(button.?, p.position);
+                if (p.button == .primary and button != null and w.pressed == button) try w.click(button.?, p.position, p.modifiers);
             },
             .key_down => |key| {
                 if (key.key == .tab) {
                     w.focus = nextFocus(frame, w.focus, key.modifiers.shift);
                     w.dirty = true;
                 }
-                if (key.key == .enter or key.key == .space) if (w.focus) |i| try w.click(i, .{});
+                if (key.key == .enter or key.key == .space) if (w.focus) |i| try w.click(i, .{}, key.modifiers);
             },
             else => {},
         };
@@ -333,10 +335,10 @@ pub const Window = struct {
         w.cursor = cursor;
         if (w.surface) |surface| surface.setCursor(cursor);
     }
-    fn click(w: *Window, index: u32, point: g.Point) !void {
+    fn click(w: *Window, index: u32, point: g.Point, key_modifiers: platform.Modifiers) !void {
         const node = w.frames.committed.nodes.items[index];
         if (node.kind == .button) if (node.kind.button.on_click) |handler| {
-            var e: events.Event(events.Click) = .{ .data = .{ .position = point }, .bounds = w.frames.committed.bounds[index], ._surface = w.surface, ._window_size = w.dimensions };
+            var e: events.Event(events.Click) = .{ .data = .{ .position = point, .modifiers = key_modifiers }, .bounds = w.frames.committed.bounds[index], ._surface = w.surface, ._window_size = w.dimensions };
             try handler.dispatch(&w.app, &e);
         };
     }
