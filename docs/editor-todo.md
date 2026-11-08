@@ -243,7 +243,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **WORK-02: Editable combined excerpts for search/diff/diagnostics.**
   Depends: TEXT-07, LANG-06, SEARCH-04, GIT-08, PERF-01. Scope: source/excerpt mapping and transactions. Done: edits map to current source documents with correct boundaries, undo/save/selection, duplicate excerpts and stale revision behavior; editing does not silently change an unrelated file.
-  Progress: pinned Zed source and all direct consumers are mapped in [the multibuffer research](research/zed-multibuffer-consumers-2026-11-08.md). `packages/zircon_multibuffer` now maps source-backed excerpts, anchors and projected edits, and the Git service creates it for matching open files. The current patch rows remain display-only. A read/write multibuffer editor, UTF-16 display points, grouped history and search/diagnostics migration remain open.
+  Progress: pinned Zed source and all direct consumers are mapped in [the multibuffer research](research/zed-multibuffer-consumers-2026-11-08.md). `packages/zircon_multibuffer` now maps source-backed excerpts, anchors and revision-aware projected edits, and the Git service attaches every distinct matching open file to the combined projection. The current patch rows remain display-only. A read/write multibuffer editor, UTF-16 display points, grouped history and search/diagnostics migration remain open.
 
 - [ ] **WORK-03: Multi-root projects and independent project contexts.**
   Depends: SEARCH-01, GIT-02, LANG-01, TEXT-05, WORK-01. Scope: project/worktree identities and UI. Done: search, Git, tasks, server sessions, recovery and terminals are scoped to explicit roots/projects; duplicate paths and project switches cannot cross-deliver results.

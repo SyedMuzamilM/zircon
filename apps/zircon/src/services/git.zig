@@ -84,7 +84,47 @@ pub const Model = struct {
         self.editable = projection;
         self.editable_source = id;
     }
+    pub fn setEditableProjection(self: *Model, projection: multibuffer.MultiBuffer, source: ?workspace.DocumentId) void {
+        self.clearEditable();
+        self.editable = projection;
+        self.editable_source = source;
+    }
 };
+fn matchesPath(absolute: []const u8, relative: []const u8) bool {
+    if (std.mem.eql(u8, absolute, relative)) return true;
+    if (absolute.len <= relative.len or !std.mem.endsWith(u8, absolute, relative)) return false;
+    const separator = absolute[absolute.len - relative.len - 1];
+    return separator == '/' or separator == '\\';
+}
+fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
+    var projection = multibuffer.MultiBuffer.init(a);
+    errdefer projection.deinit();
+    var source: ?workspace.DocumentId = null;
+    var source_count: usize = 0;
+    for (self.tabs.items, 0..) |tab, tab_index| {
+        const record = self.workspace.getConst(tab.document) catch continue;
+        const path = record.path orelse continue;
+        var duplicate = false;
+        for (self.tabs.items[0..tab_index]) |previous| if (std.meta.eql(previous.document, tab.document)) {
+            duplicate = true;
+            break;
+        };
+        if (duplicate) continue;
+        var included = false;
+        for (diff.hunks) |hunk| if (matchesPath(path, hunk.path)) {
+            included = true;
+            break;
+        };
+        if (!included) continue;
+        var snapshot = record.doc.snapshot();
+        defer snapshot.deinit();
+        try projection.addSource(tab.document, snapshot);
+        try projection.setExcerpts(tab.document, &.{.{ .start = 0, .end = snapshot.byteLen() }});
+        source = tab.document;
+        source_count += 1;
+    }
+    self.git.setEditableProjection(projection, if (source_count == 1) source else null);
+}
 pub fn ensureEditable(self: *Shell) !void {
     if (self.git.editable != null or self.git.selected_path.len == 0) return;
     for (self.tabs.items) |tab| {
@@ -375,6 +415,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         self.git.diff = diff;
         value.diff = null;
         self.git.diff_scroll.offset = 0;
+        try rebuildEditable(self, diff);
         if (self.git.reveal_path.len > 0) {
             if (@import("../views/git_diff.zig").fileOffset(diff, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| self.git.diff_scroll.offset = offset;
             a.free(self.git.reveal_path);

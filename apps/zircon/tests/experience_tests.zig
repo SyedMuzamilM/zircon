@@ -60,6 +60,12 @@ const Ops = struct {
         try self.openPath(path);
         cx.notify();
     }
+    fn openKeepActive(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), path: []const u8) !void {
+        const old_active = self.active;
+        try self.openPath(path);
+        self.active = old_active;
+        cx.notify();
+    }
     fn configure(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), home: []const u8) !void {
         try self.loadExtensions(cx, home);
     }
@@ -75,7 +81,10 @@ const Ops = struct {
         return self.git.generation;
     }
     fn editableGitSource(self: *const zircon.Shell) bool {
-        return self.git.editable != null and self.git.editable_source != null;
+        return if (self.git.editable) |projection| projection.sources.items.len > 0 else false;
+    }
+    fn editableGitSources(self: *const zircon.Shell) usize {
+        return if (self.git.editable) |projection| projection.sources.items.len else 0;
     }
     fn previewImage(self: *const zircon.Shell) ?u64 {
         return self.preview.?.view.imageIdentity("image.png");
@@ -389,6 +398,7 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     defer app.deinit();
     const h = try open(&app, root, "main.zig");
     const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.openKeepActive, .{"src/helper.zig"});
     try send(&app, h, .git_changes);
     try settle(&app);
     try click(&app, h, "View diff");
@@ -415,6 +425,7 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try t.expectEqual(before_navigation, try app.read(owner, Ops.gitGeneration, .{}));
     try settle(&app);
     try t.expect(try app.read(owner, Ops.editableGitSource, .{}));
+    try t.expectEqual(@as(usize, 2), try app.read(owner, Ops.editableGitSources, .{}));
     var numbered = false;
     var addition = false;
     for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .text) {

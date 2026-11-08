@@ -26,11 +26,11 @@ The Git UI dependency list includes `multi_buffer`, `buffer_diff`, `editor`, `la
 
 ## Zircon implementation
 
-`packages/zircon_multibuffer` now provides the first source-backed core. A source is a workspace `DocumentId` plus an immutable `zircon_text.Snapshot`. An excerpt stores source identity and a source byte range. The projection concatenates excerpt bytes for rendering, while `edit(ProjectedRange, replacement)` returns a `SourceEdit` with the original document ID and range. Edits crossing an excerpt or source boundary return `CrossExcerptEdit`.
+`packages/zircon_multibuffer` now provides the first source-backed core. A source is a workspace `DocumentId` plus an immutable `zircon_text.Snapshot`. An excerpt stores source identity and a source byte range. The projection concatenates excerpt bytes for rendering, while `edit(ProjectedRange, replacement)` returns a `SourceEdit` with the original document ID, the source revision observed by the projection, and the source range. Edits crossing an excerpt or source boundary return `CrossExcerptEdit`. `setSources` replaces several source snapshots and their excerpt order atomically, retaining the previous projection if validation or allocation fails.
 
 `Anchor` stores source identity, byte offset and insertion bias. `updateSource` remaps excerpt ranges through `text.Change` mappings and swaps the retained snapshot. `mapAnchor` applies the same mapping. Revision mismatches return `StaleSourceRevision`. The package does not mutate workspace documents; the caller must group returned source edits through the existing workspace transaction and publish `DocumentChange` values.
 
-The Git service now creates this source-backed projection when a selected Git path matches any open workspace document, including the combined diff path that can be selected while a Git job is already running. The existing patch renderer remains a display projection. The experience suite asserts that selecting a Git file creates an editable source projection, while the current UI still refuses to type into the diff rows. That preserves current behavior until a multibuffer editor is wired into the view.
+The Git service now creates this source-backed projection for every distinct open workspace document represented in a combined Git diff, while retaining the single-file selection path. The existing patch renderer remains a display projection. The experience suite opens two changed files, asserts that both source identities are retained, and still verifies that patch rows remain display-only until a multibuffer editor is wired into the view.
 
 ## Gaps before calling it full support
 

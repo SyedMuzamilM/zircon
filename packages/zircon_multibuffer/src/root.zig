@@ -9,8 +9,20 @@ pub const Anchor = struct { source: SourceId, offset: usize, bias: Bias = .after
 pub const ExcerptId = struct { value: u64, generation: u64 };
 pub const Excerpt = struct { id: ExcerptId, source: SourceId, source_range: text.Range };
 pub const ProjectedRange = struct { start: usize, end: usize };
-pub const SourceEdit = struct { source: SourceId, range: text.Range, replacement: []const u8 };
+pub const SourceEdit = struct {
+    source: SourceId,
+    /// Revision observed when the projection was built. The workspace owner
+    /// must compare this with the live document before applying the edit.
+    source_revision: u64,
+    range: text.Range,
+    replacement: []const u8,
+};
 pub const SourceSnapshot = struct { source: SourceId, revision: u64, snapshot: text.Snapshot };
+pub const SourceInput = struct {
+    source: SourceId,
+    snapshot: text.Snapshot,
+    excerpts: []const text.Range,
+};
 
 const StoredSource = struct { id: SourceId, snapshot: text.Snapshot };
 pub const ExcerptView = struct { value: Excerpt, projection_start: usize, projection_end: usize };
@@ -36,6 +48,43 @@ pub const MultiBuffer = struct {
         if (self.sourceIndex(id) != null) return error.SourceAlreadyPresent;
         try self.sources.append(self.allocator, .{ .id = id, .snapshot = snapshot.clone() });
         self.generation +%= 1;
+    }
+
+    /// Replace the projection's source set and excerpt order as one operation.
+    /// Every snapshot is cloned before the old state is released, so an
+    /// allocation or invalid-range failure leaves the current view usable.
+    pub fn setSources(self: *MultiBuffer, inputs: []const SourceInput) !void {
+        var next_sources: std.ArrayList(StoredSource) = .empty;
+        errdefer {
+            for (next_sources.items) |*source| source.snapshot.deinit();
+            next_sources.deinit(self.allocator);
+        }
+        var next_excerpts: std.ArrayList(ExcerptView) = .empty;
+        errdefer next_excerpts.deinit(self.allocator);
+        var next_excerpt = self.next_excerpt;
+        try next_sources.ensureTotalCapacity(self.allocator, inputs.len);
+        for (inputs) |input| {
+            for (next_sources.items) |source| if (std.meta.eql(source.id, input.source)) return error.SourceAlreadyPresent;
+            for (input.excerpts) |range| try input.snapshot.validateRange(range);
+            next_sources.appendAssumeCapacity(.{ .id = input.source, .snapshot = input.snapshot.clone() });
+            try next_excerpts.ensureTotalCapacity(self.allocator, next_excerpts.items.len + input.excerpts.len);
+            for (input.excerpts) |range| {
+                next_excerpts.appendAssumeCapacity(.{
+                    .value = .{ .id = .{ .value = next_excerpt, .generation = self.generation }, .source = input.source, .source_range = range },
+                    .projection_start = 0,
+                    .projection_end = 0,
+                });
+                next_excerpt +%= 1;
+            }
+        }
+        for (self.sources.items) |*source| source.snapshot.deinit();
+        self.sources.deinit(self.allocator);
+        self.excerpts.deinit(self.allocator);
+        self.sources = next_sources;
+        self.excerpts = next_excerpts;
+        self.next_excerpt = next_excerpt;
+        self.generation +%= 1;
+        self.reindex();
     }
     pub fn removeSource(self: *MultiBuffer, id: SourceId) !void {
         const index = self.sourceIndex(id) orelse return error.SourceNotFound;
@@ -84,6 +133,10 @@ pub const MultiBuffer = struct {
         if (anchor.offset > source.snapshot.byteLen()) return error.InvalidAnchor;
         return anchor;
     }
+    pub fn sourceRevision(self: *const MultiBuffer, id: SourceId) !u64 {
+        const source = self.sourceConst(id) orelse return error.SourceNotFound;
+        return source.snapshot.revision();
+    }
     pub fn mapAnchor(self: *const MultiBuffer, anchor: Anchor, change: *const text.Change) !Anchor {
         _ = self.sourceConst(anchor.source) orelse return error.SourceNotFound;
         return .{ .source = anchor.source, .offset = change.map(anchor.offset, switch (anchor.bias) {
@@ -115,7 +168,7 @@ pub const MultiBuffer = struct {
     pub fn edit(self: *const MultiBuffer, range: ProjectedRange, replacement: []const u8) !SourceEdit {
         const mapped = try self.sourceRange(range);
         if (!std.unicode.utf8ValidateSlice(replacement)) return error.InvalidUtf8;
-        return .{ .source = mapped.source, .range = mapped.range, .replacement = replacement };
+        return .{ .source = mapped.source, .source_revision = try self.sourceRevision(mapped.source), .range = mapped.range, .replacement = replacement };
     }
     pub fn excerptList(self: *const MultiBuffer) []const ExcerptView {
         return self.excerpts.items;

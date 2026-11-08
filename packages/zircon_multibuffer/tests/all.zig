@@ -74,3 +74,32 @@ test "stale source updates and cross-source edits are refused" {
     try t.expectError(error.StaleSourceRevision, mb.updateSource(id, &change, after));
     try t.expectError(error.CrossExcerptEdit, mb.edit(.{ .start = 1, .end = 4 }, "z"));
 }
+
+test "setSources atomically replaces a multi-file projection" {
+    var first = try snapshot("one\ntwo");
+    defer first.deinit();
+    const second_id = workspace.DocumentId{ .workspace = 1, .slot = 2, .generation = 1 };
+    var second = try snapshot("alpha\nbeta");
+    defer second.deinit();
+    var mb = multi.MultiBuffer.init(t.allocator);
+    defer mb.deinit();
+    try mb.setSources(&.{
+        .{ .source = id, .snapshot = first, .excerpts = &.{.{ .start = 0, .end = 3 }} },
+        .{ .source = second_id, .snapshot = second, .excerpts = &.{.{ .start = 6, .end = 10 }} },
+    });
+    const bytes = try mb.read(t.allocator);
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings("one\nbeta", bytes);
+    const edit = try mb.edit(.{ .start = 4, .end = 8 }, "BETA");
+    try t.expectEqual(second_id, edit.source);
+    try t.expectEqual(@as(u64, second.revision()), edit.source_revision);
+
+    var replacement = try snapshot("replacement");
+    defer replacement.deinit();
+    try t.expectError(error.InvalidRange, mb.setSources(&.{
+        .{ .source = id, .snapshot = replacement, .excerpts = &.{.{ .start = 1, .end = 999 }} },
+    }));
+    const retained = try mb.read(t.allocator);
+    defer t.allocator.free(retained);
+    try t.expectEqualStrings("one\nbeta", retained);
+}

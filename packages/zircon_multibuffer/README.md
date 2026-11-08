@@ -1,6 +1,6 @@
 # Zircon multibuffer
 
-`zircon_multibuffer` is the source-backed projection used by editable Git, search, diagnostics and blame views. A `SourceId` is a workspace `DocumentId`. Sources retain immutable snapshots. Excerpts identify source ranges and receive stable excerpt identities. The projection exposes concatenated bytes for the editor while `edit(ProjectedRange, replacement)` returns a source document ID and source range.
+`zircon_multibuffer` is the source-backed projection used by editable Git, search, diagnostics and blame views. A `SourceId` is a workspace `DocumentId`. Sources retain immutable snapshots. Excerpts identify source ranges and receive stable excerpt identities. `setSources` installs multiple source snapshots and ordered excerpts atomically. The projection exposes concatenated bytes for the editor while `edit(ProjectedRange, replacement)` returns a source document ID, the source revision observed by the projection, and a source range.
 
 Anchors store a source identity, byte offset and insertion bias. Apply a source `text.Change` to remap anchors and excerpt ranges before replacing the retained snapshot. A projected edit that crosses an excerpt or source boundary returns `CrossExcerptEdit`; callers must split or reject it before mutating a workspace document. A stale source revision returns `StaleSourceRevision`.
 
