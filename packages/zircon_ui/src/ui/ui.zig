@@ -22,6 +22,9 @@ pub const Button = struct {
 pub const Ui = struct {
     frame: *tree.Frame,
     owner: identity.Token,
+    pub fn fluent(ui: *Ui) @import("fluent.zig").Fluent {
+        return .{ .ui = ui.*, .epoch = ui.frame.epoch };
+    }
     /// Renders another entity through a const borrow and records its version in
     /// this frame. The child entity owns its state and generated event handlers.
     pub fn view(ui: *Ui, handle: anytype) !elements.Element {
@@ -122,7 +125,7 @@ pub const Ui = struct {
         ui.frame.nodes.appendAssumeCapacity(.{ .style = style, .kind = .{ .custom = custom_value } });
         return .{ .index = @intCast(ui.frame.nodes.items.len - 1), .frame_epoch = ui.frame.epoch };
     }
-    pub fn allocator(ui: *Ui) std.mem.Allocator {
+    pub fn allocator(ui: *const Ui) std.mem.Allocator {
         return ui.frame.allocator();
     }
     pub fn viewport(ui: *const Ui) @import("../layout/geometry.zig").Size {
@@ -212,12 +215,7 @@ pub const Ui = struct {
         }
     }
     fn container(ui: *Ui, style: styles.Style, children: []const elements.Element) !elements.Element {
-        for (children, 0..) |child, i| {
-            if ((try ui.frame.get(child)).parent != null) return error.ElementAlreadyParented;
-            for (children[0..i]) |previous| if (previous.index == child.index) return error.DuplicateChild;
-        }
-        const indices = try ui.frame.allocator().alloc(u32, children.len);
-        for (children, 0..) |child, i| indices[i] = child.index;
+        const indices = try ui.frame.prepareChildren(children);
         const parent = try ui.frame.append(.{ .style = style, .children = indices, .kind = .container });
         for (indices) |index| ui.frame.nodes.items[index].parent = parent.index;
         return parent;

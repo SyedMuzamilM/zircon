@@ -6,6 +6,7 @@ const Shell = @import("../shell.zig").Shell;
 const v = @import("components.zig");
 pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui.Element {
     const c = self.colors;
+    const f = b.fluent();
     const tree_row = self.project_entry_spacing;
     if (self.left_panel != .project) return @import("git_sidebar.zig").render(self, b, width, window_height - v.metrics.titlebar - v.metrics.status);
     const header = try b.row(.{ .height = .{ .px = 32 }, .flex_shrink = 0, .align_items = .center, .gap = 7, .padding = .{ .left = 10, .right = 5 } }, &.{ try v.icon(b, .folder_open, c.muted, 16), try b.styled(try v.text(b, std.fs.path.basename(self.workspace.root_path), c.folder, 13), .{ .flex_grow = 1, .text = .{ .size = 13, .color = c.folder }, .overflow = .hidden }), try v.iconButton(b, c, .new_file, "New file", .plus, false) });
@@ -24,10 +25,20 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui
         if (if (entry.directory) self.project_folder_icons else self.project_file_icons) try children.append(b.allocator(), try v.fileGlyph(self, b, entry.path, entry.directory, entry.expanded, 16));
         try children.append(b.allocator(), try v.text(b, entry.name, if (entry.directory) c.folder else c.text, 13));
         const accessible = if (contribution != null and contribution.? == .symbol) try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ contribution.?.symbol, entry.name }) else entry.name;
-        const row = try b.button(.{ .key = .named(entry.path), .on_input = b.onInputWith(Shell.onTreeDrag, @intCast(index)), .label = accessible, .children = children.items, .on_click = b.onClickWith(Shell.onTree, @as(u32, @intCast(index))), .style = .{ .direction = .row, .height = .{ .px = tree_row }, .flex_shrink = 0, .align_items = .center, .gap = 5, .padding = .{ .left = 5, .right = 8 }, .background = if (selected) c.selected else null, .hover_background = if (selected) c.selected else c.hover, .overflow = .hidden } });
+        const row = try f.button(.{ .label = accessible }).id(.named(entry.path))
+            .flex().h_px(tree_row).shrink_0().items_center().gap_px(5)
+            .padding(.{ .left = 5, .right = 8 }).overflow_hidden()
+            .when(selected, .{ .background = c.selected })
+            .hover_bg(if (selected) c.selected else c.hover)
+            .on_click(b.onClickWith(Shell.onTree, @as(u32, @intCast(index))))
+            .on_input(b.onInputWith(Shell.onTreeDrag, @intCast(index)))
+            .children(children.items).build();
         try rows.append(b.allocator(), row);
     }
     if (rows.items.len == 0) try rows.append(b.allocator(), try b.styled(try v.text(b, "This folder is empty.", c.muted, 12), .{ .padding = ui.Insets.all(12), .text = .{ .size = 12, .color = c.muted } }));
-    const list = try b.listen(try b.key(.{ .string = "project-files" }, try b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .scroll_y = @max(0, -visible.top), .overflow = .hidden }, rows.items)), .{ .on_input = b.onInput(Shell.onTreeInput) });
-    return b.key(.named("sidebar"), b.column(.{ .width = .{ .px = width }, .flex_shrink = 0, .background = c.sidebar, .overflow = .hidden }, &.{ header, list }));
+    const list = f.div().id(.named("project-files")).grow().min_h_px(0)
+        .scroll_y_px(@max(0, -visible.top)).overflow_hidden()
+        .on_input(b.onInput(Shell.onTreeInput)).children(rows.items);
+    return f.div().id(.named("sidebar")).w_px(width).shrink_0().bg(c.sidebar)
+        .overflow_hidden().children(.{ header, list }).build();
 }

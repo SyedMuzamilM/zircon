@@ -35,6 +35,7 @@ pub const Frame = struct {
     epoch: u64,
     root: ?elements.Element = null,
     retiring: bool = false,
+    fluent_error: ?anyerror = null,
     bounds: []const @import("../layout/geometry.zig").Rect = &.{},
     scene: @import("../graphics/scene.zig").Frame = .{ .items = &.{}, .background = .black },
     timeline: ?*@import("../animation/timeline.zig").Timeline = null,
@@ -58,6 +59,7 @@ pub const Frame = struct {
     pub fn reset(frame: *Frame) !void {
         const next = try epoch();
         frame.retire();
+        frame.fluent_error = null;
         _ = frame.arena.reset(.{ .retain_with_limit = retained_arena_limit });
         frame.nodes = .empty;
         frame.cleanups = .empty;
@@ -86,7 +88,6 @@ pub const Frame = struct {
         frame.dependencies = .empty;
         frame.app = null;
         frame.root = null;
-        frame.retiring = false;
         frame.bounds = &.{};
         frame.scene = .{ .items = &.{}, .background = .black };
         frame.timeline = null;
@@ -131,9 +132,19 @@ pub const Frame = struct {
         return .{ .index = @intCast(frame.nodes.items.len - 1), .frame_epoch = frame.epoch };
     }
     pub fn setRoot(frame: *Frame, root: elements.Element) !void {
+        if (frame.fluent_error) |err| return err;
         if ((try frame.get(root)).parent != null) return error.InvalidRoot;
         try frame.validateKeys();
         frame.root = root;
+    }
+    pub fn prepareChildren(frame: *Frame, children: []const elements.Element) ![]const u32 {
+        for (children, 0..) |child, i| {
+            if ((try frame.get(child)).parent != null) return error.ElementAlreadyParented;
+            for (children[0..i]) |previous| if (previous.index == child.index) return error.DuplicateChild;
+        }
+        const indices = try frame.allocator().alloc(u32, children.len);
+        for (children, 0..) |child, i| indices[i] = child.index;
+        return indices;
     }
     fn keyScope(frame: *const Frame, index: u32) ?u32 {
         var parent = frame.nodes.items[index].parent;

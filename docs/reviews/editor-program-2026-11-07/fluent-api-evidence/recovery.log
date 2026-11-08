@@ -1,0 +1,37 @@
+Recovery evidence: /var/folders/sq/7sjt760s67v1mr3598d_3rr00000gn/T/zircon-recovery-e9w5ycr_
+[
+  {
+    "scenario": "saved-untitled-panes",
+    "result": "passed",
+    "terminated_by": "SIGKILL",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  },
+  {
+    "scenario": "external-rewrite",
+    "result": "passed",
+    "terminated_by": "SIGKILL",
+    "original_file_sha256": "6a02998fc887029bb9f1640553871d8764c1db7c210b18d609734265f3d42533"
+  },
+  {
+    "scenario": "discarded-document",
+    "result": "passed",
+    "terminated_by": "SIGKILL",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  },
+  {
+    "scenario": "close-clean",
+    "result": "passed",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  },
+  {
+    "scenario": "close-discard",
+    "result": "passed",
+    "original_file_sha256": "e4afa146b6cac84107134c69a12c93b983d4a09d5f628f325d11aa7347a8e895"
+  }
+]
+Build Summary: 4/4 steps succeeded
+verify-recovery success
++- run python3 success 3s
+   +- compile exe zircon-recovery-journey debug native success 5s MaxRSS:691M
+      +- options cached
+

@@ -245,6 +245,7 @@ pub fn build(b: *std.Build) void {
         .{ "borrowed_read", "read/update results cannot borrow pointers or slices; copy into a caller-owned output argument" },
         .{ "invalid_handler", "onClick requires fn (*Self, *Event(Click), *Context(Self)) !void" },
         .{ "invalid_child", "UI child must be Element or !Element" },
+        .{ "fluent_unknown_style", "unknown style field: not_a_style" },
         .{ "borrowed_handler", "handler payloads must be pointer-free copied values" },
         .{ "borrowed_error_payload", "handler payloads must be pointer-free copied values" },
         .{ "borrowed_error_result", "read/update results cannot borrow pointers or slices; copy into a caller-owned output argument" },

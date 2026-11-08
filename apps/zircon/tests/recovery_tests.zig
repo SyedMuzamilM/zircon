@@ -5,8 +5,16 @@ const t = std.testing;
 const Shell = zircon.Shell;
 
 const Ops = struct {
+    fn queueCheckpoint(self: *Shell, cx: *ui.Context(Shell)) !void {
+        self.recovery.?.committed = null;
+        self.recovery.?.due = 0;
+        try self.pollLanguage(cx);
+    }
     fn busy(self: *const Shell) bool {
         return self.recovery.?.busy;
+    }
+    fn checkpointStarted(self: *const Shell) bool {
+        return self.recovery.?.busy or self.recovery.?.last_checkpoint != null;
     }
     fn failed(self: *const Shell) bool {
         return self.recovery.?.last_error != null;
@@ -246,7 +254,7 @@ test "window discard refuses edits made after confirmation while a writer is act
     _ = try app.step(0);
     try app.update(owner, Ops.replace, .{"confirmed"});
     _ = try app.step(0.1);
-    _ = try app.step(0.4);
+    try app.update(owner, Ops.queueCheckpoint, .{});
     try t.expect(try app.read(owner, Ops.busy, .{}));
     try app.update(owner, Ops.confirmWindowDiscard, .{});
     try app.update(owner, Ops.replace, .{"newer unconfirmed work"});
@@ -270,7 +278,7 @@ test "document discard cannot remove later edits during an active checkpoint" {
     _ = try app.step(0);
     try app.update(owner, Ops.replace, .{"old work"});
     _ = try app.step(0.1);
-    _ = try app.step(0.4);
+    try app.update(owner, Ops.queueCheckpoint, .{});
     try t.expect(try app.read(owner, Ops.busy, .{}));
     try app.update(owner, Ops.command, .{.close_tab});
     try app.update(owner, Ops.command, .{.discard_dirty});
@@ -316,14 +324,15 @@ test "failed checkpoint preserves the old backup and a persistent warning surviv
     try t.expect(warning);
 }
 
-test "destroying the application with a writer active releases the session lock" {
+test "destroying the application with a checkpoint outstanding releases the session lock" {
     var temp = t.tmpDir(.{});
     defer temp.cleanup();
     const root = try temp.dir.realPathFileAlloc(t.io, ".", t.allocator);
     defer t.allocator.free(root);
     const home = try std.fs.path.join(t.allocator, &.{ root, "recovery" });
     defer t.allocator.free(home);
-    var store_path: []u8 = undefined;
+    var store_path: []u8 = &.{};
+    defer t.allocator.free(store_path);
     {
         var app = try ui.App.init(.{ .allocator = t.allocator });
         defer app.deinit();
@@ -331,10 +340,10 @@ test "destroying the application with a writer active releases the session lock"
         const owner = try app.windowEntity(Shell, handle);
         try app.read(owner, Ops.storePath, .{ t.allocator, &store_path });
         _ = try app.step(0);
-        _ = try app.step(0.3);
+        // Queue the actual writer without a step that can drain its result.
+        try app.update(owner, Ops.queueCheckpoint, .{});
         try t.expect(try app.read(owner, Ops.busy, .{}));
     }
-    defer t.allocator.free(store_path);
     const dir = try std.Io.Dir.cwd().openDir(t.io, store_path, .{});
     defer dir.close(t.io);
     const lock = try dir.createFile(t.io, "lock", .{ .truncate = false, .lock = .exclusive, .lock_nonblocking = true });
@@ -357,7 +366,7 @@ test "continuous edits cannot move the checkpoint deadline beyond its maximum ag
         try app.dispatch(handle, .{ .text = "a" });
         _ = try app.step(@as(f64, @floatFromInt(iteration)) * 0.1);
     }
-    try t.expect(try app.read(owner, Ops.busy, .{}));
+    try t.expect(try app.read(owner, Ops.checkpointStarted, .{}));
     try settle(&app, owner, 1.1);
     try app.update(owner, Ops.checkpointBytes, .{"aaaaaaaaaa"});
 }

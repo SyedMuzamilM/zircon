@@ -1,4 +1,5 @@
 test {
+    _ = @import("fluent_tests.zig");
     _ = @import("composition_tests.zig");
     _ = @import("external_tests.zig");
     _ = @import("image_tests.zig");

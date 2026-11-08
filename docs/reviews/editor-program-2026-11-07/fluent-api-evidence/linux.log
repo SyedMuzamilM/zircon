@@ -1,0 +1,18 @@
+Build Summary: 14/14 steps succeeded
+test-build success
++- compile test debug x86_64-linux-gnu cached 75ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 82ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 75ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 70ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 72ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 41ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 94ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu success 3s MaxRSS:173M
+|  +- options cached
++- compile test debug x86_64-linux-gnu cached 41ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu cached 72ms MaxRSS:31M
++- compile test debug x86_64-linux-gnu success 2s MaxRSS:163M
+|  +- options (reused)
++- compile test debug x86_64-linux-gnu success 2s MaxRSS:238M
+   +- options (reused)
+

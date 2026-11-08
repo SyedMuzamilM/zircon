@@ -78,10 +78,15 @@ pub fn fileColor(c: Palette, path: []const u8) ui.Color {
 }
 
 pub fn menuRow(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, shortcut: []const u8, selected: bool) !ui.Element {
-    return b.button(.{ .key = .{ .number = @backingInt(action) }, .label = label, .children = &.{
-        try b.styled(try text(b, label, c.text, 13), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden, .text = .{ .size = 13, .color = c.text } }),
-        try text(b, shortcut, c.muted, 12),
-    }, .on_click = b.onClickWith(Shell.onCommand, action), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 20, .padding = .{ .left = 10, .right = 10 }, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover, .overflow = .hidden } });
+    const f = b.fluent();
+    return f.button(.{ .label = label }).id(.{ .number = @backingInt(action) })
+        .flex().h_px(30).shrink_0().items_center().gap_px(20).px_px(10)
+        .rounded_px(metrics.control_radius).hover_bg(c.hover).overflow_hidden()
+        .when(selected, .{ .background = c.selected })
+        .on_click(b.onClickWith(Shell.onCommand, action))
+        .child(f.text(label).grow().min_w_px(0).overflow_hidden().text_size(13).text_color(c.text))
+        .child(f.text(shortcut).text_size(12).text_color(c.muted).shrink_0().overflow_hidden())
+        .build();
 }
 
 /// Align to the invoking control, flip above it when needed, and stay inside

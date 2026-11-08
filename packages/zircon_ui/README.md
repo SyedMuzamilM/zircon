@@ -16,6 +16,8 @@ A view implements `pub fn render(self: *const Self, builder: *ui.Ui) !ui.Element
 
 ## Entity ownership and effects
 
+For GPUI-style composition, use `const f = builder.fluent();` and return a chain such as `f.div().p_4().gap_2().child(f.text("Hello")).build()`. Styles, keys and typed callbacks use the same frame data as the eager API. Chain copies alias one draft, and adding a child finalizes that child. See the [fluent API and ownership guide](../../docs/zircon-ui-composition.md#gpui-style-element-chains) before storing or reusing chains.
+
 `createEntity` creates application-owned state; `createInScope` and `Context.createChild` give explicit scope/parent ownership. Handles are non-owning, typed and generational. Root views belong to their window's scope. Children are destroyed before their owners. Optional entity cleanup has signature `deinit(*Self, std.mem.Allocator) void`.
 
 `App.read` callbacks receive `*const Self`. `App.update` receives `(*Self, *Context(Self), ...)`. Access results cannot borrow pointers or slices; copy owned snapshots into caller-provided outputs. Conflicting borrows, expired contexts, stale identities and wrong-thread calls return errors. Destructors must not reenter the application.
