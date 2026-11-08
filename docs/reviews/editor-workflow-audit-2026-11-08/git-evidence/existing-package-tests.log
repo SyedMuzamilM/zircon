@@ -1,0 +1,18 @@
+1/17 all.test.unborn repository status staging and unstaging preserve file bytes...OK
+2/17 all.test.status diff history blame and explicit commits use actual repository state...OK
+3/17 all.test.rename and detached HEAD preserve exact paths and report branch mode...OK
+4/17 all.test.failed operations retain files and reject escaping paths...OK
+5/17 all.test.line diff maps insert modification deletion and EOF without quadratic unbounded work...OK
+6/17 all.test.bare repositories have no worktree and are not accepted as editor repositories...OK
+7/17 all.test.literal pathspecs stage only the named file even when its name resembles Git magic...OK
+8/17 all.test.failed commit hook leaves index and worktree available for retry...OK
+9/17 all.test.untracked baselines are empty and path conversion rejects sibling directories...OK
+10/17 all.test.branch stash and network workflows use real repositories and a local bare remote...OK
+11/17 all.test.combined review includes staged unstaged and untracked files including an unborn repository...OK
+12/17 all.test.conflicting stash pop preserves its stash and reports the failed apply...OK
+13/17 all.test.file line counts include net partially staged changes deletions and untracked EOF...OK
+14/17 all.test.unborn counts use current bytes for staged additions and binary files...OK
+15/17 all.test.rename line counts preserve unusual target paths and untracked symlinks count link text...OK
+16/17 all.test.oversized untracked content leaves counts unknown without hiding the file...OK
+17/17 all.test.unsaved buffer hunks preserve source numbering context and deleted text...OK
+All 17 tests passed.

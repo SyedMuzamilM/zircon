@@ -1,0 +1,75 @@
+1/4 audit-git-app.test.audit external commits refresh visible history...history cached head=7741b7e918dd5bcc58a92ad977cb826028de5b8a, external head=76f3d00f0e82f8d92aabfedcae22c3768d10b306
+
+====== expected this output: =========
+76f3d00f0e82f8d92aabfedcae22c3768d10b306␃
+
+======== instead found this: =========
+7741b7e918dd5bcc58a92ad977cb826028de5b8a␃
+
+======================================
+First difference occurs on line 1:
+expected:
+76f3d00f0e82f8d92aabfedcae22c3768d10b306
+ ^ ('\x36')
+found:
+7741b7e918dd5bcc58a92ad977cb826028de5b8a
+ ^ ('\x37')
+FAIL (TestExpectedEqual)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:696:9: 0x1028f7bf3 in expectEqualStrings (audit-git-app)
+        return error.TestExpectedEqual;
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:43:9: 0x1028f7e8f in matchesHead (audit-git-app)
+        try t.expectEqualStrings(expected, self.git.commits[0].oid);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x1028f79cb in read__func_3601 (audit-git-app)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:101:5: 0x1028f7483 in test.audit external commits refresh visible history (audit-git-app)
+    try app.read(owner,Ops.matchesHead,.{oid});
+    ^
+2/4 audit-git-app.test.audit selecting a stash installs its patch...stash selected=b40a98979d613271b5d53528f50a3d4cf3c5cf78, diff installed=false
+FAIL (TestUnexpectedResult)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:584:14: 0x1028f628f in expect (audit-git-app)
+    if (!ok) return error.TestUnexpectedResult;
+             ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:69:9: 0x1028f647b in stashInstalled (audit-git-app)
+        try t.expect(self.git.diff != null);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x1028f6257 in read__func_3596 (audit-git-app)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:118:5: 0x1028f5d33 in test.audit selecting a stash installs its patch (audit-git-app)
+    try app.read(owner,Ops.stashInstalled,.{});
+    ^
+3/4 audit-git-app.test.audit mixed binary and text comparison exposes both files...mixed comparison status entries=2, projected files=1
+FAIL (BinaryFileMissingFromComparison)
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:64:9: 0x1028f43c3 in mixedBinaryVisible (audit-git-app)
+        return error.BinaryFileMissingFromComparison;
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x1028f41c7 in read__func_3588 (audit-git-app)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:139:5: 0x1028f3f67 in test.audit mixed binary and text comparison exposes both files (audit-git-app)
+    try app.read(owner,Ops.mixedBinaryVisible,.{});
+    ^
+4/4 audit-git-app.test.audit space-name changed file becomes an editable source...space-name editable sources=0
+expected 1, found 0
+FAIL (TestExpectedEqual)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:93:17: 0x1024e8f6b in expectEqualInner__func_1081 (audit-git-app)
+                return error.TestExpectedEqual;
+                ^
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:57:5: 0x1024e90a7 in expectEqual (audit-git-app)
+    return expectEqualInner(T, expected, actual);
+    ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:56:9: 0x1024e912b in spacedSourceEditable (audit-git-app)
+        try t.expectEqual(@as(usize,1),projection.sources.items.len);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x1024e85e7 in read__func_1077 (audit-git-app)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-app.zig:159:5: 0x1024e7dbf in test.audit space-name changed file becomes an editable source (audit-git-app)
+    try app.read(owner,Ops.spacedSourceEditable,.{});
+    ^
+0 passed; 0 skipped; 4 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/70cebe30b82b45160503cf0c615a88ec/audit-git-app --seed=0xe5b9cd09

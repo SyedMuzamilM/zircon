@@ -1,0 +1,56 @@
+1/3 audit-git-paths.test.audit quoted Git paths preserve source identity...status actual path { 108, 105, 110, 101, 10, 110, 97, 109, 101, 46, 116, 120, 116 }; parsed hunk path { 34, 98, 47, 108, 105, 110, 101, 92, 110, 110, 97, 109, 101, 46, 116, 120, 116, 34 }
+
+====== expected this output: =========
+line
+name.txt␃
+
+======== instead found this: =========
+"b/line\nname.txt"␃
+
+======================================
+First difference occurs on line 1:
+expected:
+line
+^ ('\x6c')
+found:
+"b/line\nname.txt"
+^ ('\x22')
+FAIL (TestExpectedEqual)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:696:9: 0x100be6f1f in expectEqualStrings (root)
+        return error.TestExpectedEqual;
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-paths.zig:50:5: 0x100c02bb7 in test.audit quoted Git paths preserve source identity (root)
+    try t.expectEqualStrings(status.entries[0].path, diff.hunks[0].path);
+    ^
+2/3 audit-git-paths.test.audit binary and pure rename retain comparison entries...binary patch bytes=117, exposed hunks=0
+diff --git a/binary.dat b/binary.dat
+index 782abe7..fdaf61f 100644
+Binary files a/binary.dat and b/binary.dat differ
+
+OK
+3/3 audit-git-paths.test.audit space Git paths preserve source identity...status actual path { 115, 112, 97, 99, 101, 32, 110, 97, 109, 101, 46, 116, 120, 116 }; parsed hunk path { 115, 112, 97, 99, 101, 32, 110, 97, 109, 101, 46, 116, 120, 116, 9 }
+
+====== expected this output: =========
+space name.txt␃
+
+======== instead found this: =========
+space name.txt	␃
+
+======================================
+First difference occurs on line 1:
+expected:
+space name.txt
+              ^ (end of string)
+found:
+space name.txt	⏎
+              ^ ('\x09')
+FAIL (TestExpectedEqual)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:696:9: 0x100be6f1f in expectEqualStrings (root)
+        return error.TestExpectedEqual;
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/../../../../../tmp/audit-git-paths.zig:87:5: 0x100be79af in test.audit space Git paths preserve source identity (root)
+    try t.expectEqualStrings(status.entries[0].path, diff.hunks[0].path);
+    ^
+1 passed; 0 skipped; 2 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/a36da4161b88de943ea86b17dc54a0e3/root --seed=0x152da1f7

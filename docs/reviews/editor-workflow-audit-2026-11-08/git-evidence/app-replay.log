@@ -1,0 +1,76 @@
+/Users/syedmuzamilm/work/expirements/zigpui/.tools/zig-aarch64-macos-0.17.1/zig test -Odebug --dep zircon --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep agent_fixture --dep language_fixture --dep image_fixture -Mroot=/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig -Odebug --dep zircon_widgets --dep zircon_git_ui --dep zircon_ui --dep zircon_text --dep zircon_workspace --dep zircon_multibuffer --dep zircon_editor --dep zircon_git --dep zircon_extensions --dep zircon_search --dep zircon_language --dep zircon_markdown --dep zircon_agent -Mzircon=apps/zircon/src/root.zig -Odebug --dep zircon_options -Mzircon_ui=packages/zircon_ui/src/root.zig -Odebug -Mzircon_text=packages/zircon_text/src/root.zig -Odebug --dep zircon_text -Mzircon_workspace=packages/zircon_workspace/src/root.zig -Magent_fixture=packages/zircon_agent/tests/fixture.py -Mlanguage_fixture=packages/zircon_language/tests/fixture.py -Mimage_fixture=packages/zircon_extensions/tests/fixtures/pixel.png -Odebug --dep zircon_ui -Mzircon_widgets=packages/zircon_widgets/src/root.zig -Odebug --dep zircon_ui --dep zircon_editor --dep zircon_text --dep zircon_workspace --dep zircon_multibuffer --dep zircon_git --dep zircon_widgets -Mzircon_git_ui=packages/zircon_git_ui/src/root.zig -Odebug --dep zircon_text --dep zircon_workspace -Mzircon_multibuffer=packages/zircon_multibuffer/src/root.zig -Odebug --dep zircon_text --dep zircon_ui -Mzircon_editor=packages/zircon_editor/src/root.zig -Odebug -Mzircon_git=packages/zircon_git/src/root.zig -Odebug --dep oxide_manifest -Mzircon_extensions=packages/zircon_extensions/src/root.zig -Odebug --dep zircon_text -Mzircon_search=packages/zircon_search/src/root.zig -Odebug --dep zircon_text -Mzircon_language=packages/zircon_language/src/root.zig -Odebug -Mzircon_markdown=packages/zircon_markdown/src/root.zig -Odebug -Mzircon_agent=packages/zircon_agent/src/root.zig -Mzircon_options=.zig-cache/o/66b85da3a6ef02db4543b459a7bd8944/options.zig -Moxide_manifest=packages/zircon_extensions/examples/oxide/extension.json --cache-dir .zig-cache --global-cache-dir /Users/syedmuzamilm/.cache/zig --build-root . --name audit-git-app-repros --zig-lib-dir .tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/
+1/4 app-repros.test.audit external commits refresh visible history...history cached head=999977dd2b4ae58413908fc3ec5a82acc474a4da, external head=42a6f4e246b0253dcecd9e75cb470bac60e4e4ad
+
+====== expected this output: =========
+42a6f4e246b0253dcecd9e75cb470bac60e4e4ad␃
+
+======== instead found this: =========
+999977dd2b4ae58413908fc3ec5a82acc474a4da␃
+
+======================================
+First difference occurs on line 1:
+expected:
+42a6f4e246b0253dcecd9e75cb470bac60e4e4ad
+^ ('\x34')
+found:
+999977dd2b4ae58413908fc3ec5a82acc474a4da
+^ ('\x39')
+FAIL (TestExpectedEqual)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:696:9: 0x10265fbf3 in expectEqualStrings (audit-git-app-repros)
+        return error.TestExpectedEqual;
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:43:9: 0x10265fe8f in matchesHead (audit-git-app-repros)
+        try t.expectEqualStrings(expected, self.git.commits[0].oid);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x10265f9cb in read__func_3601 (audit-git-app-repros)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:101:5: 0x10265f483 in test.audit external commits refresh visible history (audit-git-app-repros)
+    try app.read(owner,Ops.matchesHead,.{oid});
+    ^
+2/4 app-repros.test.audit selecting a stash installs its patch...stash selected=2136ec418b8be81af79658d6b870196dbd482d5f, diff installed=false
+FAIL (TestUnexpectedResult)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:584:14: 0x10265e28f in expect (audit-git-app-repros)
+    if (!ok) return error.TestUnexpectedResult;
+             ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:69:9: 0x10265e47b in stashInstalled (audit-git-app-repros)
+        try t.expect(self.git.diff != null);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x10265e257 in read__func_3596 (audit-git-app-repros)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:118:5: 0x10265dd33 in test.audit selecting a stash installs its patch (audit-git-app-repros)
+    try app.read(owner,Ops.stashInstalled,.{});
+    ^
+3/4 app-repros.test.audit mixed binary and text comparison exposes both files...mixed comparison status entries=2, projected files=1
+FAIL (BinaryFileMissingFromComparison)
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:64:9: 0x10265c3c3 in mixedBinaryVisible (audit-git-app-repros)
+        return error.BinaryFileMissingFromComparison;
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x10265c1c7 in read__func_3588 (audit-git-app-repros)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:139:5: 0x10265bf67 in test.audit mixed binary and text comparison exposes both files (audit-git-app-repros)
+    try app.read(owner,Ops.mixedBinaryVisible,.{});
+    ^
+4/4 app-repros.test.audit space-name changed file becomes an editable source...space-name editable sources=0
+expected 1, found 0
+FAIL (TestExpectedEqual)
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:93:17: 0x102250f6b in expectEqualInner__func_1081 (audit-git-app-repros)
+                return error.TestExpectedEqual;
+                ^
+.tools/zig-stdlib-overlay/1b615ecea8c6ebf45736cdfb/std/testing.zig:57:5: 0x1022510a7 in expectEqual (audit-git-app-repros)
+    return expectEqualInner(T, expected, actual);
+    ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:56:9: 0x10225112b in spacedSourceEditable (audit-git-app-repros)
+        try t.expectEqual(@as(usize,1),projection.sources.items.len);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/app/app.zig:322:9: 0x1022505e7 in read__func_1077 (audit-git-app-repros)
+        return @call(.auto, function, .{object} ++ args);
+        ^
+/Users/syedmuzamilm/work/expirements/zigpui/docs/reviews/editor-workflow-audit-2026-11-08/git-evidence/app-repros.zig:159:5: 0x10224fdbf in test.audit space-name changed file becomes an editable source (audit-git-app-repros)
+    try app.read(owner,Ops.spacedSourceEditable,.{});
+    ^
+0 passed; 0 skipped; 4 failed.
+error: the following test command failed with exit code 1:
+.zig-cache/o/3c6b805e5411ddea482cee113e192244/audit-git-app-repros --seed=0x83c9066f
