@@ -2,6 +2,7 @@
 const ui = @import("zircon_ui");
 pub const Command = enum {
     show_symbol_info,
+    go_to_definition,
     cut,
     copy,
     paste,
@@ -128,6 +129,7 @@ pub const Command = enum {
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
     .{ .command = .show_symbol_info, .label = "Language: show symbol information", .shortcut = "⌥⌘I" },
+    .{ .command = .go_to_definition, .label = "Language: go to definition", .shortcut = "F12" },
     .{ .command = .cut, .label = "Cut", .shortcut = "⌘X" },
     .{ .command = .copy, .label = "Copy", .shortcut = "⌘C" },
     .{ .command = .paste, .label = "Paste", .shortcut = "⌘V" },

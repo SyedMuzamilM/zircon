@@ -102,11 +102,13 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
     try client.didOpen(uri, "zig", snap);
     const one = try client.completion(uri, snap.revision(), .{ .line = 0, .character = 3 });
     const two = try client.completion(uri, snap.revision(), .{ .line = 0, .character = 3 });
+    const definition = try client.definition(uri, snap.revision(), .{ .line = 0, .character = 3 });
     var diagnostics = false;
+    var definition_seen = false;
     var ids: [2]u64 = undefined;
     var count: usize = 0;
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
-    while (!diagnostics or count < 2) {
+    while (!diagnostics or !definition_seen or count < 2) {
         const messages = try client.drain(t.allocator);
         defer language.deinitMessages(t.allocator, messages);
         for (messages) |message| switch (message.data) {
@@ -122,6 +124,12 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
                     ids[count] = value.id;
                     count += 1;
                 }
+            },
+            .locations => |value| {
+                try t.expectEqual(definition, value.id);
+                try t.expectEqual(@as(usize, 1), value.items.len);
+                try t.expectEqualStrings(uri, value.items[0].uri);
+                definition_seen = true;
             },
             .failure => return error.FixtureFailure,
             else => {},

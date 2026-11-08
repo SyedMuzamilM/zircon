@@ -36,6 +36,7 @@ const Document = struct {
     diagnostics: ?lsp.Message = null,
 };
 pub const Pending = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64, cursor: usize };
+const PendingDefinition = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64 };
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
@@ -46,6 +47,8 @@ pub const Model = struct {
     completions: ?lsp.Message = null,
     completion_index: usize = 0,
     pending: ?Pending = null,
+    definitions: ?lsp.Message = null,
+    definition_pending: ?PendingDefinition = null,
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -67,8 +70,14 @@ pub const Model = struct {
         self.completion_index = 0;
         self.pending = null;
     }
+    pub fn clearDefinition(self: *Model) void {
+        if (self.definitions) |*value| value.deinit();
+        self.definitions = null;
+        self.definition_pending = null;
+    }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         self.clearCompletion();
+        self.clearDefinition();
         for (self.documents.items) |*doc| {
             if (doc.diagnostics) |*value| value.deinit();
             a.free(doc.uri);
@@ -306,6 +315,14 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     changed = true;
                 },
                 .hover => try symbol_hover.accept(self, cx, session_index, message.data),
+                .locations => |value| if (self.language.definition_pending) |pending| {
+                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                    if (self.language.definitions) |*old| old.deinit();
+                    self.language.definitions = message;
+                    moved = true;
+                    changed = true;
+                    try acceptDefinition(self, cx, session_index, self.language.definitions.?.data);
+                },
                 else => {},
             }
         }
@@ -329,6 +346,80 @@ pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
         return;
     };
     return error.NoLanguageServer;
+}
+
+pub fn requestDefinition(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try poll(self, cx);
+    const current = try actions.active(self);
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
+        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const request_id = try client.definition(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head));
+        self.language.clearDefinition();
+        self.language.definition_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+        cx.notify();
+        return;
+    };
+    return error.NoLanguageServer;
+}
+
+fn selectDocument(self: *Shell, id: ws.DocumentId) !bool {
+    for (self.tabs.items, 0..) |tab, index| if (std.meta.eql(tab.document, id)) {
+        self.active = index;
+        self.active_pane = .primary;
+        return true;
+    };
+    return false;
+}
+
+fn filePathFromUri(a: std.mem.Allocator, uri: []const u8) ![]u8 {
+    if (!std.mem.startsWith(u8, uri, "file://")) return error.UnsupportedLocationUri;
+    const encoded = uri[7..];
+    var path: std.ArrayList(u8) = .empty;
+    errdefer path.deinit(a);
+    const digits = "0123456789abcdefABCDEF";
+    var i: usize = 0;
+    while (i < encoded.len) : (i += 1) {
+        if (encoded[i] == '%' and i + 2 < encoded.len) {
+            const hi = std.mem.indexOfScalar(u8, digits, encoded[i + 1]) orelse return error.InvalidFileUri;
+            const lo = std.mem.indexOfScalar(u8, digits, encoded[i + 2]) orelse return error.InvalidFileUri;
+            try path.append(a, @as(u8, @intCast((hi % 16) * 16 + lo % 16)));
+            i += 2;
+        } else try path.append(a, encoded[i]);
+    }
+    return path.toOwnedSlice(a);
+}
+
+pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, message: @FieldType(lsp.Message, "data")) !void {
+    const pending = self.language.definition_pending orelse return;
+    const value = message.locations;
+    if (pending.session != session or pending.request != value.id or value.version != pending.revision) return;
+    const record = self.workspace.getConst(pending.document) catch return;
+    if (record.doc.revision() != pending.revision) return self.language.clearDefinition();
+    if (value.items.len == 0) return self.language.clearDefinition();
+    const location = value.items[0];
+    var path: ?[]u8 = null;
+    var target_document: ?ws.DocumentId = null;
+    for (self.language.documents.items) |doc| if (std.mem.eql(u8, doc.uri, location.uri)) {
+        target_document = doc.id;
+        path = try self.allocator.dupe(u8, doc.path);
+        break;
+    };
+    if (path == null) path = try filePathFromUri(self.allocator, location.uri);
+    defer self.allocator.free(path.?);
+    if (target_document) |id| {
+        if (!try selectDocument(self, id)) try self.openPath(path.?);
+    } else try self.openPath(path.?);
+    const current = try actions.active(self);
+    var snapshot = try self.workspace.snapshot(current.id);
+    defer snapshot.deinit();
+    const selected_range: text.Range = .{ .start = try lsp.offsetAt(snapshot, location.range.start), .end = try lsp.offsetAt(snapshot, location.range.end) };
+    try current.editor.setSelection(snapshot, selected_range);
+    current.editor.reveal(snapshot);
+    self.editor_focus_request +%= 1;
+    self.language.clearDefinition();
+    cx.notify();
 }
 
 pub fn selectDiagnostic(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {

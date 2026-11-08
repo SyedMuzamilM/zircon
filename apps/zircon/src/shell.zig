@@ -744,6 +744,9 @@ pub const Shell = struct {
         services_language.accept(self, cx, index) catch |err| try self.reportError(err);
         cx.notify();
     }
+    pub fn onDefinition(self: *Shell, cx: *ui.Context(Shell)) !void {
+        if (self.language.definitions) |message| try services_language.acceptDefinition(self, cx, self.language.definition_pending.?.session, message.data);
+    }
     pub fn onDiagnostic(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
         services_language.selectDiagnostic(self, cx, index) catch |err| try self.reportError(err);
         cx.notify();

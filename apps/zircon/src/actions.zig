@@ -435,6 +435,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .git_open_file,
         => unreachable,
         .show_symbol_info => try symbol_hover.show(self, cx),
+        .go_to_definition => services_language.requestDefinition(self, cx) catch |err| switch (err) {
+            error.NoLanguageServer, error.ServerNotReady, error.DefinitionNotSupported => {},
+            else => return err,
+        },
         .cut, .copy, .paste => {
             // Native menu actions arrive through globalInput with the original
             // event surface. Palette actions are handled by the focused editor.
