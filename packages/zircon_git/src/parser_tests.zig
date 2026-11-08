@@ -19,6 +19,16 @@ test "history hunks retain separate file headings including spaces and deletions
 test "machine parsers retain path bytes and release allocation failures" {
     try t.checkAllAllocationFailures(t.allocator, allocationCase, .{});
 }
+
+test "diff parser decodes Git path delimiters and quoted escapes" {
+    var patch = try diff.parse(t.allocator, "diff --git a/space name.txt b/space name.txt\n" ++
+        "--- a/space name.txt\t\n+++ b/space name.txt\t\n@@ -1 +1 @@\n-old\n+new\n" ++
+        "diff --git \"a/line\\nname.txt\" \"b/line\\nname.txt\"\n" ++
+        "--- \"a/line\\nname.txt\"\n+++ \"b/line\\nname.txt\"\n@@ -1 +1 @@\n-old\n+new\n");
+    defer patch.deinit();
+    try t.expectEqualStrings("space name.txt", patch.hunks[0].path);
+    try t.expectEqualStrings("line\nname.txt", patch.hunks[1].path);
+}
 fn allocationCase(a: std.mem.Allocator) !void {
     var state = try status.parse(a, "## main\x00R  new\n日.txt\x00old name.txt\x00?? new.txt\x00");
     defer state.deinit();

@@ -229,6 +229,13 @@ pub const Editor = struct {
         self.selections.synchronize(snapshot);
     }
     pub fn applyEdits(self: *Editor, document: *text.Document, edits: []const text.Edit, group: u64) !Outcome {
+        return self.applyEditsWithSelection(document, edits, group, null);
+    }
+
+    /// Applies one transaction while keeping a single intentional caret. This
+    /// is used by language edits that include auxiliary edits elsewhere in the
+    /// document, such as an import added by completion.
+    pub fn applyEditsWithSelection(self: *Editor, document: *text.Document, edits: []const text.Edit, group: u64, selection_range: ?text.Range) !Outcome {
         if (edits.len == 0) return .{ .handled = true };
         if (self.edit_scope) |scope| for (edits) |edit| {
             if (edit.range.start < scope.start or edit.range.end > scope.end) return error.CrossExcerptEdit;
@@ -238,7 +245,8 @@ pub const Editor = struct {
         try self.remember(before.stateId(), self.selections.items.items);
         // Reserve selection history and its payload before document mutation.
         try self.history.ensureUnusedCapacity(self.allocator, 1);
-        const after_selections = try self.allocator.alloc(selection.Selection, edits.len);
+        const selection_count: usize = if (selection_range != null) 1 else edits.len;
+        const after_selections = try self.allocator.alloc(selection.Selection, selection_count);
         errdefer self.allocator.free(after_selections);
         try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
         var change = try document.apply(document.revision(), edits, group);
@@ -249,7 +257,10 @@ pub const Editor = struct {
         }
         self.wrap_cache.noteChange(&change);
         vim_repeat.changed(self, &change, edits);
-        for (edits, 0..) |edit, i| {
+        if (selection_range) |range| {
+            const end = change.map(range.end, .after);
+            after_selections[0] = .{ .anchor = end, .head = end };
+        } else for (edits, 0..) |edit, i| {
             const end = change.map(edit.range.end, .after);
             after_selections[i] = .{ .anchor = end, .head = end };
         }

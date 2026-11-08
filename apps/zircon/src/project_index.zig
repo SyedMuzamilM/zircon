@@ -21,7 +21,7 @@ const Job = struct {
             entries.deinit(a);
         }
         var truncated = false;
-        try scan(a, self.io, self.root, "", 0, cancel, &entries, &truncated);
+        if (!try scanGit(a, self.io, self.root, cancel, &entries, &truncated)) try scan(a, self.io, self.root, "", 0, cancel, &entries, &truncated);
         std.mem.sort(model.IndexedFile, entries.items, {}, struct {
             fn less(_: void, x: model.IndexedFile, y: model.IndexedFile) bool {
                 return std.ascii.orderIgnoreCase(x.label, y.label) == .lt;
@@ -41,6 +41,40 @@ const Job = struct {
         std.heap.page_allocator.free(self.root);
     }
 };
+
+fn scanGit(a: std.mem.Allocator, io: std.Io, root: []const u8, cancel: *ui.tasks.Cancellation, entries: *std.ArrayList(model.IndexedFile), truncated: *bool) !bool {
+    const top = std.process.run(a, io, .{ .argv = &.{ "git", "-C", root, "rev-parse", "--show-toplevel" }, .stdout_limit = .limited(4096), .stderr_limit = .limited(64 * 1024) }) catch return false;
+    defer {
+        a.free(top.stdout);
+        a.free(top.stderr);
+    }
+    const root_end = if (root.len > 0 and root[root.len - 1] == '/') root.len - 1 else root.len;
+    if (top.term != .exited or top.term.exited != 0 or !std.mem.eql(u8, std.mem.trim(u8, top.stdout, "\r\n"), root[0..root_end])) return false;
+    const result = std.process.run(a, io, .{ .argv = &.{ "git", "-C", root, "ls-files", "-co", "--exclude-standard", "-z" }, .stdout_limit = .limited(64 * 1024 * 1024), .stderr_limit = .limited(1024 * 1024) }) catch return false;
+    defer {
+        a.free(result.stdout);
+        a.free(result.stderr);
+    }
+    if (result.term != .exited or result.term.exited != 0) return false;
+    var offset: usize = 0;
+    while (offset < result.stdout.len) {
+        try cancel.check();
+        const end = std.mem.indexOfScalarPos(u8, result.stdout, offset, 0) orelse return error.InvalidGitIndex;
+        if (end == offset) return error.InvalidGitIndex;
+        if (entries.items.len >= 20_000) {
+            truncated.* = true;
+            break;
+        }
+        const relative = result.stdout[offset..end];
+        const absolute = try std.fs.path.join(a, &.{ root, relative });
+        errdefer a.free(absolute);
+        const label = try a.dupe(u8, relative);
+        errdefer a.free(label);
+        try entries.append(a, .{ .path = absolute, .label = label });
+        offset = end + 1;
+    }
+    return true;
+}
 pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.indexing) return;
     const root = try std.heap.page_allocator.dupe(u8, self.workspace.root_path);

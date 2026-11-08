@@ -48,6 +48,19 @@ fn settle(app: *ui.App) !void {
     _ = try app.step(0);
 }
 const Ops = struct {
+    fn setProjectQuery(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), bytes: []const u8) !void {
+        const Set = struct {
+            fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), value: []const u8) !void {
+                input.bytes.clearRetainingCapacity();
+                try input.bytes.appendSlice(input.allocator, value);
+                input.cursor = value.len;
+                input.anchor = value.len;
+                input.revision +%= 1;
+                context.notify();
+            }
+        };
+        try cx.update(self.fields.?.project_search.query, Set.call, .{bytes});
+    }
     fn execute(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), which: zircon.Command) !void {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onCommand(&event, cx, which);
@@ -622,6 +635,9 @@ test "project search captures unsaved buffers and opens the real source selectio
     defer t.allocator.free(root);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = "disk only\n" });
     try tmp.dir.writeFile(t.io, .{ .sub_path = "two.zig", .data = "needle two\n" });
+    try command(root, &.{"init"});
+    try tmp.dir.writeFile(t.io, .{ .sub_path = ".gitignore", .data = "generated.zig\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "generated.zig", .data = "needle ignored\n" });
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
     const h = try open(&app, root, "one.zig");
@@ -662,6 +678,10 @@ test "project search captures unsaved buffers and opens the real source selectio
     try app.read(owner, Ops.source, .{ t.allocator, &source });
     defer t.allocator.free(source);
     try t.expectEqualStrings("edited unsaved\ndisk only\n", source);
+    try app.update(owner, Ops.setProjectQuery, .{""});
+    try send(&app, h, .run_project_search);
+    try settle(&app);
+    try t.expectEqual(@as(usize, 0), try app.read(owner, Ops.matches, .{}));
 }
 
 fn insideTabs(frame: anytype, start: u32) bool {

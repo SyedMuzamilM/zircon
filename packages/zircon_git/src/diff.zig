@@ -24,7 +24,17 @@ pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Diff {
     var path: []const u8 = "";
     var iterator = std.mem.splitScalar(u8, owned, '\n');
     while (iterator.next()) |line| {
-        if (std.mem.startsWith(u8, line, "@@ -")) {
+        if (current == null and std.mem.startsWith(u8, line, "Binary files ")) {
+            const rest = line[13..];
+            const separator = std.mem.indexOf(u8, rest, " and ") orelse return error.InvalidGitDiff;
+            const target_start = separator + 5;
+            const target_end = std.mem.indexOfPos(u8, rest, target_start, " differ") orelse return error.InvalidGitDiff;
+            const binary_path = try decodePath(al, rest[target_start..target_end]);
+            path = if (std.mem.startsWith(u8, binary_path, "b/")) binary_path[2..] else binary_path;
+            const binary_lines = try al.alloc(Line, 1);
+            binary_lines[0] = .{ .kind = .metadata, .text = line };
+            try hunks.append(al, .{ .old_start = 0, .old_count = 0, .new_start = 0, .new_count = 0, .header = line, .lines = binary_lines, .path = path });
+        } else if (std.mem.startsWith(u8, line, "@@ -")) {
             if (current) |*h| {
                 h.lines = lines.items;
                 try hunks.append(al, h.*);
@@ -46,8 +56,7 @@ pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Diff {
             }
             path = "";
         } else if (current == null and (std.mem.startsWith(u8, line, "--- ") or std.mem.startsWith(u8, line, "+++ "))) {
-            // Keep Git's quoting for unusual names; never split paths on spaces.
-            const name = line[4..];
+            const name = try decodePath(al, line[4..]);
             if (!std.mem.eql(u8, name, "/dev/null")) path = if (std.mem.startsWith(u8, name, "a/") or std.mem.startsWith(u8, name, "b/")) name[2..] else name;
         } else if (current != null and line.len > 0) {
             const item: Line = switch (line[0]) {
@@ -77,6 +86,42 @@ pub fn parse(a: std.mem.Allocator, bytes: []const u8) !Diff {
         try hunks.append(al, h.*);
     }
     return .{ .arena = arena, .text = owned, .hunks = hunks.items };
+}
+
+fn decodePath(a: std.mem.Allocator, raw: []const u8) ![]const u8 {
+    const name = if (raw.len >= 2 and raw[0] == '"' and raw[raw.len - 1] == '"') raw[1 .. raw.len - 1] else raw[0 .. std.mem.indexOfScalar(u8, raw, '\t') orelse raw.len];
+    var decoded: std.ArrayList(u8) = .empty;
+    errdefer decoded.deinit(a);
+    var i: usize = 0;
+    while (i < name.len) : (i += 1) {
+        if (name[i] != '\\' or i + 1 >= name.len) {
+            try decoded.append(a, name[i]);
+            continue;
+        }
+        i += 1;
+        const byte = switch (name[i]) {
+            'a' => 0x07,
+            'b' => 0x08,
+            'f' => 0x0c,
+            'n' => 0x0a,
+            'r' => 0x0d,
+            't' => 0x09,
+            'v' => 0x0b,
+            '\\' => '\\',
+            '"' => '"',
+            else => if (name[i] >= '0' and name[i] <= '7') blk: {
+                var value: u8 = name[i] - '0';
+                var count: usize = 1;
+                while (count < 3 and i + 1 < name.len and name[i + 1] >= '0' and name[i + 1] <= '7') : (count += 1) {
+                    i += 1;
+                    value = value * 8 + name[i] - '0';
+                }
+                break :blk value;
+            } else name[i],
+        };
+        try decoded.append(a, byte);
+    }
+    return decoded.toOwnedSlice(a);
 }
 fn range(value: []const u8) !struct { start: usize, count: usize } {
     if (value.len < 2 or (value[0] != '-' and value[0] != '+')) return error.InvalidGitDiff;

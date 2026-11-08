@@ -66,7 +66,15 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     try cx.read(self.fields.?.project_search.query, ui.controls.TextInput.copy, .{ a, &query });
     errdefer a.free(query);
     if (query.len == 0) {
+        if (self.search.task) |task| cx.app.cancelTask(task) catch {};
+        if (self.search.results) |*results| results.deinit();
+        self.search.results = null;
+        self.search.generation = std.math.add(u64, self.search.generation, 1) catch return error.SearchGenerationExhausted;
+        self.search.task = null;
+        self.search.busy = false;
+        self.search.scroll.offset = 0;
         a.free(query);
+        cx.notify();
         return;
     }
     var buffers: std.ArrayList(search.Buffer) = .empty;

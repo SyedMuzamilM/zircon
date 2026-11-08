@@ -70,7 +70,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("apps/zircon/tests/all.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "zircon", .module = app_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module } },
+        .imports = &.{ .{ .name = "zircon", .module = app_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_language", .module = language_module } },
     }) });
     app_tests.root_module.addAnonymousImport("agent_fixture", .{ .root_source_file = b.path("packages/zircon_agent/tests/fixture.py") });
     app_tests.root_module.addAnonymousImport("language_fixture", .{ .root_source_file = b.path("packages/zircon_language/tests/fixture.py") });

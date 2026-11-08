@@ -12,6 +12,7 @@ pub const Status = client.Status;
 pub const SynchronizationOptions = synchronization.Options;
 pub const Position = model.Position;
 pub const Range = model.Range;
+pub const TextEdit = model.TextEdit;
 pub const Diagnostic = model.Diagnostic;
 pub const Completion = model.Completion;
 pub const Message = model.Message;

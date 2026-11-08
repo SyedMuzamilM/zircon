@@ -254,6 +254,7 @@ pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
         for (diff.hunks) |hunk| {
             if (std.mem.eql(u8, previous, hunk.path)) continue;
             previous = hunk.path;
+            if (isBinaryHunk(hunk)) continue;
             const absolute = try std.fs.path.resolve(a, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, hunk.path });
             defer a.free(absolute);
             var present = false;
@@ -298,6 +299,10 @@ pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
         }
     }
     self.git.setEditableProjection(projection, if (source_count == 1) source else null);
+}
+
+fn isBinaryHunk(hunk: git.Hunk) bool {
+    return hunk.lines.len == 1 and hunk.lines[0].kind == .metadata and std.mem.startsWith(u8, hunk.lines[0].text, "Binary files ");
 }
 const SourceVersion = struct { document: workspace.DocumentId, revision: u64 };
 const CapturedBuffer = struct { document: workspace.DocumentId, path: []u8, snapshot: text.Snapshot, dirty: bool };
@@ -365,6 +370,8 @@ const Job = struct {
         if (self.operation == .history) {
             result.history_oid = try a.dupe(u8, self.operation.history);
             result.message = try repo.commitMessage(a, self.operation.history);
+        } else if (self.operation == .stash_show) {
+            result.history_oid = try a.dupe(u8, self.operation.stash_show);
         }
         result.preserve_scroll = self.comparison != null;
         result.found = true;
@@ -550,7 +557,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
         else => false,
     };
     if ((mutation or operation == .refresh) and (self.panel == .git_diff or self.secondary_tool == .git_diff) and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (!self.git.combined and self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
-    job.include_references = self.git.needs_metadata or self.git.references == null or switch (operation) {
+    job.include_references = self.git.needs_metadata or self.git.references == null or operation == .refresh or switch (operation) {
         .network, .switch_branch, .stash_save, .stash_apply, .commit => true,
         else => false,
     };

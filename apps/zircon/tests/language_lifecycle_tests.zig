@@ -1,11 +1,41 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zircon = @import("zircon");
+const lsp = @import("zircon_language");
 const ui = @import("zircon_ui");
 const t = std.testing;
 
 const Identity = struct { client: usize, diagnostics: usize, generation: u64 };
 const Ops = struct {
+    fn seedCompletion(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), additional: bool) !void {
+        const tab = &self.tabs.items[self.active];
+        var snapshot = try self.workspace.snapshot(tab.document);
+        defer snapshot.deinit();
+        const cursor = snapshot.byteLen();
+        try tab.editor.setSelection(snapshot, .{ .start = cursor, .end = cursor });
+        var arena = std.heap.ArenaAllocator.init(t.allocator);
+        const a = arena.allocator();
+        const items = try a.alloc(lsp.Completion, 1);
+        items[0] = .{ .label = "print", .insert_text = "print" };
+        if (additional) {
+            const extra = try a.alloc(lsp.TextEdit, 1);
+            extra[0] = .{ .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } }, .new_text = "const std = @import(\"std\");\n" };
+            items[0].text_edit = .{ .range = .{ .start = .{ .line = 0, .character = 10 }, .end = .{ .line = 0, .character = 13 } }, .new_text = "print" };
+            items[0].additional_edits = extra;
+        }
+        self.language.pending = .{ .document = tab.document, .session = 0, .request = 1, .revision = snapshot.revision(), .cursor = cursor };
+        self.language.completions = .{ .arena = arena, .data = .{ .completion = .{ .id = 1, .uri = "file:///main.zig", .version = snapshot.revision(), .items = items } } };
+        var event: ui.Event(ui.Click) = .{ .data = .{} };
+        try self.onCompletion(&event, cx, 0);
+    }
+    fn source(self: *const zircon.Shell, a: std.mem.Allocator, out: *[]u8) !void {
+        var snapshot = try self.workspace.snapshot(self.tabs.items[self.active].document);
+        defer snapshot.deinit();
+        out.* = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
+    }
+    fn selectionCount(self: *const zircon.Shell) usize {
+        return self.tabs.items[self.active].editor.selections.items.items.len;
+    }
     fn hoverReady(self: *const zircon.Shell) bool {
         return self.language.documents.items.len > 0 and self.language.documents.items[0].version != null and self.language.sessions.items[self.language.documents.items[0].session].client.?.ready();
     }
@@ -47,9 +77,9 @@ const Ops = struct {
     fn completion(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
         const id = if (self.active_pane == .secondary) self.secondary.?.document else self.tabs.items[self.active].document;
         const editor = if (self.active_pane == .secondary) &self.secondary.?.editor else &self.tabs.items[self.active].editor;
-        var source = try self.workspace.snapshot(id);
-        defer source.deinit();
-        try editor.setSelection(source, .{ .start = 5, .end = 5 });
+        var snapshot = try self.workspace.snapshot(id);
+        defer snapshot.deinit();
+        try editor.setSelection(snapshot, .{ .start = 5, .end = 5 });
         try command(self, cx, .complete);
     }
     fn pending(self: *const zircon.Shell) bool {
@@ -89,6 +119,48 @@ const Ops = struct {
         return primary_session != null and secondary_session != null and primary_session.? != secondary_session.?;
     }
 };
+
+fn openLanguageFixture(root: []const u8, file: []const u8) !struct { app: ui.App, handle: ui.WindowHandle, owner: ui.Entity(zircon.Shell) } {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    errdefer app.deinit();
+    const handle = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, file));
+    const owner = try app.windowEntity(zircon.Shell, handle);
+    try app.update(owner, zircon.Shell.bootstrap, .{handle});
+    _ = try app.step(0);
+    return .{ .app = app, .handle = handle, .owner = owner };
+}
+
+test "completion without textEdit replaces the current identifier" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "pri" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var fixture = try openLanguageFixture(root, "main.zig");
+    defer fixture.app.deinit();
+    try fixture.app.update(fixture.owner, Ops.seedCompletion, .{false});
+    var source: []u8 = undefined;
+    try fixture.app.read(fixture.owner, Ops.source, .{ t.allocator, &source });
+    defer t.allocator.free(source);
+    try t.expectEqualStrings("print", source);
+    try t.expectEqual(@as(usize, 1), try fixture.app.read(fixture.owner, Ops.selectionCount, .{}));
+}
+
+test "completion additional edits keep one caret at the primary edit" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const p = pri;\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var fixture = try openLanguageFixture(root, "main.zig");
+    defer fixture.app.deinit();
+    try fixture.app.update(fixture.owner, Ops.seedCompletion, .{true});
+    var source: []u8 = undefined;
+    try fixture.app.read(fixture.owner, Ops.source, .{ t.allocator, &source });
+    defer t.allocator.free(source);
+    try t.expectEqualStrings("const std = @import(\"std\");\nconst p = print;\n", source);
+    try t.expectEqual(@as(usize, 1), try fixture.app.read(fixture.owner, Ops.selectionCount, .{}));
+}
 
 test "symbol information renders language-server Markdown and dismisses on edit" {
     var tmp = t.tmpDir(.{});

@@ -90,6 +90,26 @@ fn syntaxDocument(self: *Shell, id: ws.DocumentId) !usize {
     return self.language.syntax_documents.items.len - 1;
 }
 
+fn completionWordRange(snapshot: text.Snapshot, cursor: usize) !text.Range {
+    var start = cursor;
+    while (start > 0) {
+        const previous = try snapshot.previousBoundary(start);
+        if (!identifierByte(try snapshot.byteAt(previous))) break;
+        start = previous;
+    }
+    var end = cursor;
+    while (end < snapshot.byteLen()) {
+        const next = try snapshot.nextBoundary(end);
+        if (!identifierByte(try snapshot.byteAt(end))) break;
+        end = next;
+    }
+    return .{ .start = start, .end = end };
+}
+
+fn identifierByte(byte: u8) bool {
+    return byte >= 0x80 or std.ascii.isAlphanumeric(byte) or byte == '_';
+}
+
 fn retireUnused(self: *Shell, index: usize) void {
     for (self.language.documents.items) |doc| if (doc.session == index) return;
     const session = &self.language.sessions.items[index];
@@ -348,14 +368,15 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
     }
     var edits: std.ArrayList(text.Edit) = .empty;
     defer edits.deinit(self.allocator);
-    try edits.append(self.allocator, if (item.text_edit) |edit| .{ .range = .{ .start = try lsp.offsetAt(snapshot, edit.range.start), .end = try lsp.offsetAt(snapshot, edit.range.end) }, .text = edit.new_text } else .{ .range = .{ .start = pending.cursor, .end = pending.cursor }, .text = item.insert_text });
+    const primary_edit = if (item.text_edit) |edit| text.Edit{ .range = .{ .start = try lsp.offsetAt(snapshot, edit.range.start), .end = try lsp.offsetAt(snapshot, edit.range.end) }, .text = edit.new_text } else text.Edit{ .range = try completionWordRange(snapshot, pending.cursor), .text = item.insert_text };
+    try edits.append(self.allocator, primary_edit);
     for (item.additional_edits) |edit| try edits.append(self.allocator, .{ .range = .{ .start = try lsp.offsetAt(snapshot, edit.range.start), .end = try lsp.offsetAt(snapshot, edit.range.end) }, .text = edit.new_text });
     std.mem.sort(text.Edit, edits.items, {}, struct {
         fn less(_: void, a: text.Edit, b: text.Edit) bool {
             return a.range.start < b.range.start;
         }
     }.less);
-    var outcome = try current.editor.applyEdits(&record.doc, edits.items, try zircon_editor.Editor.freshGroup());
+    var outcome = try current.editor.applyEditsWithSelection(&record.doc, edits.items, try zircon_editor.Editor.freshGroup(), primary_edit.range);
     try actions.applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .completion);
     self.language.clearCompletion();
     self.editor_focus_request +%= 1;
