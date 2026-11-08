@@ -38,6 +38,9 @@ pub fn Event(comptime T: type) type {
         }
         pub fn preventDefault(e: *@This()) void {
             e.prevented = true;
+            if (comptime T == Input) if (e.data == .key_down) if (e._surface) |surface| {
+                if (surface.ops.consume_key) |consume| consume(surface.context);
+            };
         }
         pub fn focus(e: *@This()) void {
             e.focus_requested = true;

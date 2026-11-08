@@ -221,6 +221,12 @@ pub const commands = [_]Entry{
     .{ .command = .zoom_out, .label = "Decrease font size" },
 };
 pub const bindings = [_]ui.Keymap(Command).Binding{
+    .{ .chord = .{ .key = .f12 }, .action = .go_to_definition },
+    .{ .chord = .{ .key = .f12, .modifiers = .{ .shift = true } }, .action = .find_references },
+    .{ .chord = .{ .key = .f2 }, .action = .rename_symbol },
+    .{ .chord = .{ .key = .f, .modifiers = .{ .alt = true, .shift = true } }, .action = .format_document },
+    .{ .chord = .{ .key = .space, .modifiers = .{ .control = true, .shift = true } }, .action = .show_signature_help },
+    .{ .chord = .{ .key = .period, .modifiers = .{ .command = true } }, .action = .code_actions },
     .{ .chord = .{ .key = .i, .modifiers = .{ .command = true, .alt = true } }, .action = .show_symbol_info },
     .{ .chord = .{ .key = .slash, .modifiers = .{ .command = true } }, .action = .toggle_comment },
     .{ .chord = .{ .key = .z, .modifiers = .{ .alt = true } }, .action = .toggle_soft_wrap },

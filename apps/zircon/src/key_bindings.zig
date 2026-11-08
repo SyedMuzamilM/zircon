@@ -49,7 +49,7 @@ pub fn parse(value: std.json.Value) !Overrides {
                 modifiers.shift = true;
             } else key = std.meta.stringToEnum(ui.Key, token) orelse return error.InvalidKeyBindings;
         }
-        if (key == null or key.? == .unknown or (!modifiers.command and !modifiers.control)) return error.InvalidKeyBindings;
+        if (key == null or key.? == .unknown or (!modifiers.command and !modifiers.control and !modifiers.alt and !functionKey(key.?))) return error.InvalidKeyBindings;
         const action = entry.value_ptr.*;
         const command = if (action == .null) catalogue.Command.dismiss else if (action == .string) std.meta.stringToEnum(catalogue.Command, action.string) orelse return error.InvalidKeyBindings else return error.InvalidKeyBindings;
         if (catalogue.retired(command)) continue;
@@ -77,6 +77,7 @@ fn format(a: std.mem.Allocator, binding: ui.Keymap(catalogue.Command).Binding) !
         .up => "↑",
         .down => "↓",
         .comma => ",",
+        .period => ".",
         .slash => "/",
         .space => "Space",
         .enter => "Enter",
@@ -85,4 +86,11 @@ fn format(a: std.mem.Allocator, binding: ui.Keymap(catalogue.Command).Binding) !
     const label = try std.fmt.allocPrint(a, "{s}{s}{s}{s}{s}", .{ if (m.control) "⌃" else "", if (m.alt) "⌥" else "", if (m.shift) "⇧" else "", if (m.command) "⌘" else "", key });
     for (label) |*byte| byte.* = std.ascii.toUpper(byte.*);
     return label;
+}
+
+fn functionKey(key: ui.Key) bool {
+    return switch (key) {
+        .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12 => true,
+        else => false,
+    };
 }

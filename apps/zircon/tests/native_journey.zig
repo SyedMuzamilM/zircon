@@ -337,3 +337,37 @@ fn expectSource(app: *ui.App, owner: ui.Entity(zircon.Shell), expected: []const 
     defer t.allocator.free(actual);
     try t.expectEqualStrings(expected, actual);
 }
+
+test "native language shortcut consumes option text instead of inserting it" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "alpha" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .title = "ZirconShortcutJourney", .visible = false, .width = 1000, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    const application = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const windows = objc.send(objc.Id, application, "windows", .{});
+    const window = for (0..objc.send(usize, windows, "count", .{})) |index| {
+        const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{index});
+        if (std.mem.eql(u8, objc.fromString(objc.send(objc.Id, candidate, "title", .{})), "ZirconShortcutJourney")) break candidate;
+    } else return error.ShortcutWindowMissing;
+    try nativeKey(window, 3, "Ï", (1 << 17) | (1 << 19));
+    try nativeKey(window, 120, "\u{f705}", 0);
+    const Check = struct {
+        fn renameOpen(self: *const zircon.Shell) bool {
+            return self.overlay == .rename;
+        }
+    };
+    try t.expect(try app.read(owner, Check.renameOpen, .{}));
+    try command(&app, owner, .dismiss);
+    try nativeKey(window, 111, "\u{f70f}", 0);
+    var actual: []u8 = undefined;
+    try app.read(owner, bytes, .{ t.allocator, &actual });
+    defer t.allocator.free(actual);
+    try t.expectEqualStrings("alpha", actual);
+}

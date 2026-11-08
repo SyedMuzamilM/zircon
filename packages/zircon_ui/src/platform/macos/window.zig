@@ -64,6 +64,7 @@ const State = struct {
     pending_icon: Id = null,
     input: ?platform.TextSnapshot = null,
     awaiting_snapshot: bool = false,
+    key_consumed: bool = false,
     font_generation: u64 = 0,
     text_requests: std.ArrayList(TextRequest) = .empty,
     closed: bool = false,
@@ -196,6 +197,7 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
 }
 
 const ops: platform.Surface.Ops = .{
+    .consume_key = consumeKey,
     .set_cursor = setCursor,
     .system_dark = systemDark,
     .set_appearance = setAppearance,
@@ -592,12 +594,17 @@ fn scroll(object: Id, _: Sel, event: Id) callconv(.c) void {
     const multiplier: f64 = if (precise) 1 else 20;
     s.emit(.{ .scroll = .{ .position = eventPoint(s, event), .x = @floatCast(objc.send(f64, event, "scrollingDeltaX", .{}) * multiplier), .y = @floatCast(objc.send(f64, event, "scrollingDeltaY", .{}) * multiplier), .modifiers = modifiers(event) } });
 }
+fn consumeKey(raw: *anyopaque) void {
+    state(raw).key_consumed = true;
+}
+
 fn keyDown(object: Id, _: Sel, event: Id) callconv(.c) void {
     const s = nativeState(object) orelse return;
     const mods = modifiers(event);
     const key_code = objc.send(u16, event, "keyCode", .{});
+    s.key_consumed = false;
     s.emit(.{ .key_down = .{ .key = key(key_code), .modifiers = mods, .repeat = objc.send(bool, event, "isARepeat", .{}) } });
-    if (mods.command or mods.control or s.closed) return;
+    if (s.key_consumed or mods.command or mods.control or s.closed) return;
     const events = objc.send(Id, objc.class("NSArray"), "arrayWithObject:", .{event});
     objc.send(void, object, "interpretKeyEvents:", .{events});
 }
@@ -630,6 +637,19 @@ fn key(code: u16) platform.Key {
         38 => .j,
         40 => .k,
         43 => .comma,
+        47 => .period,
+        122 => .f1,
+        120 => .f2,
+        99 => .f3,
+        118 => .f4,
+        96 => .f5,
+        97 => .f6,
+        98 => .f7,
+        100 => .f8,
+        101 => .f9,
+        109 => .f10,
+        103 => .f11,
+        111 => .f12,
         44 => .slash,
         45 => .n,
         46 => .m,
