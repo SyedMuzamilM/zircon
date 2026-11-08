@@ -4,11 +4,13 @@ const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const annotations = @import("annotations.zig");
+const brackets = @import("brackets.zig");
 const canvas = @import("canvas.zig");
 const commands = @import("commands.zig");
 const comments = @import("comments.zig");
 const input = @import("input.zig");
 const navigation = @import("navigation.zig");
+const pairing = @import("pairing.zig");
 const profile_module = @import("profile.zig");
 const selection = @import("selections.zig");
 const syntax = @import("syntax.zig");
@@ -23,6 +25,8 @@ pub const Editor = struct {
     allocator: std.mem.Allocator,
     vim: vim_module.State = .{},
     selections: selection.Set,
+    pairs: pairing.State = .{},
+    bracket_cache: *brackets.Cache,
     /// Optional source range exposed by an excerpt view. Edits cannot consume
     /// bytes outside it; insertion at either endpoint remains valid.
     edit_scope: ?text.Range = null,
@@ -71,7 +75,10 @@ pub const Editor = struct {
     pub fn init(a: std.mem.Allocator) !Editor {
         var selections = try selection.Set.init(a);
         errdefer selections.deinit(a);
-        return .{ .allocator = a, .selections = selections, .syntax_cache = .init(a), .wrap_cache = try wrap.Cache.init(a) };
+        const bracket_cache = try a.create(brackets.Cache);
+        errdefer a.destroy(bracket_cache);
+        bracket_cache.* = .{};
+        return .{ .allocator = a, .bracket_cache = bracket_cache, .selections = selections, .syntax_cache = .init(a), .wrap_cache = try wrap.Cache.init(a) };
     }
     pub fn deinit(self: *Editor) void {
         self.allocator.free(self.grammar_spans);
@@ -81,6 +88,8 @@ pub const Editor = struct {
         self.allocator.free(self.git_baseline);
         if (self.inline_blame) |*blame| blame.deinit(self.allocator);
         self.selections.deinit(self.allocator);
+        self.pairs.deinit(self.allocator);
+        self.allocator.destroy(self.bracket_cache);
         self.syntax_cache.deinit();
         for (self.history.items) |entry| self.allocator.free(entry.items);
         self.history.deinit(self.allocator);
@@ -122,6 +131,7 @@ pub const Editor = struct {
         if (!std.math.isFinite(self.font_size) or self.font_size <= 0 or self.font_size > 128 or !std.math.isFinite(self.line_height) or self.line_height < self.font_size or !std.math.isFinite(self.scroll.offset) or self.scroll.offset < 0 or !std.math.isFinite(self.horizontal) or self.horizontal < 0 or self.tab_width == 0 or self.tab_width > 32) return error.InvalidEditorOptions;
     }
     pub fn synchronize(self: *Editor, snapshot: text.Snapshot) void {
+        self.bracket_cache.revision = null;
         self.selections.synchronize(snapshot);
         vim_module.synchronize(self, snapshot);
         self.syntax_cache.profile = self.language_profile;
@@ -135,6 +145,7 @@ pub const Editor = struct {
         };
     }
     pub fn mapChange(self: *Editor, change: *const text.Change) void {
+        self.pairs.map(change);
         self.mapHighlights(change);
         if (self.edit_scope) |*range| {
             range.start = change.map(range.start, .before);
@@ -268,6 +279,7 @@ pub const Editor = struct {
                 change.deinit();
                 return .{ .handled = true };
             }
+            editor_value.pairs.map(&change);
             editor_value.mapHighlights(&change);
             if (editor_value.edit_scope) |*scope| {
                 scope.start = change.map(scope.start, .before);
@@ -401,6 +413,7 @@ pub const Editor = struct {
             },
             .delete_backward, .delete_forward => {
                 self.selections.normalize();
+                if (command == .delete_backward) if (try pairing.backspace(self, document, snapshot)) |outcome| return outcome;
                 var arena = std.heap.ArenaAllocator.init(self.allocator);
                 defer arena.deinit();
                 const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
@@ -423,6 +436,7 @@ pub const Editor = struct {
                 try self.selections.items.ensureTotalCapacity(self.allocator, capacity);
                 const changed = if (command == .undo) try document.undo() else try document.redo();
                 if (changed) {
+                    self.pairs.items.clearRetainingCapacity();
                     var current = document.snapshot();
                     defer current.deinit();
                     try self.restoreSelections(current);
@@ -484,6 +498,7 @@ pub const Editor = struct {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
+        const carets = try arena.allocator().alloc(usize, edits.len);
         const ending = if (snapshot.lineCount() > 1 and (try snapshot.lineRangeIncludingEnding(0)).end - (try snapshot.lineRange(0)).end == 2) "\r\n" else "\n";
         for (self.selections.items.items, 0..) |item, i| {
             const range = try snapshot.lineRange((try snapshot.pointAt(item.head)).line);
@@ -493,11 +508,28 @@ pub const Editor = struct {
                 if (ch != ' ' and ch != '\t') break;
             }
             const prefix = try snapshot.copy(arena.allocator(), .{ .start = range.start, .end = end });
-            const extra = if (item.head > range.start and (try snapshot.byteAt(item.head - 1)) == '{') "    " else "";
-            edits[i] = .{ .range = item.range(), .text = try std.mem.concat(arena.allocator(), u8, &.{ ending, prefix, extra }) };
+            const opening = if (item.head > range.start) try snapshot.byteAt(item.head - 1) else @as(u8, 0);
+            const closing: u8 = switch (opening) {
+                '{' => '}',
+                '(' => ')',
+                '[' => ']',
+                else => 0,
+            };
+            const split_pair = item.empty() and closing != 0 and item.head < snapshot.byteLen() and try snapshot.byteAt(item.head) == closing;
+            const extra: []u8 = if (opening == '{' or split_pair) try arena.allocator().alloc(u8, self.tab_width) else &.{};
+            @memset(extra, ' ');
+            const inside = try std.mem.concat(arena.allocator(), u8, &.{ ending, prefix, extra });
+            carets[i] = inside.len;
+            edits[i] = .{ .range = item.range(), .text = if (split_pair) try std.mem.concat(arena.allocator(), u8, &.{ inside, ending, prefix }) else inside };
         }
         self.typing_group = 0;
-        return self.applyEdits(document, edits, 0);
+        var prepared = try self.prepareEdits(document, edits, 0, .preserve);
+        defer prepared.deinit();
+        for (edits, carets, prepared.selections) |edit, caret, *selected| {
+            const end = prepared.text_edit.change.map(edit.range.start, .before) + caret;
+            selected.* = .{ .anchor = end, .head = end };
+        }
+        return prepared.commit();
     }
     pub fn prepareView(self: *Editor, snapshot: text.Snapshot, viewport: ui.Size, metrics: ui.layout.Measurer) !void {
         self.last_viewport = viewport;

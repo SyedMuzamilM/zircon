@@ -2,6 +2,7 @@ const std = @import("std");
 const editor = @import("zircon_editor");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
+const pairing_tests = @import("pairing_tests.zig");
 const t = std.testing;
 
 test "polish typing retains unaffected grammar colors until the parser catches up" {
@@ -1234,4 +1235,36 @@ test "prepared language edits preserve reversed selections and multiple carets t
     try t.expectEqual(@as(usize, 12), state.primary().anchor);
     try t.expectEqual(@as(usize, 7), state.primary().head);
     try t.expectEqual(@as(usize, 18), state.selections.items.items[1].head);
+}
+
+test {
+    _ = pairing_tests;
+}
+
+test "active brackets paint subtle backgrounds and their enclosing indentation guide" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const source = "fn main() {\n    if (true) {\n        call(1);\n    }\n}\n";
+    var document = try text.Document.init(t.allocator, source);
+    var state = try editor.Editor.init(t.allocator);
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    state.language = .zig;
+    state.synchronize(snapshot);
+    const caret = std.mem.indexOf(u8, source, "call(1)").? + 5;
+    state.selections.single(.{ .anchor = caret, .head = caret });
+    const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+        state.deinit();
+        document.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var matches: usize = 0;
+    var guides: usize = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect) {
+        if (item.color.a == 0.16 and item.rect.width > 1) matches += 1;
+        if (item.color.a == 0.45 and item.rect.width == 1) guides += 1;
+    };
+    try t.expectEqual(@as(usize, 2), matches);
+    try t.expectEqual(@as(usize, 3), guides);
 }

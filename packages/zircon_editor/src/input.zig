@@ -6,6 +6,7 @@ const ui = @import("zircon_ui");
 const canvas = @import("canvas.zig");
 const model = @import("editor.zig");
 const navigation = @import("navigation.zig");
+const pairing = @import("pairing.zig");
 const vim_module = @import("vim.zig");
 const Editor = model.Editor;
 const Outcome = model.Outcome;
@@ -32,7 +33,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
     switch (e.data) {
         .text => |bytes| {
             if (bytes.len == 0) return .{};
-            const result = try self.insert(document, bytes);
+            const result = (try pairing.typeText(self, document, bytes)) orelse try self.insert(document, bytes);
             e.preventDefault();
             return result;
         },
@@ -42,6 +43,12 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             try edit.selection.validate(edit.text);
             if (!std.unicode.utf8ValidateSlice(edit.text)) return error.InvalidUtf8;
             const composing = edit.composing or self.composition_group != 0;
+            if (!composing and edit.selection.start == edit.text.len and edit.selection.end == edit.text.len and std.meta.eql(self.primary().range(), text.Range{ .start = edit.range.start, .end = edit.range.end })) {
+                if (try pairing.typeText(self, document, edit.text)) |outcome| {
+                    e.preventDefault();
+                    return outcome;
+                }
+            }
             const previous_group = self.composition_group;
             const previous_typing = self.typing_group;
             const previous_changed = self.composition_changed;

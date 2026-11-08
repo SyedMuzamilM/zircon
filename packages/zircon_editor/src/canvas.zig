@@ -5,6 +5,7 @@ const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const annotations = @import("annotations.zig");
 const blame_view = @import("blame_view.zig");
+const brackets = @import("brackets.zig");
 const display = @import("display.zig");
 const editor = @import("editor.zig");
 const profile_module = @import("profile.zig");
@@ -49,12 +50,16 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
     } else null;
     const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
     var canvas = value;
+    canvas.scope = try state.bracket_cache.get(state, snapshot, b.allocator());
+    canvas.scope_guide = state.bracket_cache.guide;
     canvas.show_scrollbars = state.show_scrollbars;
     return b.custom(Canvas, canvas, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
 const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22, segment: ?wrap.Row = null };
 const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32, content_width: f32 };
 const Canvas = struct {
+    scope: ?brackets.Scope = null,
+    scope_guide: ?brackets.Scope = null,
     show_scrollbars: bool = true,
     snapshot: text.Snapshot,
     grammar_spans: ?[]const syntax.Span,
@@ -182,9 +187,20 @@ const Canvas = struct {
             try cx.painter.pushClip(.{ .x = bounds.x + prepared.gutter - 4, .y = bounds.y, .width = @max(0, bounds.width - prepared.gutter + 4), .height = bounds.height });
             for (self.git_changes) |change| if (change.expanded and line.row >= change.start and line.row < change.end and change.old_count == change.end - change.start and !line.oversized) {
                 const columns = annotations.changedColumns(annotations.lineAt(change.removed, line.row - change.start), line.original);
-                try highlightColumns(cx, metrics.*, line, style, x, @max(columns.start, segment_start), @min(columns.end, segment_end), self.theme.git_added);
+                var fill = self.theme.git_added;
+                fill.a = 0.25;
+                try highlightColumns(cx, metrics.*, line, style, x, @max(columns.start, segment_start), @min(columns.end, segment_end), fill);
             };
             if (!line.oversized) {
+                if (cx.focused) if (self.scope) |scope| {
+                    var fill = self.theme.foreground;
+                    fill.a = 0.16;
+                    for ([_]usize{ scope.open, scope.close }) |at| {
+                        if (at < line.range.start or at >= line.range.end) continue;
+                        const column = at - line.range.start;
+                        if (column >= segment_start and column < segment_end) try highlightColumns(cx, metrics.*, line, style, x, column, column + 1, fill);
+                    }
+                };
                 var indent: usize = 0;
                 while (indent < line.original.len and (line.original[indent] == ' ' or line.original[indent] == '\t')) indent += 1;
                 const cells = line.display.displayOffset(indent);
@@ -198,6 +214,13 @@ const Canvas = struct {
                     const guide_x = @as(f32, @floatFromInt(guide)) * advance;
                     try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + guide_x, .y = line.y, .width = 1, .height = self.line_height }, .color = tint });
                 }
+                if (self.indent_guides and cx.focused) if (self.scope_guide) |scope| {
+                    if (scope.first_row < scope.last_row and line.row >= scope.first_row and line.row <= scope.last_row) {
+                        var active = self.theme.foreground;
+                        active.a = 0.45;
+                        try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + @as(f32, @floatFromInt(scope.indent)) * advance, .y = line.y, .width = 1, .height = self.line_height }, .color = active });
+                    }
+                };
                 var match_start: usize = 0;
                 var match_end = self.search_ranges.len;
                 while (match_start < match_end) {
@@ -399,7 +422,5 @@ fn highlightColumns(cx: *ui.PaintCx, metrics: ui.layout.Measurer, line: RenderLi
     if (end <= start) return;
     const left = line.display.caret(metrics, style, start);
     const right = line.display.caret(metrics, style, end);
-    var fill = color;
-    fill.a = 0.25;
-    try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y, .width = @max(0, right - left), .height = line.height }, .color = fill });
+    try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y, .width = @max(0, right - left), .height = line.height }, .color = color });
 }
