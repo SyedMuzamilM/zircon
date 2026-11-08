@@ -32,6 +32,8 @@ There is no self-assigned quality score. Each area passes demonstrated behavior 
 6. Implement common native platform seams and native Linux/Windows adapters using the [native platform plan](native-platforms.md). Platform support is part of this program, not satisfied by portable tests. Add target builds early to expose POSIX/macOS assumptions, then platform execution and packaging checks.
 7. Run the complete coding journey and lifecycle/failure checks. Resolve findings and document the verified scope.
 
+The user additionally prioritizes a shared editable multibuffer for the Git tab, search and other excerpt views. Research the actual Zed `multi_buffer`, buffer-diff, editor/display-map and consumer contracts now. Implement its source identity, mapping and transaction core before waiting for every later consumer feature. A concatenated patch or copied search snippet does not establish editable multibuffer support.
+
 Units can overlap only at independent boundaries. Native tests that need foreground access run sequentially. Existing documentation changes belong to their current author and remain intact.
 
 ## Architecture constraints to preserve
