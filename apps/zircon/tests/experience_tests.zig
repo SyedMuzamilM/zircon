@@ -438,7 +438,7 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     };
     try t.expect(try app.read(owner, AllChanges.visible, .{}));
     var commit_disabled = false;
-    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Commit staged changes")) {
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Commit tracked changes")) {
         commit_disabled = node.kind.button.on_click == null;
     };
     try t.expect(commit_disabled);

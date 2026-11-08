@@ -250,6 +250,25 @@ pub const Repository = struct {
         const output = try self.command(self.allocator, args.items);
         self.allocator.free(output);
     }
+    /// NUL-separated index paths, including tracked files absent from status.
+    pub fn trackedPaths(self: *Repository, a: std.mem.Allocator) ![]u8 {
+        return self.command(a, &.{ "ls-files", "--cached", "-z" });
+    }
+    pub fn commitTrackedFallback(self: *Repository, message: []const u8) !void {
+        var current = try self.status(self.allocator);
+        defer current.deinit();
+        for (current.entries) |entry| if (entry.conflicted) return error.UnresolvedGitConflicts;
+        var staged = false;
+        for (current.entries) |entry| staged = staged or entry.staged;
+        if (!staged) {
+            var paths: std.ArrayList([]const u8) = .empty;
+            defer paths.deinit(self.allocator);
+            for (current.entries) |entry| if (entry.unstaged and entry.index != .untracked and entry.index != .added and entry.worktree != .untracked and entry.worktree != .added) try paths.append(self.allocator, entry.path);
+            if (paths.items.len == 0) return error.NoCommitChanges;
+            try self.stage(paths.items);
+        }
+        try self.commit(message);
+    }
     pub fn commit(self: *Repository, message: []const u8) !void {
         if (std.mem.trim(u8, message, " \t\r\n").len == 0 or std.mem.indexOfScalar(u8, message, 0) != null) return error.InvalidCommitMessage;
         const output = try self.command(self.allocator, &.{ "commit", "-m", message });

@@ -35,7 +35,7 @@ Source inspected at immutable revision `b5cd310b3b54dfc659fcc06453e6358843dfe216
 
 ## Remaining work
 
-1. Exercise commit, fetch, pull, push and publish through the application against disposable local bare remotes. Repository-level tests exist, but they do not establish the complete app flow. Match Zed's conditional implicit staging and dirty-buffer save policy, retain failures and messages, and investigate metadata polling/UI churn.
+1. Extend Git beyond the verified basic operations. The application now publishes, fetches, pulls, commits and pushes against disposable bare remotes. Commit preserves an explicit index or implicitly stages tracked changes when empty. Stage and implicit Commit save affected buffers after checking captured revisions and paths; disk conflicts stop index mutation. Failed hooks retain their message/index, successful commits clear only the submitted message, and idle refreshes preserve refs/history allocations and skip history queries. External-network credentials, hunk staging, conflict controls, advanced history and multiline commit composition remain open.
 2. Complete editable global-search multibuffers and Git comparisons, including selection, editing, Save/Save All, clipboard/deleted hunks, undo and source synchronization. Existing Git inline editing covers a subset; global search is still display-only.
 3. Add declaration, type-definition, implementation and call-hierarchy navigation. These screenshot actions are not in the context menu yet. File history and hosted permalinks also remain separate work; repository history is not a replacement for file history.
 4. Add context menus to writable Git/search excerpts when their source targeting is complete. The new menu currently covers normal source panes and splits. Cut/Copy require a selection; Zed's empty-selection line-copy behavior remains open.
@@ -44,3 +44,7 @@ Source inspected at immutable revision `b5cd310b3b54dfc659fcc06453e6358843dfe216
 7. Finish the audit's syntax, external reload, UI organization, formatting, performance and supported-language acceptance cases. Passing current fixture tests is not full Zed parity.
 
 Scratch source copies remain excluded from commits.
+
+## Git operation follow-up
+
+The app workflow suite reproduces the disabled unstaged Commit control and stale disk staging before the fixes. It verifies conditional implicit staging, dirty-buffer staging, disk-conflict refusal, stale preparation refusal, explicit-index preservation, hook failure/retry, message retention, and local publish/fetch/pull/commit/push through real controls. Idle-refresh checks assert unchanged refs/history identities and no additional history commands, then verify external commits and clean source reloads. The full check passed 53/53 steps; a fresh native run passed 150/150 tests before the final stale-preparation test was added. That additional test passed independently.

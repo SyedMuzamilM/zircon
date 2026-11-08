@@ -12,6 +12,7 @@ const actions = @import("../actions.zig");
 const git_editing = @import("../git_editing.zig");
 const git_tree = @import("../models/git_tree.zig");
 const shell = @import("../shell.zig");
+const commit_form = @import("../views/git/commit.zig");
 const handoff = @import("handoff.zig");
 const diff_layout = zircon_git_ui.layout;
 const Shell = shell.Shell;
@@ -86,6 +87,7 @@ pub const Model = struct {
     needs_refresh: bool = false,
     next_refresh: f64 = 0,
     needs_metadata: bool = true,
+    metadata_fingerprint: ?u64 = null,
     pending_all_diff: bool = false,
     diff_scroll: ui.controls.Scroll = .{},
     sidebar_scroll: ui.controls.Scroll = .{},
@@ -305,8 +307,12 @@ fn isBinaryHunk(hunk: git.Hunk) bool {
     return hunk.lines.len == 1 and hunk.lines[0].kind == .metadata and std.mem.startsWith(u8, hunk.lines[0].text, "Binary files ");
 }
 const SourceVersion = struct { document: workspace.DocumentId, revision: u64 };
+const SaveTarget = struct { document: workspace.DocumentId, revision: u64, path: []u8 };
 const CapturedBuffer = struct { document: workspace.DocumentId, path: []u8, snapshot: text.Snapshot, dirty: bool };
 const Result = struct {
+    save_documents: []SaveTarget = &.{},
+    prepared_operation: ?Operation = null,
+    committed_message: ?[]u8 = null,
     source_versions: []SourceVersion = &.{},
     history_oid: []u8 = &.{},
     message: []u8 = &.{},
@@ -318,6 +324,7 @@ const Result = struct {
     status: ?git.Status = null,
     commits: []git.Commit = &.{},
     commits_ready: bool = false,
+    metadata_fingerprint: ?u64 = null,
     diff: ?git.Diff = null,
     references: ?git.References = null,
     reload_worktree: bool = false,
@@ -332,6 +339,10 @@ const Result = struct {
     baseline: []u8 = &.{},
     error_text: []u8 = &.{},
     pub fn deinit(self: *Result) void {
+        for (self.save_documents) |source| a.free(source.path);
+        a.free(self.save_documents);
+        if (self.prepared_operation) |operation| freeOperation(operation);
+        if (self.committed_message) |message| a.free(message);
         a.free(self.source_versions);
         a.free(self.history_oid);
         a.free(self.message);
@@ -359,7 +370,9 @@ const Job = struct {
     snapshot: ?text.Snapshot = null,
     document: ?workspace.DocumentId = null,
     path: ?[]u8 = null,
+    preflight: bool = false,
     include_references: bool = false,
+    metadata_fingerprint: ?u64 = null,
     comparison: ?struct { path: ?[]u8, staged: bool, all: bool } = null,
     pub fn run(self: *Job, cancel: *ui.tasks.Cancellation) !*Box {
         try cancel.check();
@@ -367,6 +380,10 @@ const Job = struct {
         errdefer result.deinit();
         var repo = (try git.Repository.discover(a, self.io, self.root)) orelse return Box.create(a, result);
         defer repo.deinit();
+        if (self.preflight) {
+            try self.prepareMutation(&repo, &result);
+            return Box.create(a, result);
+        }
         if (self.operation == .history) {
             result.history_oid = try a.dupe(u8, self.operation.history);
             result.message = try repo.commitMessage(a, self.operation.history);
@@ -440,7 +457,10 @@ const Job = struct {
             .history => |oid| result.diff = try repo.commitDiff(a, oid, null),
             .stage => |path| try repo.stage(&.{path}),
             .unstage => |path| try repo.unstage(&.{path}),
-            .commit => |message| try repo.commit(message),
+            .commit => |message| {
+                try repo.commitTrackedFallback(message);
+                result.committed_message = try a.dupe(u8, message);
+            },
             .stage_all, .unstage_all => {
                 var current = try repo.status(a);
                 defer current.deinit();
@@ -463,9 +483,12 @@ const Job = struct {
             },
         }
         if (self.comparison) |comparison| result.diff = if (comparison.all) try repo.allChanges(a) else try repo.diff(a, comparison.path, comparison.staged);
-        if (self.include_references) result.references = try repo.references(a);
-        result.status = try repo.status(a);
         if (self.include_references) {
+            result.references = try repo.references(a);
+            result.metadata_fingerprint = referencesFingerprint(result.references.?);
+        }
+        result.status = try repo.status(a);
+        if (self.include_references and self.metadata_fingerprint != result.metadata_fingerprint) {
             result.commits = try repo.history(a, 100);
             result.commits_ready = true;
         }
@@ -481,6 +504,37 @@ const Job = struct {
             result.changes_ready = true;
         };
     }
+    fn prepareMutation(self: *Job, repo: *git.Repository, result: *Result) !void {
+        var current = try repo.status(a);
+        defer current.deinit();
+        var staged = false;
+        for (current.entries) |entry| {
+            if (self.operation == .commit and entry.conflicted) return error.UnresolvedGitConflicts;
+            staged = staged or entry.staged;
+        }
+        const tracked = if (self.operation == .stage_all or (self.operation == .commit and !staged)) try repo.trackedPaths(a) else &.{};
+        defer a.free(tracked);
+        var documents: std.ArrayList(SaveTarget) = .empty;
+        defer documents.deinit(a);
+        errdefer for (documents.items) |source| a.free(source.path);
+        for (self.buffers) |buffer| {
+            const path = repo.relativePath(a, buffer.path) catch continue;
+            defer a.free(path);
+            const selected = switch (self.operation) {
+                .stage => |requested| std.mem.eql(u8, path, requested),
+                .stage_all => indexed(tracked, path) or statusEntry(current.entries, path) != null,
+                .commit => !staged and indexed(tracked, path),
+                else => unreachable,
+            };
+            if (!selected) continue;
+            const owned_path = try a.dupe(u8, buffer.path);
+            errdefer a.free(owned_path);
+            try documents.append(a, .{ .document = buffer.document, .revision = buffer.snapshot.revision(), .path = owned_path });
+        }
+        result.save_documents = try documents.toOwnedSlice(a);
+        result.prepared_operation = try copyOperation(self.operation);
+    }
+
     pub fn discard(_: *Job, result: *Box) void {
         result.destroy();
     }
@@ -498,6 +552,10 @@ const Job = struct {
     }
 };
 pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
+    return startOperation(self, cx, operation, true);
+}
+
+fn startOperation(self: *Shell, cx: *ui.Context(Shell), operation: Operation, prepare_mutation: bool) !void {
     const changes_worktree = switch (operation) {
         .switch_branch, .stash_save, .stash_apply => true,
         .network => |n| n == .pull,
@@ -545,6 +603,8 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
     var job: Job = .{ .io = self.workspace.io, .root = try a.dupe(u8, self.workspace.root_path), .operation = .refresh, .generation = self.git.generation + 1 };
     errdefer job.deinit(a);
     job.operation = try copyOperation(operation);
+    job.preflight = prepare_mutation and (operation == .stage or operation == .stage_all or operation == .commit);
+    job.metadata_fingerprint = self.git.metadata_fingerprint;
     if (self.tabs.items.len > 0) {
         const id = if (operation == .blame and operation.blame.document != null) operation.blame.document.? else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
         const record = try self.workspace.getConst(id);
@@ -576,7 +636,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
     }
     job.buffers = try buffers.toOwnedSlice(a);
     _ = try cx.spawn(Job, job, complete);
-    if (job.include_references) self.git.needs_metadata = false;
+    if (job.include_references and !job.preflight) self.git.needs_metadata = false;
     self.git.busy = true;
     self.git.background = operation == .refresh or (operation == .blame and !operation.blame.expanded);
     self.git.next_refresh = try cx.app.currentTime() + 1;
@@ -589,7 +649,8 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
 }
 
 fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
-    var changed = !self.git.background;
+    const background = self.git.background;
+    var changed = !background;
     self.git.busy = false;
     self.git.background = false;
     self.git.operation_label = "";
@@ -601,6 +662,21 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     if (box.value.?.generation != self.git.generation) return;
     var value = box.take();
     defer value.deinit();
+    if (value.prepared_operation) |operation| {
+        // Recheck every captured revision before the first save. A newer edit
+        // must be prepared again, and a disk conflict must stop index mutation.
+        for (value.save_documents) |source| {
+            const record = self.workspace.getConst(source.document) catch return failPreparation(self, cx, error.StaleGitOperation);
+            if (record.doc.revision() != source.revision or record.path == null or !std.mem.eql(u8, record.path.?, source.path)) return failPreparation(self, cx, error.StaleGitOperation);
+        }
+        for (value.save_documents) |source| {
+            if (!(try self.workspace.getConst(source.document)).dirty()) continue;
+            self.workspace.save(source.document, null) catch |err| return failPreparation(self, cx, err);
+        }
+        try startOperation(self, cx, operation, false);
+        return;
+    }
+    if (value.committed_message) |message| try commit_form.completed(self, cx, message);
     self.git.repository = value.found;
     if (value.found) {
         a.free(self.git.root_path);
@@ -608,10 +684,14 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.root_path = &.{};
     }
     if (value.references) |refs| {
-        changed = true;
-        if (self.git.references) |*old| old.deinit();
-        self.git.references = refs;
-        value.references = null;
+        const fingerprint_value = referencesFingerprint(refs);
+        if (self.git.references == null or self.git.metadata_fingerprint != fingerprint_value) {
+            changed = true;
+            if (self.git.references) |*old| old.deinit();
+            self.git.references = refs;
+            value.references = null;
+        }
+        if (value.commits_ready or self.git.metadata_fingerprint == fingerprint_value) self.git.metadata_fingerprint = fingerprint_value;
     }
     if (value.reload_worktree) {
         self.git.needs_refresh = true;
@@ -695,7 +775,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
             self.git.reveal_path = &.{};
         }
     }
-    if (!value.quiet_blame) {
+    if (!value.quiet_blame and (!background or value.error_text.len > 0)) {
         changed = changed or !std.mem.eql(u8, self.git.error_text, value.error_text);
         a.free(self.git.error_text);
         self.git.error_text = value.error_text;
@@ -842,4 +922,38 @@ fn freeOperation(operation: Operation) void {
         },
         else => {},
     }
+}
+
+fn indexed(paths: []const u8, path: []const u8) bool {
+    var iterator = std.mem.splitScalar(u8, paths, 0);
+    while (iterator.next()) |item| if (std.mem.eql(u8, item, path)) return true;
+    return false;
+}
+
+fn failPreparation(self: *Shell, cx: *ui.Context(Shell), err: anyerror) !void {
+    try self.reportError(err);
+    cx.notify();
+}
+
+fn referencesFingerprint(refs: git.References) u64 {
+    var hash = std.hash.Wyhash.init(0);
+    for (refs.branches) |branch| {
+        inline for (.{ branch.name, branch.oid, branch.subject, branch.author, branch.upstream, branch.tracking }) |field| {
+            std.hash.autoHash(&hash, field.len);
+            hash.update(field);
+        }
+        std.hash.autoHash(&hash, branch.remote);
+    }
+    std.hash.autoHash(&hash, refs.branches.len);
+    for (refs.remotes) |remote| {
+        std.hash.autoHash(&hash, remote.len);
+        hash.update(remote);
+    }
+    std.hash.autoHash(&hash, refs.remotes.len);
+    for (refs.stashes) |stash| inline for (.{ stash.reference, stash.oid, stash.subject }) |field| {
+        std.hash.autoHash(&hash, field.len);
+        hash.update(field);
+    };
+    std.hash.autoHash(&hash, refs.stashes.len);
+    return hash.final();
 }
