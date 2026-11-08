@@ -230,8 +230,24 @@ fn changesToolbar(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             try ghostAction(b, c, .git_diff_all, "View diff", .diff),
             try b.fluent().div().grow().children(.{}).build(),
             try b.fluent().adopt(stage_control).id(.{ .string = "git-stage-control" }).build(),
+            try b.fluent().button(.{
+                .label = if (self.git.tree.mode == .tree) "Show changes as list" else "Show changes as tree",
+                .tooltip = if (self.git.tree.mode == .tree) "Show changes as list" else "Show changes as tree",
+                .tooltip_colors = .{ c.panel, c.text, c.line },
+            })
+                .style(v.iconButtonStyle(c, false))
+                .on_click(b.onClick(toggleView))
+                .children(.{v.icon(b, if (self.git.tree.mode == .tree) .file else .folder, c.muted, 14)})
+                .id(.{ .string = "git-file-view-toggle" })
+                .build(),
             try v.iconButton(b, c, .git_refresh, "Refresh", .refresh, false),
         }).build();
+}
+
+fn toggleView(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell)) void {
+    self.git.tree.mode = if (self.git.tree.mode == .tree) .list else .tree;
+    self.git.sidebar_scroll.offset = 0;
+    cx.notify();
 }
 
 fn changedFiles(self: *const Shell, b: *ui.Ui, height: f32, notices: f32) !ui.Element {

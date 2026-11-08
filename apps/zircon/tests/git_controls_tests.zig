@@ -129,7 +129,7 @@ const CountOps = struct {
         return !self.git.busy and self.git.status != null and self.git.status.?.entries.len == 2;
     }
 };
-test "Git rows render real rounded counts and joined action menus at narrow widths" {
+test "Git rows render plain change counts and joined action menus at narrow widths" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
@@ -166,8 +166,7 @@ test "Git rows render real rounded counts and joined action menus at narrow widt
                 additions = additions or std.mem.eql(u8, label, "+1");
                 deletions = deletions or std.mem.eql(u8, label, "−1");
                 const badge = frame.nodes.items[node.parent.?];
-                try t.expectEqual(@as(f32, 4), badge.style.radius);
-                try t.expectEqual(@as(f32, 0.12), badge.style.background.?.a);
+                try t.expect(badge.style.background == null);
             }
             binary = binary or std.mem.eql(u8, label, "Binary");
             try t.expect(!std.mem.eql(u8, label, "A") and !std.mem.eql(u8, label, "M") and !std.mem.eql(u8, label, "D"));

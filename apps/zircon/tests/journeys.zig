@@ -5,6 +5,7 @@ const diagnostics_tests = @import("diagnostics_tests.zig");
 const diff_layout_tests = @import("diff_layout_tests.zig");
 const experience_tests = @import("experience_tests.zig");
 const git_controls_tests = @import("git_controls_tests.zig");
+const git_tree_tests = @import("git_tree_tests.zig");
 const grammar_retry_tests = @import("grammar_retry_tests.zig");
 const language_actions_tests = @import("language_actions_tests.zig");
 const language_lifecycle_tests = @import("language_lifecycle_tests.zig");
@@ -14,6 +15,7 @@ const sidebar_tests = @import("sidebar_tests.zig");
 const ui_ownership_tests = @import("ui_ownership_tests.zig");
 const workspace_polish_tests = @import("workspace_polish_tests.zig");
 test {
+    _ = git_tree_tests;
     _ = diagnostics_tests;
     _ = recovery_tests;
     _ = agent_tests;

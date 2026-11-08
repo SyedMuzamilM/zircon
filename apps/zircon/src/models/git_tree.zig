@@ -2,13 +2,15 @@
 //! status snapshot; only collapsed directory identities own persistent bytes.
 const std = @import("std");
 const git = @import("zircon_git");
+pub const Mode = enum { tree, list };
 pub const Group = enum { conflicts, tracked, untracked };
 pub const Row = union(enum) {
     section: struct { group: Group, count: usize },
-    directory: struct { path: []const u8, depth: usize, entry: u32, group: Group },
+    directory: struct { path: []const u8, label: []const u8, depth: usize, entry: u32, group: Group },
     file: struct { index: u32, depth: usize },
 };
 pub const Tree = struct {
+    mode: Mode = .tree,
     sections: [3]bool = @splat(false),
     directories: std.StringHashMapUnmanaged(void) = .empty,
     pub fn deinit(self: *Tree, a: std.mem.Allocator) void {
@@ -44,29 +46,48 @@ pub const Tree = struct {
             if (count > 0) {
                 try result.append(a, .{ .section = .{ .group = group, .count = count } });
                 if (!self.sections[@backingInt(group)]) {
-                    var previous: []const u8 = "";
-                    for (indices) |index| {
-                        const entry = entries[index];
-                        if (groupFor(entry) != group) continue;
-                        var depth: usize = 0;
-                        var hidden = false;
-                        for (entry.path, 0..) |char, end| {
-                            if (char != '/') continue;
-                            const directory = entry.path[0..end];
-                            if (!(previous.len > end and previous[end] == '/' and std.mem.eql(u8, previous[0..end], directory))) try result.append(a, .{ .directory = .{ .path = directory, .depth = depth, .entry = index, .group = group } });
-                            depth += 1;
-                            if (self.directories.contains(directory)) {
-                                hidden = true;
-                                break;
-                            }
-                        }
-                        if (!hidden) try result.append(a, .{ .file = .{ .index = index, .depth = depth } });
-                        previous = entry.path;
-                    }
+                    var group_indices: std.ArrayList(u32) = .empty;
+                    defer group_indices.deinit(a);
+                    for (indices) |index| if (groupFor(entries[index]) == group) try group_indices.append(a, index);
+                    if (self.mode == .list) {
+                        for (group_indices.items) |index| try result.append(a, .{ .file = .{ .index = index, .depth = 0 } });
+                    } else try self.appendDirectory(a, &result, entries, group_indices.items, group, 0, 0);
                 }
             }
         }
         return result.toOwnedSlice(a);
+    }
+
+    fn appendDirectory(self: *const Tree, a: std.mem.Allocator, result: *std.ArrayList(Row), entries: []const git.Entry, indices: []const u32, group: Group, prefix: usize, depth: usize) !void {
+        var index: usize = 0;
+        while (index < indices.len) {
+            const entry = indices[index];
+            const path = entries[entry].path;
+            const slash = std.mem.indexOfScalarPos(u8, path, prefix, '/') orelse {
+                try result.append(a, .{ .file = .{ .index = entry, .depth = depth } });
+                index += 1;
+                continue;
+            };
+            var end = index + 1;
+            while (end < indices.len and std.mem.startsWith(u8, entries[indices[end]].path, path[0 .. slash + 1])) : (end += 1) {}
+            // Shared directory prefixes represent chains with no file or sibling
+            // at intermediate levels, so they can occupy a single disclosure row.
+            var common = std.mem.lastIndexOfScalar(u8, path, '/').?;
+            for (indices[index + 1 .. end]) |other| {
+                const other_path = entries[other].path;
+                while (!std.mem.startsWith(u8, other_path, path[0 .. common + 1])) {
+                    common = std.mem.lastIndexOfScalar(u8, path[0..common], '/').?;
+                }
+            }
+            var compact_end = slash;
+            while (compact_end < common and !self.directories.contains(path[0..compact_end])) {
+                compact_end = std.mem.indexOfScalarPos(u8, path, compact_end + 1, '/').?;
+            }
+            const directory = path[0..compact_end];
+            try result.append(a, .{ .directory = .{ .path = directory, .label = path[prefix..compact_end], .depth = depth, .entry = entry, .group = group } });
+            if (!self.directories.contains(directory)) try self.appendDirectory(a, result, entries, indices[index..end], group, compact_end + 1, depth + 1);
+            index = end;
+        }
     }
 };
 pub fn groupFor(entry: git.Entry) Group {

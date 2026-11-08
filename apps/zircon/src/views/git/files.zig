@@ -52,7 +52,7 @@ pub fn renderRow(self: *const Shell, b: *ui.Ui, entries: []const git.Entry, row:
             .children(&.{
                 try v.icon(b, if (self.git.tree.directories.contains(directory.path)) .chevron_right else .chevron_down, c.muted, 12),
                 try v.icon(b, .folder, c.muted, 15),
-                try v.text(b, std.fs.path.basename(directory.path), c.muted, 12),
+                try v.text(b, directory.label, c.muted, 12),
             })
             .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "{s}:{s}", .{ @tagName(directory.group), directory.path }) })
             .build(),
@@ -82,6 +82,7 @@ pub fn renderRow(self: *const Shell, b: *ui.Ui, entries: []const git.Entry, row:
                 .padding = .{ .left = 26 + @as(f32, @floatFromInt(file.depth)) * 14 },
                 .overflow = .hidden,
             };
+            const parent = if (self.git.tree.mode == .list) std.fs.path.dirname(entry.path) orelse "" else "";
             const target = try b.fluent().button(.{
                 .label = entry.path,
             })
@@ -95,6 +96,7 @@ pub fn renderRow(self: *const Shell, b: *ui.Ui, entries: []const git.Entry, row:
                         .text = .{ .size = 12, .color = color },
                         .overflow = .hidden,
                     }).build(),
+                    try v.text(b, parent, c.muted, 11),
                     try changeBadges(b, c, entry),
                 }).build();
             return b.fluent().div()
@@ -155,14 +157,9 @@ fn changeBadges(b: *ui.Ui, c: v.Palette, entry: git.Entry) !ui.Element {
 }
 
 fn badge(b: *ui.Ui, label: []const u8, color: ui.Color) !ui.Element {
-    var background = color;
-    background.a = 0.12;
     return b.fluent().div()
         .h(.{ .px = 18 })
-        .padding(.{ .left = 5, .right = 5 })
-        .rounded_px(4)
         .items_center()
-        .background(background)
         .shrink_0()
         .flex()
         .children(.{v.text(b, label, color, 11)})
