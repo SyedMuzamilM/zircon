@@ -13,7 +13,7 @@ const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
-const Pending = struct { kind: enum { initialize, completion, hover, definition, references, rename, formatting, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
+const Pending = struct { kind: enum { initialize, completion, hover, definition, references, rename, formatting, signature, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
     pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0, change_text_bytes: u64 = 0, incremental_changes: u64 = 0, resync_changes: u64 = 0 };
     counters: Stats = .{},
@@ -36,6 +36,7 @@ pub const Client = struct {
     references_supported: std.atomic.Value(bool) = .init(false),
     rename_supported: std.atomic.Value(bool) = .init(false),
     formatting_supported: std.atomic.Value(bool) = .init(false),
+    signature_supported: std.atomic.Value(bool) = .init(false),
     sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
@@ -300,6 +301,28 @@ pub const Client = struct {
             self.lock.unlock(self.io);
         }
         try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/formatting", .params = .{ .textDocument = .{ .uri = uri }, .options = .{ .tabSize = 4, .insertSpaces = true } } });
+        return id;
+    }
+    pub fn supportsSignature(self: *const Client) bool {
+        return self.signature_supported.load(.acquire);
+    }
+    pub fn signature(self: *Client, uri: []const u8, version: u64, cursor_position: model.Position) !u64 {
+        try self.check();
+        if (!self.supportsSignature()) return error.SignatureHelpNotSupported;
+        if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
+        const id = try self.requestId();
+        const owned = try transport_allocator.dupe(u8, uri);
+        errdefer transport_allocator.free(owned);
+        self.lock.lockUncancelable(self.io);
+        const inserted = self.pending.put(transport_allocator, id, .{ .kind = .signature, .uri = owned, .version = version });
+        self.lock.unlock(self.io);
+        try inserted;
+        errdefer {
+            self.lock.lockUncancelable(self.io);
+            _ = self.pending.remove(id);
+            self.lock.unlock(self.io);
+        }
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/signatureHelp", .params = .{ .textDocument = .{ .uri = uri }, .position = cursor_position } });
         return id;
     }
     fn requestId(self: *Client) !u64 {
@@ -668,6 +691,8 @@ fn parse(self: *Client, body: []const u8) !void {
             self.rename_supported.store(rename_provider, .release);
             const formatting_provider = if (field(capabilities, "documentFormattingProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.formatting_supported.store(formatting_provider, .release);
+            const signature_provider = if (field(capabilities, "signatureHelpProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
+            self.signature_supported.store(signature_provider, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
             if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
@@ -745,6 +770,10 @@ fn parse(self: *Client, body: []const u8) !void {
             const items = try a.alloc(model.TextEdit, result.array.items.len);
             for (result.array.items, items) |value, *actual| actual.* = try edit(value);
             self.publish(.{ .arena = arena, .data = .{ .edits = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } } });
+        },
+        .signature => {
+            const contents = if (result == .null) "" else if (field(result, "signatures")) |signatures| if (signatures == .array and signatures.array.items.len > 0) try string(field(signatures.array.items[0], "label") orelse return error.InvalidSignatureHelp) else "" else "";
+            self.publish(.{ .arena = arena, .data = .{ .signature_help = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } } });
         },
     }
 }

@@ -129,6 +129,7 @@ pub const Command = enum {
     rename_symbol,
     submit_rename,
     format_document,
+    show_signature_help,
 };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
@@ -137,6 +138,7 @@ pub const commands = [_]Entry{
     .{ .command = .find_references, .label = "Language: find all references", .shortcut = "⇧F12" },
     .{ .command = .rename_symbol, .label = "Language: rename symbol", .shortcut = "F2" },
     .{ .command = .format_document, .label = "Language: format document", .shortcut = "⇧⌥F" },
+    .{ .command = .show_signature_help, .label = "Language: show signature help", .shortcut = "⌃⇧Space" },
     .{ .command = .cut, .label = "Cut", .shortcut = "⌘X" },
     .{ .command = .copy, .label = "Copy", .shortcut = "⌘C" },
     .{ .command = .paste, .label = "Paste", .shortcut = "⌘V" },

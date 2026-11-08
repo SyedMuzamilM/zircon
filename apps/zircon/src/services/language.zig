@@ -40,6 +40,7 @@ const PendingDefinition = struct { document: ws.DocumentId, session: usize, requ
 const PendingReferences = PendingDefinition;
 const PendingRename = PendingDefinition;
 const PendingFormatting = PendingDefinition;
+const PendingSignature = PendingDefinition;
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
@@ -56,6 +57,8 @@ pub const Model = struct {
     references_pending: ?PendingReferences = null,
     rename_pending: ?PendingRename = null,
     formatting_pending: ?PendingFormatting = null,
+    signature: ?lsp.Message = null,
+    signature_pending: ?PendingSignature = null,
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -93,12 +96,18 @@ pub const Model = struct {
     pub fn clearFormatting(self: *Model) void {
         self.formatting_pending = null;
     }
+    pub fn clearSignature(self: *Model) void {
+        if (self.signature) |*value| value.deinit();
+        self.signature = null;
+        self.signature_pending = null;
+    }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         self.clearCompletion();
         self.clearDefinition();
         self.clearReferences();
         self.clearRename();
         self.clearFormatting();
+        self.clearSignature();
         for (self.documents.items) |*doc| {
             if (doc.diagnostics) |*value| value.deinit();
             a.free(doc.uri);
@@ -367,6 +376,15 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     moved = true;
                     changed = true;
                 },
+                .signature_help => |value| if (self.language.signature_pending) |pending| {
+                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                    if (self.language.signature) |*old| old.deinit();
+                    self.language.signature = message;
+                    self.language.signature_pending = null;
+                    moved = true;
+                    changed = true;
+                    if (value.contents.len > 0) try self.setStatus(try self.allocator.dupe(u8, value.contents));
+                },
                 else => {},
             }
         }
@@ -450,6 +468,22 @@ pub fn requestFormatting(self: *Shell, cx: *ui.Context(Shell)) !void {
         const request_id = try client.formatting(doc.uri, snapshot.revision());
         self.language.clearFormatting();
         self.language.formatting_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+        cx.notify();
+        return;
+    };
+    return error.NoLanguageServer;
+}
+
+pub fn requestSignature(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try poll(self, cx);
+    const current = try actions.active(self);
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
+        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const request_id = try client.signature(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head));
+        self.language.clearSignature();
+        self.language.signature_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
         cx.notify();
         return;
     };
