@@ -39,6 +39,8 @@ Two route records are written by the standalone suite:
 - `/tmp/zircon-native-input-mode.txt` identifies window-bound delivery.
 - `/tmp/zircon-native-queued-input-mode.txt` records `PASSED` foreground queue coverage or `SKIPPED` activation unavailability.
 
+The native menu journeys use the same distinction. One sends an actual menu action to the window's responder and always asserts document creation. The foreground journey waits for app activation and the expected key window before exercising AppKit's responder-chain routing. If activation is denied and no key window exists, it reports `SkipZigTest`. An active app with the wrong key window still fails. `/tmp/zircon-native-menu-input-mode.txt` records `PASSED` or the activation-related `SKIPPED` reason.
+
 Read these with the current invocation's exit status and summary. They are fixed temporary paths and can be overwritten by a later run; a mode file by itself is not a test result. Full foreground IME acceptance, dead-key layouts and accessibility remain separate checklist tasks.
 
 The macOS native CI job runs `test-native-fresh` and uploads the build log plus both route records even on failure. A foreground skip must remain visible in the summary/artifact; do not relabel it as full OS-input acceptance.

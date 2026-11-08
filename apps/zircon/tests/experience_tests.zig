@@ -1082,6 +1082,15 @@ test "Git multibuffer drags across source rows survives redraw and edits either 
 }
 
 test "platform menus dispatch commands without duplicating a menu bar in the window" {
+    try menuJourney(false);
+}
+
+test "foreground native menus route commands through the key window" {
+    if (comptime ui.testing.native == void) return error.SkipZigTest;
+    try menuJourney(true);
+}
+
+fn menuJourney(foreground: bool) !void {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
@@ -1123,15 +1132,33 @@ test "platform menus dispatch commands without duplicating a menu bar in the win
             if (std.mem.eql(u8, "ZirconMenuJourney", objc.fromString(objc.send(objc.Id, candidate, "title", .{})))) native_window = candidate;
         }
         const window = native_window orelse return error.MenuJourneyWindowMissing;
-        objc.send(void, window, "makeKeyAndOrderFront:", .{@as(objc.Id, null)});
         const file_heading = objc.send(objc.Id, bar, "itemAtIndex:", .{@as(isize, 1)});
         const file_menu = objc.send(objc.Id, file_heading, "submenu", .{});
-        objc.send(void, native_app, "activateIgnoringOtherApps:", .{true});
-        for (0..16) |_| try ui.testing.native.pump(0);
-        objc.send(void, window, "makeKeyWindow", .{});
-        objc.send(void, file_menu, "performActionForItemAtIndex:", .{@as(isize, 0)});
+        const item = objc.send(objc.Id, file_menu, "itemAtIndex:", .{@as(isize, 0)});
+        if (foreground) {
+            objc.send(void, native_app, "activateIgnoringOtherApps:", .{true});
+            objc.send(void, window, "makeKeyAndOrderFront:", .{@as(objc.Id, null)});
+            const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromMilliseconds(500));
+            while (!objc.send(bool, native_app, "isActive", .{}) or objc.send(objc.Id, native_app, "keyWindow", .{}) != window) {
+                if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) break;
+                try ui.testing.native.pump(0.005);
+            }
+            const active = objc.send(bool, native_app, "isActive", .{});
+            const key = objc.send(objc.Id, native_app, "keyWindow", .{});
+            if (!active and key == null) {
+                try std.Io.Dir.cwd().writeFile(t.io, .{ .sub_path = "/tmp/zircon-native-menu-input-mode.txt", .data = "SKIPPED: macOS denied app activation; keyWindow and menu target are absent\n" });
+                return error.SkipZigTest;
+            }
+            try t.expect(active and key == window);
+            objc.send(void, file_menu, "performActionForItemAtIndex:", .{@as(isize, 0)});
+        } else {
+            const action = objc.send(?*anyopaque, item, "action", .{});
+            const responder = objc.send(objc.Id, window, "firstResponder", .{});
+            try t.expect(objc.send(bool, native_app, "sendAction:to:from:", .{ action, responder, item }));
+        }
         for (0..4) |_| try ui.testing.native.pump(0);
         _ = try app.step(0);
         try t.expect(try app.read(try app.windowEntity(zircon.Shell, h), Check.nativeNewFile, .{}));
+        if (foreground) try std.Io.Dir.cwd().writeFile(t.io, .{ .sub_path = "/tmp/zircon-native-menu-input-mode.txt", .data = "PASSED: native responder-chain menu routing through the key window\n" });
     }
 }
