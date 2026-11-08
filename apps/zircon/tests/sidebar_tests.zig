@@ -35,6 +35,16 @@ fn open(app: *ui.App, root: []const u8, file: []const u8) !ui.WindowHandle {
     return h;
 }
 const Ops = struct {
+    fn statusGeneration(self: *const zircon.Shell) u64 {
+        return self.git.status_generation;
+    }
+    fn diffGeneration(self: *const zircon.Shell) u64 {
+        return self.git.diff_generation;
+    }
+    fn comparison(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        var e: ui.Event(ui.Click) = .{ .data = .{} };
+        try self.onCommand(&e, cx, .git_diff_all);
+    }
     fn treeUpdated(self: *const zircon.Shell) bool {
         var root_file = false;
         var nested_file = false;
@@ -64,6 +74,29 @@ const Ops = struct {
         return self.colors;
     }
 };
+
+test "polish idle Git polls preserve status and comparison presentation" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "before\n" });
+    try git(root, &.{ "init", "-q" });
+    try git(root, &.{ "add", "." });
+    try git(root, &.{ "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "initial" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "after\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.txt");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.comparison, .{});
+    try settle(&app, 0);
+    const status = try app.read(owner, Ops.statusGeneration, .{});
+    const diff = try app.read(owner, Ops.diffGeneration, .{});
+    try settle(&app, 2);
+    try t.expectEqual(status, try app.read(owner, Ops.statusGeneration, .{}));
+    try t.expectEqual(diff, try app.read(owner, Ops.diffGeneration, .{}));
+}
 fn expectColor(app: *ui.App, h: ui.WindowHandle, name: []const u8, color: ui.Color) !void {
     for ((try app.window(h)).frames.committed.nodes.items) |node| {
         if (node.kind == .text and std.mem.eql(u8, node.kind.text, name) and std.meta.eql(node.style.text.color, color)) return;

@@ -36,7 +36,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         if (self.git.commits.len == 0) try rows.append(b.allocator(), try note(b, c, "No commits yet"));
         try children.append(b.allocator(), try list(b, rows.items, @max(0, -visible.top), @as(f32, @floatFromInt(self.git.commits.len)) * history_height));
     } else {
-        const stage_control = try splitAction(b, c, .git_stage_all, .git_changes_menu, "Stage all", "Change actions", .plus, width >= 260, self.git.menu == .changes, self.git.busy);
+        const stage_control = try splitAction(b, c, .git_stage_all, .git_changes_menu, "Stage all", "Change actions", .plus, width >= 260, self.git.menu == .changes, self.git.updating());
         try children.append(b.allocator(), try b.fluent().div().h(.{ .px = 34 }).shrink_0().gap_px(6).items_center().padding(.{ .left = 8, .right = 8 }).flex().children(&.{ try ghostAction(b, c, .git_diff_all, "View diff", .diff), try b.fluent().div().grow().children(.{}).build(), try b.fluent().adopt(stage_control).id(.{ .string = "git-stage-control" }).build(), try v.iconButton(b, c, .git_refresh, "Refresh", .refresh, false) }).build());
         var rows: std.ArrayList(ui.Element) = .empty;
         var total: f32 = 0;
@@ -54,7 +54,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         try children.append(b.allocator(), try v.rule(b, c));
         const branch = if (self.git.status) |status| if (status.branch.len > 0) status.branch else "Detached HEAD" else "Loading…";
         const upstream = git_controls.hasUpstream(self);
-        const publish = try splitAction(b, c, if (upstream) .git_push else .git_publish, .git_network_menu, if (upstream) "Push" else "Publish", "Remote actions", .arrow_up, width >= 220, self.git.menu == .network, self.git.busy);
+        const publish = try splitAction(b, c, if (upstream) .git_push else .git_publish, .git_network_menu, if (upstream) "Push" else "Publish", "Remote actions", .arrow_up, width >= 220, self.git.menu == .network, self.git.updating());
         try children.append(b.allocator(), try b.fluent().div().h(.{ .px = 30 }).shrink_0().padding(.{ .left = 12, .right = 8 }).gap_px(6).items_center().flex().children(.{ b.fluent().button(.{ .label = "Switch branch", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, branch, c.text, 12) }, .on_click = b.onClickWith(Shell.onCommand, Command.git_branches), .style = .{ .direction = .row, .gap = 5, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .hover_background = c.hover, .overflow = .hidden } }), b.fluent().adopt(publish).id(.{ .string = "git-publish-control" }) }).build());
         try children.append(b.allocator(), try v.rule(b, c));
         var staged = false;
@@ -64,7 +64,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
             conflicted = conflicted or entry.conflicted;
         };
         const message_text = if (self.fields) |fields| try view_module.fieldText(b, fields.commit) else "";
-        const commit_ready = staged and !conflicted and !self.git.busy and std.mem.trim(u8, message_text, " \t\r\n").len > 0;
+        const commit_ready = staged and !conflicted and !self.git.updating() and std.mem.trim(u8, message_text, " \t\r\n").len > 0;
         var commit_style = v.buttonStyle(c, commit_ready);
         if (!commit_ready) commit_style.background = c.hover;
         var commit: std.ArrayList(ui.Element) = .empty;

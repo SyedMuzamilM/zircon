@@ -23,6 +23,7 @@ const services_language = @import("services/language.zig");
 const services_project = @import("services/project.zig");
 const services_recovery = @import("services/recovery.zig");
 const services_search = @import("services/search.zig");
+const symbol_hover = @import("services/symbol_hover.zig");
 const model = @import("settings/model.zig");
 const settings_store = @import("settings/store.zig");
 const terminal_module = @import("terminal.zig");
@@ -115,6 +116,7 @@ pub const Shell = struct {
     catalog: services_catalog.Model = .{},
     extension_host_path: ?[]const u8 = null,
     language: services_language.Model = .{},
+    symbol_hover: symbol_hover.Model = .{},
     agents: services_agents.Model = .{},
     agent_mode: bool = false,
     agent_editor: bool = true,
@@ -136,6 +138,7 @@ pub const Shell = struct {
         return self;
     }
     pub fn deinit(self: *Shell, _: std.mem.Allocator) void {
+        self.symbol_hover.deinit();
         panes.cancel(self);
         self.recent.deinit(self.allocator);
         self.terminal.deinit(self.allocator);
@@ -668,6 +671,7 @@ pub const Shell = struct {
     }
     pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
+        self.git.editing.horizontal = @max(0, self.git.editing.horizontal - e.data.scroll.x);
         const height = if (self.git.projection) |projection| projection.contentHeight(&self.git.diff_view, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
@@ -692,6 +696,7 @@ pub const Shell = struct {
         try terminal_module.poll(self, cx);
         try buffer_find.poll(self, cx);
         try services_language.poll(self, cx);
+        try symbol_hover.poll(self, cx);
         try services_project.poll(self, cx);
         try services_git.pollBlame(self, cx);
         if (!self.git.busy) {

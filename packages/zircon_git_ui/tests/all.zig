@@ -5,6 +5,17 @@ const multi = @import("zircon_multibuffer");
 const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
 const t = std.testing;
+
+test "hunk copying returns added and deleted text without diff prefixes" {
+    var comparison = try git.parseDiff(t.allocator, "diff --git a/main.txt b/main.txt\n--- a/main.txt\n+++ b/main.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n");
+    defer comparison.deinit();
+    const added = try gui.hunks.copyText(t.allocator, comparison.hunks[0], .added);
+    defer t.allocator.free(added);
+    const deleted = try gui.hunks.copyText(t.allocator, comparison.hunks[0], .deleted);
+    defer t.allocator.free(deleted);
+    try t.expectEqualStrings("new\n", added);
+    try t.expectEqualStrings("old\n", deleted);
+}
 const patch = "diff --git a/a.zig b/a.zig\n--- a/a.zig\n+++ b/a.zig\n@@ -2,2 +2,3 @@\n same\n-old\n+new\n+extra\ndiff --git a/b.zig b/b.zig\n--- a/b.zig\n+++ b/b.zig\n@@ -1 +1 @@\n-no\n+yes\n";
 
 test "Git excerpts map only visible source ranges and refuse edits across files" {

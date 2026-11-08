@@ -6,6 +6,12 @@ const t = std.testing;
 
 const Identity = struct { client: usize, diagnostics: usize, generation: u64 };
 const Ops = struct {
+    fn hoverReady(self: *const zircon.Shell) bool {
+        return self.language.documents.items.len > 0 and self.language.documents.items[0].version != null and self.language.sessions.items[self.language.documents.items[0].session].client.?.ready();
+    }
+    fn hoverVisible(self: *const zircon.Shell) bool {
+        return self.symbol_hover.preview != null;
+    }
     fn configure(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), home: []const u8) !void {
         try self.loadExtensions(cx, home);
     }
@@ -83,6 +89,49 @@ const Ops = struct {
         return primary_session != null and secondary_session != null and primary_session.? != secondary_session.?;
     }
 };
+
+test "symbol information renders language-server Markdown and dismisses on edit" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.createDirPath(t.io, "extensions/org.zircon.hover");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "server.py", .data = @embedFile("language_fixture") });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = "const answer = 42;\n" });
+    const server = try std.fs.path.join(t.allocator, &.{ root, "server.py" });
+    defer t.allocator.free(server);
+    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{ .schema_version = 1, .id = "org.zircon.hover", .name = "Hover", .version = "1.0.0", .contributes = .{ .language_servers = .{.{ .id = "hover", .languages = .{"zig"}, .command = "python3", .args = .{ server, "host" } }} } }, .{});
+    defer t.allocator.free(manifest);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.hover/extension.json", .data = manifest });
+    const home = try std.fs.path.join(t.allocator, &.{ root, "extensions" });
+    defer t.allocator.free(home);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, "one.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    try app.update(owner, Ops.configure, .{home});
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (!try app.read(owner, Ops.hoverReady, .{})) {
+        _ = try app.step(0);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.HoverReadinessTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
+    try app.update(owner, Ops.command, .{.show_symbol_info});
+    while (!try app.read(owner, Ops.hoverVisible, .{})) {
+        _ = try app.step(0);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.HoverPresentationTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
+    _ = try app.step(0);
+    var card = false;
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "symbol-hover")) {
+        card = true;
+    };
+    try t.expect(card);
+    try app.dispatch(h, .{ .text = "x" });
+    try t.expect(!try app.read(owner, Ops.hoverVisible, .{}));
+}
 fn waitReady(app: *ui.App, owner: ui.Entity(zircon.Shell)) !void {
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
     while (!try app.read(owner, Ops.ready, .{})) {

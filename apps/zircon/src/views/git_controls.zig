@@ -22,7 +22,7 @@ fn dismiss(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
     }
 }
 pub fn commandRow(self: *const Shell, b: *ui.Ui, command: Command, label: []const u8, enabled: bool) !ui.Element {
-    if (enabled and !self.git.busy) return v.menuRow(b, self.colors, command, label, try self.key_bindings.shortcut(b.allocator(), command), false);
+    if (enabled and !self.git.updating()) return v.menuRow(b, self.colors, command, label, try self.key_bindings.shortcut(b.allocator(), command), false);
     return b.fluent().div().h(.{ .px = 30 }).shrink_0().items_center().padding(.{ .left = 10, .right = 10 }).opacity(0.45).flex().children(.{v.text(b, label, self.colors.muted, 13)}).build();
 }
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {

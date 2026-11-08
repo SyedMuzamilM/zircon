@@ -65,6 +65,8 @@ pub const Model = struct {
     working_presentation: ?Presentation = null,
     pending_history: ?[]u8 = null,
     busy: bool = false,
+    background: bool = false,
+    pending_actions: std.ArrayList(Operation) = .empty,
     blame_target: ?BlameTarget = null,
     blame_changed_at: f64 = 0,
     blame_requested: bool = false,
@@ -98,6 +100,8 @@ pub const Model = struct {
         return statusEntry(status.entries, path[root.len + 1 ..]);
     }
     pub fn deinit(self: *Model) void {
+        for (self.pending_actions.items) |operation| freeOperation(operation);
+        self.pending_actions.deinit(a);
         self.editing.deinit();
         if (self.editable) |*value| value.deinit();
         a.free(self.root_path);
@@ -119,6 +123,9 @@ pub const Model = struct {
         self.history_tabs.deinit(a);
         a.free(self.error_text);
         self.* = undefined;
+    }
+    pub fn updating(self: *const Model) bool {
+        return self.busy and !self.background;
     }
     pub fn clearEditable(self: *Model) void {
         if (self.editable) |*value| value.deinit();
@@ -204,6 +211,26 @@ fn statusEntry(entries: []const git.Entry, path: []const u8) ?git.Entry {
 fn newFile(entry: git.Entry) bool {
     return !entry.conflicted and (entry.index == .added or entry.index == .untracked or entry.worktree == .untracked);
 }
+fn sameStatus(left: git.Status, right: git.Status) bool {
+    if (!std.mem.eql(u8, left.branch, right.branch) or left.unborn != right.unborn or left.detached != right.detached or left.entries.len != right.entries.len) return false;
+    for (left.entries, right.entries) |x, y| {
+        if (!std.mem.eql(u8, x.path, y.path) or x.index != y.index or x.worktree != y.worktree or x.staged != y.staged or x.unstaged != y.unstaged or x.conflicted != y.conflicted or !std.meta.eql(x.stats, y.stats)) return false;
+        if ((x.old_path == null) != (y.old_path == null)) return false;
+        if (x.old_path) |path| if (!std.mem.eql(u8, path, y.old_path.?)) return false;
+    }
+    return true;
+}
+fn sameDiff(left: git.Diff, right: git.Diff) bool {
+    if (left.hunks.len != right.hunks.len) return false;
+    if (left.hunks.len == 0) return std.mem.eql(u8, left.text, right.text);
+    for (left.hunks, right.hunks) |x, y| {
+        if (!std.mem.eql(u8, x.path, y.path) or !std.mem.eql(u8, x.header, y.header) or x.old_start != y.old_start or x.old_count != y.old_count or x.new_start != y.new_start or x.new_count != y.new_count or x.lines.len != y.lines.len) return false;
+        for (x.lines, y.lines) |a_line, b_line| {
+            if (a_line.kind != b_line.kind or a_line.old_line != b_line.old_line or a_line.new_line != b_line.new_line or !std.mem.eql(u8, a_line.text, b_line.text)) return false;
+        }
+    }
+    return true;
+}
 pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
     // Opening a diff also loads the live documents that have no source tab yet.
     // Keep the selected pane and tool while adding them to workspace ownership.
@@ -257,6 +284,7 @@ pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
             try projection.addSource(tab.document, snapshot);
+            _ = try git_editing.getView(self, tab.document);
             const ranges = try zircon_git_ui.sources.ranges(a, snapshot, diff.hunks, hunk.path);
             defer a.free(ranges);
             try projection.setExcerpts(tab.document, ranges);
@@ -455,18 +483,7 @@ const Job = struct {
         if (self.comparison) |comparison| if (comparison.path) |path| a.free(path);
         if (self.path) |path| a.free(path);
         if (self.snapshot) |*snapshot| snapshot.deinit();
-        switch (self.operation) {
-            .diff => |r| a.free(r.path),
-            .history, .stage, .unstage, .commit, .stash_show => |value| a.free(value),
-            .switch_branch => |r| a.free(r.name),
-            .stash_apply => |r| a.free(r.oid),
-            .network => |n| switch (n) {
-                .fetch => |s| a.free(s),
-                .push => |r| a.free(r.remote),
-                else => {},
-            },
-            else => {},
-        }
+        freeOperation(self.operation);
     }
 };
 pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
@@ -505,27 +522,18 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
             self.git.pending_history = pending;
             return;
         }
+        if (self.git.background) {
+            const owned = try copyOperation(operation);
+            errdefer freeOperation(owned);
+            try self.git.pending_actions.append(a, owned);
+            return;
+        }
         return error.GitBusy;
     }
     if (self.git.generation == std.math.maxInt(u64)) return error.GitGenerationExhausted;
     var job: Job = .{ .io = self.workspace.io, .root = try a.dupe(u8, self.workspace.root_path), .operation = .refresh, .generation = self.git.generation + 1 };
     errdefer job.deinit(a);
-    job.operation = switch (operation) {
-        .diff => |r| .{ .diff = .{ .path = try a.dupe(u8, r.path), .staged = r.staged } },
-        .history => |s| .{ .history = try a.dupe(u8, s) },
-        .stage => |s| .{ .stage = try a.dupe(u8, s) },
-        .unstage => |s| .{ .unstage = try a.dupe(u8, s) },
-        .commit => |s| .{ .commit = try a.dupe(u8, s) },
-        .stash_show => |s| .{ .stash_show = try a.dupe(u8, s) },
-        .switch_branch => |r| .{ .switch_branch = .{ .name = try a.dupe(u8, r.name), .create = r.create, .track = r.track } },
-        .stash_apply => |r| .{ .stash_apply = .{ .oid = try a.dupe(u8, r.oid), .pop = r.pop } },
-        .network => |n| .{ .network = switch (n) {
-            .fetch => |r| .{ .fetch = try a.dupe(u8, r) },
-            .push => |r| .{ .push = .{ .remote = try a.dupe(u8, r.remote), .publish = r.publish, .force_with_lease = r.force_with_lease } },
-            .pull => |r| .{ .pull = r },
-        } },
-        else => operation,
-    };
+    job.operation = try copyOperation(operation);
     if (self.tabs.items.len > 0) {
         const id = if (operation == .blame and operation.blame.document != null) operation.blame.document.? else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
         const record = try self.workspace.getConst(id);
@@ -559,16 +567,19 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
     _ = try cx.spawn(Job, job, complete);
     if (job.include_references) self.git.needs_metadata = false;
     self.git.busy = true;
+    self.git.background = operation == .refresh or (operation == .blame and !operation.blame.expanded);
     self.git.next_refresh = try cx.app.currentTime() + 1;
     self.git.operation_label = @tagName(operation);
     if (operation == .diff) self.git.staged_diff = operation.diff.staged;
     if (operation == .all_diff) self.git.staged_diff = false;
     self.git.generation = job.generation;
     if (operation != .blame) self.git.active_document = job.document;
-    cx.notify();
+    if (!self.git.background) cx.notify();
 }
 fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
+    var changed = !self.git.background;
     self.git.busy = false;
+    self.git.background = false;
     self.git.operation_label = "";
     const box = result catch |err| {
         if (err != error.Canceled) try self.reportError(err);
@@ -585,6 +596,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.root_path = &.{};
     }
     if (value.references) |refs| {
+        changed = true;
         if (self.git.references) |*old| old.deinit();
         self.git.references = refs;
         value.references = null;
@@ -602,12 +614,16 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         try actions.refreshTree(self);
     }
     if (value.status) |status| {
-        if (self.git.status) |*old| old.deinit();
-        self.git.status = status;
-        self.git.status_generation = value.generation;
-        value.status = null;
+        if (self.git.status == null or !sameStatus(self.git.status.?, status)) {
+            if (self.git.status) |*old| old.deinit();
+            self.git.status = status;
+            self.git.status_generation = value.generation;
+            value.status = null;
+            changed = true;
+        }
     }
     if (value.commits_ready) {
+        changed = true;
         git.deinitHistory(a, self.git.commits);
         self.git.commits = value.commits;
         value.commits = &.{};
@@ -632,7 +648,19 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.diff.?.deinit();
         value.diff = null;
     }
+    if (value.diff != null and value.preserve_scroll and self.git.diff != null and sameDiff(self.git.diff.?, value.diff.?)) {
+        value.diff.?.deinit();
+        value.diff = null;
+        for (value.source_versions) |source| if (self.git.editable) |projection| {
+            if ((projection.sourceRevision(source.document) catch null) != source.revision) {
+                try rebuildEditable(self, self.git.diff.?);
+                changed = true;
+                break;
+            }
+        };
+    }
     if (value.diff) |diff| {
+        changed = true;
         if (self.git.projection) |*old| old.deinit();
         self.git.projection = value.projection;
         value.projection = null;
@@ -656,6 +684,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         }
     }
     if (!value.quiet_blame) {
+        changed = changed or !std.mem.eql(u8, self.git.error_text, value.error_text);
         a.free(self.git.error_text);
         self.git.error_text = value.error_text;
         value.error_text = &.{};
@@ -667,12 +696,19 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     if (value.changes_ready or value.blame != null) if (value.document) |id| if (self.workspace.getConst(id)) |record| {
         if (record.doc.revision() == value.revision) {
             for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
+                changed = changed or value.blame != null or tab.editor.git_revision != value.revision or !std.mem.eql(u8, tab.editor.git_baseline, value.baseline);
                 try installEditor(&tab.editor, &value);
             };
             if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) try installEditor(&pane.editor, &value);
         }
     } else |_| {};
-    cx.notify();
+    if (changed) cx.notify();
+    if (self.git.pending_actions.items.len > 0) {
+        const operation = self.git.pending_actions.orderedRemove(0);
+        defer freeOperation(operation);
+        try start(self, cx, operation);
+        return;
+    }
     if (self.git.pending_history) |pending| {
         self.git.pending_history = null;
         defer a.free(pending);
@@ -759,4 +795,37 @@ pub fn pollBlame(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.git.blame_requested = true;
     if (state.inline_blame) |blame| if (blame.revision == snapshot.revision() and blame.line == line) return;
     try start(self, cx, .{ .blame = .{ .line = line + 1, .expanded = false } });
+}
+
+fn copyOperation(operation: Operation) !Operation {
+    return switch (operation) {
+        .diff => |r| .{ .diff = .{ .path = try a.dupe(u8, r.path), .staged = r.staged } },
+        .history => |s| .{ .history = try a.dupe(u8, s) },
+        .stage => |s| .{ .stage = try a.dupe(u8, s) },
+        .unstage => |s| .{ .unstage = try a.dupe(u8, s) },
+        .commit => |s| .{ .commit = try a.dupe(u8, s) },
+        .stash_show => |s| .{ .stash_show = try a.dupe(u8, s) },
+        .switch_branch => |r| .{ .switch_branch = .{ .name = try a.dupe(u8, r.name), .create = r.create, .track = r.track } },
+        .stash_apply => |r| .{ .stash_apply = .{ .oid = try a.dupe(u8, r.oid), .pop = r.pop } },
+        .network => |n| .{ .network = switch (n) {
+            .fetch => |r| .{ .fetch = try a.dupe(u8, r) },
+            .push => |r| .{ .push = .{ .remote = try a.dupe(u8, r.remote), .publish = r.publish, .force_with_lease = r.force_with_lease } },
+            .pull => |r| .{ .pull = r },
+        } },
+        else => operation,
+    };
+}
+fn freeOperation(operation: Operation) void {
+    switch (operation) {
+        .diff => |r| a.free(r.path),
+        .history, .stage, .unstage, .commit, .stash_show => |value| a.free(value),
+        .switch_branch => |r| a.free(r.name),
+        .stash_apply => |r| a.free(r.oid),
+        .network => |n| switch (n) {
+            .fetch => |s| a.free(s),
+            .push => |r| a.free(r.remote),
+            else => {},
+        },
+        else => {},
+    }
 }

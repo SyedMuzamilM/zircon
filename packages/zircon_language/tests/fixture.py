@@ -73,7 +73,7 @@ while True:
         sys.stderr.write("fixture stderr " + "x" * 80000 + "\n")
         sys.stderr.flush()
         assert params["capabilities"]["general"]["positionEncodings"] == ["utf-16"]
-        capabilities = {"positionEncoding": "utf-16", "completionProvider": {}}
+        capabilities = {"positionEncoding": "utf-16", "completionProvider": {}, "hoverProvider": True}
         if mode != "sync-omitted":
             capabilities["textDocumentSync"] = (
                 {"openClose": True, "change": 2} if mode == "incremental-object"
@@ -115,6 +115,8 @@ while True:
         if mode in ("incremental", "incremental-object", "verify-full"):
             send({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 3, "message": "sync:" + json.dumps({"version": old["version"], "text": old["text"], "changes": len(params["contentChanges"])}, ensure_ascii=False)}})
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"], "version": document["version"], "diagnostics": []}})
+    elif method == "textDocument/hover":
+        send({"jsonrpc": "2.0", "id": message["id"], "result": {"contents": {"kind": "markdown", "value": "```zig\nfn answer() u32\n```\nReturns the answer."}}})
     elif method == "textDocument/completion":
         assert params["position"]["character"] == 3
         completions.append(message)

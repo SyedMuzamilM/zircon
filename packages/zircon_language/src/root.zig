@@ -2,6 +2,7 @@
 //! until it answers initialize and the initialized notification is enqueued.
 const client = @import("client.zig");
 pub const framing = @import("framing.zig");
+pub const hover = @import("hover.zig");
 const model = @import("model.zig");
 const synchronization = @import("synchronization.zig");
 pub const Client = client.Client;

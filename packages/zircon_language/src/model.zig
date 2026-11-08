@@ -13,6 +13,7 @@ pub const Message = struct {
         initialized,
         diagnostics: struct { uri: []const u8, version: ?u64, items: []const Diagnostic },
         completion: struct { id: u64, uri: []const u8, version: u64, items: []const Completion, incomplete: bool = false },
+        hover: struct { id: u64, uri: []const u8, version: u64, contents: []const u8 },
         log: struct { message: []const u8, severity: u8 = 3 },
         failure: struct { message: []const u8, request_id: ?u64 = null },
         exited,

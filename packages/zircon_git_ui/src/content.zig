@@ -45,7 +45,7 @@ pub const Content = struct {
                     if (y >= bottom) break;
                     if (first == null) first = y;
                     switch (row.kind) {
-                        .hunk => |h| try elements.append(b.allocator(), try self.hunkHeader(b, self.diff.hunks[h].header)),
+                        .hunk => |h| try elements.append(b.allocator(), try Hooks.hunkHeader(host, b, h)),
                         .code => |code| {
                             const lines = self.diff.hunks[code.hunk].lines;
                             if (self.state.mode == .unified) {

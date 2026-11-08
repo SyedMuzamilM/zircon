@@ -48,11 +48,14 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
         break :blk try b.allocator().dupe(syntax.Span, state.grammar_spans[lo..hi]);
     } else null;
     const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
-    return b.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
+    var canvas = value;
+    canvas.show_scrollbars = state.show_scrollbars;
+    return b.custom(Canvas, canvas, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
 const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22, segment: ?wrap.Row = null };
 const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32, content_width: f32 };
 const Canvas = struct {
+    show_scrollbars: bool = true,
     snapshot: text.Snapshot,
     grammar_spans: ?[]const syntax.Span,
     wrap_cache: *wrap.Cache,
@@ -117,6 +120,7 @@ const Canvas = struct {
             var spans = lexed.spans;
             if (!oversized) if (self.grammar_spans) |external| {
                 var classified: std.ArrayList(syntax.Span) = .empty;
+                var classified_end: usize = 0;
                 var first_span: usize = 0;
                 var span_limit = external.len;
                 while (first_span < span_limit) {
@@ -125,8 +129,14 @@ const Canvas = struct {
                 }
                 for (external[first_span..]) |span| {
                     if (span.start >= range.end) break;
-                    try classified.append(cx.allocator, .{ .start = @max(span.start, range.start) - range.start, .end = @min(span.end, range.end) - range.start, .kind = span.kind });
+                    const begin = @max(span.start, range.start) - range.start;
+                    const end = @min(span.end, range.end) - range.start;
+                    if (end <= begin) continue;
+                    try appendLexical(cx.allocator, &classified, lexed.spans, classified_end, begin);
+                    try classified.append(cx.allocator, .{ .start = begin, .end = end, .kind = span.kind });
+                    classified_end = end;
                 }
+                try appendLexical(cx.allocator, &classified, lexed.spans, classified_end, original.len);
                 spans = classified.items;
             };
             line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = spans, .y = bounds.y + (if (self.soft_wrap) self.wrap_cache.rowY(visual_row, self.line_height, self.git_changes) else annotations.rowY(row, self.line_height, self.git_changes)) - self.scroll, .oversized = oversized, .height = self.line_height, .segment = segment };
@@ -293,6 +303,7 @@ const Canvas = struct {
         if (self.blame) |blame| if (try blame_view.layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .source_y = if (self.soft_wrap) self.wrap_cache.rowY(self.wrap_cache.starts.items[blame.line + 1] - 1, self.line_height, self.git_changes) else null, .source_x = if (self.soft_wrap) self.wrap_cache.rows.items[self.wrap_cache.starts.items[blame.line + 1] - 1].x else 0, .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
             try blame_view.paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
         };
+        if (!self.show_scrollbars) return;
         const available = @max(1, bounds.width - prepared.gutter - 12);
         const content_width = @max(prepared.content_width, self.horizontal + available);
         if (!self.soft_wrap and (prepared.content_width > available or self.horizontal > 0)) {
@@ -365,6 +376,13 @@ const Canvas = struct {
         }
     }
 };
+fn appendLexical(a: std.mem.Allocator, output: *std.ArrayList(syntax.Span), spans: []const syntax.Span, begin: usize, end: usize) !void {
+    for (spans) |span| {
+        if (span.end <= begin) continue;
+        if (span.start >= end) break;
+        try output.append(a, .{ .start = @max(begin, span.start), .end = @min(end, span.end), .kind = span.kind });
+    }
+}
 fn drawRun(cx: *ui.PaintCx, line: RenderLine, theme: theme_module.Theme, metrics: ui.layout.Measurer, style: ui.TextStyle, x: f32, start: usize, end: usize, kind: syntax.Kind) !void {
     const begin = line.display.displayOffset(start);
     const finish = line.display.displayOffset(end);

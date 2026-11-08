@@ -33,6 +33,47 @@ test "client fails missing executable without leaking process resources" {
 }
 
 const fixture = @embedFile("fixture.py");
+
+test "hover accepts markup and legacy language fragments" {
+    var input = try std.json.parseFromSlice(std.json.Value, t.allocator, "[{\"language\":\"zig\",\"value\":\"fn answer() u32\"},\"Returns the answer.\"]", .{});
+    defer input.deinit();
+    const bytes = try language.hover.contents(t.allocator, input.value);
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings("```zig\nfn answer() u32\n```\n\nReturns the answer.", bytes);
+}
+
+test "stdio hover carries document revision and Markdown documentation" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try fixturePath(tmp);
+    defer t.allocator.free(path);
+    const client = try language.Client.start(t.allocator, t.io, .{ .command = "python3", .args = &.{path}, .cwd = "/tmp" });
+    defer client.deinit();
+    try waitReady(client);
+    var document = try text.Document.init(t.allocator, "a🙂answer");
+    defer document.deinit();
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    const uri = "file:///tmp/hover.zig";
+    try client.didOpen(uri, "zig", snapshot);
+    const id = try client.hover(uri, snapshot.revision(), .{ .line = 0, .character = 3 });
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
+    var found = false;
+    while (!found) {
+        const messages = try client.drain(t.allocator);
+        defer language.deinitMessages(t.allocator, messages);
+        for (messages) |message| if (message.data == .hover) {
+            try t.expectEqual(id, message.data.hover.id);
+            try t.expectEqualStrings(uri, message.data.hover.uri);
+            try t.expectEqual(snapshot.revision(), message.data.hover.version);
+            try t.expect(std.mem.indexOf(u8, message.data.hover.contents, "fn answer() u32") != null);
+            found = true;
+        };
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.HoverTimeout;
+        std.atomic.spinLoopHint();
+    }
+    try client.didClose(uri);
+}
 fn fixturePath(tmp: std.testing.TmpDir) ![:0]u8 {
     try tmp.dir.writeFile(t.io, .{ .sub_path = "server.py", .data = fixture });
     return tmp.dir.realPathFileAlloc(t.io, "server.py", t.allocator);

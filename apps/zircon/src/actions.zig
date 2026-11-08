@@ -18,6 +18,7 @@ const services_git = @import("services/git.zig");
 const services_language = @import("services/language.zig");
 const services_recovery = @import("services/recovery.zig");
 const services_search = @import("services/search.zig");
+const symbol_hover = @import("services/symbol_hover.zig");
 const settings_model = @import("settings/model.zig");
 const settings_view = @import("settings/view.zig");
 const model = @import("shell.zig");
@@ -401,6 +402,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
+    try symbol_hover.pointer(self, cx, selected.editor, &record.doc, selected.id, e);
     if (try editor_git.handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
     const old_gutter_hover = selected.editor.gutter_hovered;
     const shortcut = self.key_bindings.resolve(e.data);
@@ -439,6 +441,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
     if (which != .complete) self.language.clearCompletion();
     if (try git_editing.command(self, cx, which)) return;
     switch (which) {
+        .show_symbol_info => try symbol_hover.show(self, cx),
         .cut, .copy, .paste => {
             // Native menu actions arrive through globalInput with the original
             // event surface. Palette actions are handled by the focused editor.
@@ -921,6 +924,7 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
     }
 }
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    symbol_hover.dismissOutside(self, cx, e.data);
     if (e.data == .action) {
         const which = std.enums.fromInt(Command, e.data.action) orelse return;
         // Clipboard actions stay on the focused text input, including search

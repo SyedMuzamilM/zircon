@@ -5,6 +5,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const text = @import("zircon_text");
 const frame = @import("framing.zig");
+const hover_content = @import("hover.zig");
 const model = @import("model.zig");
 const synchronization = @import("synchronization.zig");
 const DocumentState = struct { snapshot: text.Snapshot };
@@ -12,7 +13,7 @@ const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
-const Pending = struct { kind: enum { initialize, completion, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
+const Pending = struct { kind: enum { initialize, completion, hover, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
     pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0, change_text_bytes: u64 = 0, incremental_changes: u64 = 0, resync_changes: u64 = 0 };
     counters: Stats = .{},
@@ -30,6 +31,7 @@ pub const Client = struct {
     stdout_ended: std.atomic.Value(bool) = .init(false),
     shutdown_answer: std.atomic.Value(bool) = .init(false),
     completion_supported: std.atomic.Value(bool) = .init(false),
+    hover_supported: std.atomic.Value(bool) = .init(false),
     sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
@@ -76,7 +78,7 @@ pub const Client = struct {
         try self.pending.put(transport_allocator, 1, .{ .kind = .initialize });
         const root_uri = try model.fileUri(a, config.root_path orelse config.cwd);
         defer a.free(root_uri);
-        try self.enqueue(.{ .jsonrpc = "2.0", .id = @as(u64, 1), .method = "initialize", .params = .{ .processId = @as(?u32, null), .rootUri = root_uri, .initializationOptions = config.initialization_options, .capabilities = .{ .general = .{ .positionEncodings = [_][]const u8{"utf-16"} }, .textDocument = .{ .synchronization = .{ .didSave = false }, .completion = .{ .completionItem = .{ .snippetSupport = false, .insertReplaceSupport = false } }, .publishDiagnostics = .{ .versionSupport = true } } }, .clientInfo = .{ .name = "Zircon", .version = "0.1.0" } } });
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = @as(u64, 1), .method = "initialize", .params = .{ .processId = @as(?u32, null), .rootUri = root_uri, .initializationOptions = config.initialization_options, .capabilities = .{ .general = .{ .positionEncodings = [_][]const u8{"utf-16"} }, .textDocument = .{ .hover = .{ .contentFormat = [_][]const u8{ "markdown", "plaintext" } }, .synchronization = .{ .didSave = false }, .completion = .{ .completionItem = .{ .snippetSupport = false, .insertReplaceSupport = false } }, .publishDiagnostics = .{ .versionSupport = true } } }, .clientInfo = .{ .name = "Zircon", .version = "0.1.0" } } });
         self.writer_thread = try std.Thread.spawn(.{}, writerMain, .{self});
         self.output_thread = try std.Thread.spawn(.{}, readMain, .{self});
         self.error_thread = try std.Thread.spawn(.{}, stderrMain, .{self});
@@ -185,6 +187,28 @@ pub const Client = struct {
         self.lock.unlock(self.io);
         if (removed) |entry| transport_allocator.free(entry.value.uri) else return error.RequestNotFound;
         try self.enqueue(.{ .jsonrpc = "2.0", .method = "$/cancelRequest", .params = .{ .id = id } });
+    }
+    pub fn supportsHover(self: *const Client) bool {
+        return self.hover_supported.load(.acquire);
+    }
+    pub fn hover(self: *Client, uri: []const u8, version: u64, hover_position: model.Position) !u64 {
+        try self.check();
+        if (!self.supportsHover()) return error.HoverNotSupported;
+        if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
+        const id = try self.requestId();
+        const owned = try transport_allocator.dupe(u8, uri);
+        errdefer transport_allocator.free(owned);
+        self.lock.lockUncancelable(self.io);
+        const inserted = self.pending.put(transport_allocator, id, .{ .kind = .hover, .uri = owned, .version = version });
+        self.lock.unlock(self.io);
+        try inserted;
+        errdefer {
+            self.lock.lockUncancelable(self.io);
+            _ = self.pending.remove(id);
+            self.lock.unlock(self.io);
+        }
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/hover", .params = .{ .textDocument = .{ .uri = uri }, .position = hover_position } });
+        return id;
     }
     fn requestId(self: *Client) !u64 {
         if (self.next_id == std.math.maxInt(u64)) return error.RequestIdExhausted;
@@ -542,6 +566,8 @@ fn parse(self: *Client, body: []const u8) !void {
             self.sync_options = try synchronization.Options.parse(capabilities);
             const supported = if (field(capabilities, "completionProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.completion_supported.store(supported, .release);
+            const hover_provider = if (field(capabilities, "hoverProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
+            self.hover_supported.store(hover_provider, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
             if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
@@ -570,6 +596,10 @@ fn parse(self: *Client, body: []const u8) !void {
             const incomplete = if (field(result, "isIncomplete")) |v| if (v == .bool) v.bool else false else false;
             const uri = try a.dupe(u8, request.uri);
             self.publish(.{ .arena = arena, .data = .{ .completion = .{ .id = number, .uri = uri, .version = request.version, .items = items, .incomplete = incomplete } } });
+        },
+        .hover => {
+            const contents = if (result == .null) "" else try hover_content.contents(a, field(result, "contents") orelse return error.InvalidHover);
+            self.publish(.{ .arena = arena, .data = .{ .hover = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } } });
         },
     }
 }

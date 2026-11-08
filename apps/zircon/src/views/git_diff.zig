@@ -52,6 +52,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     try rows.append(b.allocator(), try v.rule(b, c));
     const Hooks = struct {
         pub const header = controls.header;
+        pub const hunkHeader = controls.hunkHeader;
         pub const liveRow = git_editing.renderRow;
         pub const liveBlock = git_editing.renderBlock;
     };

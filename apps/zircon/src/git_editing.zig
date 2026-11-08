@@ -64,16 +64,17 @@ pub fn renderRow(self: *const Shell, b: *ui.Ui, original: git.Line, path: []cons
 pub fn renderBlock(self: *const Shell, b: *ui.Ui, original: git.Line, path: []const u8, count: usize) !?ui.Element {
     const row = original.new_line orelse return null;
     const destination = (try target(self, path, row -| 1)) orelse return null;
-    const view = self.git.editing.current() orelse return null;
-    if (!std.meta.eql(view.document, destination.document)) return null;
+    const view = self.git.editing.find(destination.document) orelse return null;
     const record = try self.workspace.getConst(view.document);
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
     const caret = (try snapshot.pointAt(view.editor.primary().head)).line;
-    const has_caret = caret >= destination.row and caret < destination.row + count;
+    const has_caret = self.git.editing.active != null and std.meta.eql(self.git.editing.active.?, view.document) and caret >= destination.row and caret < destination.row + count;
     // One source canvas per contiguous run, with source-relative selections.
     // Header/deletion blocks remain outside the editable source ranges.
     var state = view.editor;
+    state.horizontal = self.git.editing.horizontal;
+    state.show_scrollbars = false;
     state.scroll.offset = @as(f32, @floatFromInt(destination.row)) * state.line_height;
     state.theme.background = self.colors.document;
     if (original.kind == .addition) {
@@ -81,7 +82,7 @@ pub fn renderBlock(self: *const Shell, b: *ui.Ui, original: git.Line, path: []co
         const base = self.colors.document;
         state.theme.background = .{ .r = base.r * 0.86 + tint.r * 0.14, .g = base.g * 0.86 + tint.g * 0.14, .b = base.b * 0.86 + tint.b * 0.14, .a = 1 };
     }
-    state.highlight_active_line = false;
+    state.highlight_active_line = has_caret and self.editor_options.active_line;
     state.theme.inactive_selection = state.theme.selection;
     var canvas = try state.render(&record.doc, b);
     if (has_caret) canvas = try b.fluent().adopt(canvas).id(.{ .string = "git-diff-editor" }).request_focus(self.editor_focus_request).build();
@@ -207,7 +208,7 @@ fn readOnly(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
     }
 }
 
-fn getView(self: *Shell, id: ws.DocumentId) !*View {
+pub fn getView(self: *Shell, id: ws.DocumentId) !*View {
     for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) return view;
     var editor = try editing.Editor.init(a);
     errdefer editor.deinit();
@@ -220,6 +221,10 @@ fn getView(self: *Shell, id: ws.DocumentId) !*View {
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
     editor.synchronize(snapshot);
+    for (self.tabs.items) |tab| if (std.meta.eql(tab.document, id) and tab.editor.grammar_revision == snapshot.revision()) {
+        try editor.setHighlights(snapshot, tab.editor.grammar_spans);
+        break;
+    };
     try self.git.editing.views.append(a, .{ .document = id, .editor = editor });
     return &self.git.editing.views.items[self.git.editing.views.items.len - 1];
 }

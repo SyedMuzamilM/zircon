@@ -103,13 +103,13 @@ pub fn append(self: *const Shell, b: *ui.Ui, rows: *std.ArrayList(ui.Element)) !
         .branches => {
             for (references.branches, 0..) |branch, i| if (view_module.matches(query, branch.name)) {
                 const current = !branch.remote and self.git.status != null and std.mem.eql(u8, branch.name, self.git.status.?.branch);
-                try options.append(b.allocator(), try b.fluent().button(.{ .label = branch.name, .children = &.{ try v.icon(b, if (current) .check else .branch, if (current) c.accent else c.muted, 14), try b.fluent().div().gap_px(3).min_w(.{ .px = 0 }).overflow_hidden().flex_col().children(.{ v.text(b, branch.name, c.text, 13), v.text(b, try std.fmt.allocPrint(b.allocator(), "{s} · {s}{s}", .{ branch.author, branch.subject, if (branch.remote) " · remote" else "" }), c.muted, 11) }).build() }, .on_click = if (self.git.busy) null else try b.onClickWith(chooseBranch, Target{ .index = @intCast(i), .generation = self.git.status_generation }), .style = .{ .direction = .row, .height = .{ .px = 52 }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 8, .right = 8 }, .radius = v.metrics.control_radius, .background = if (options.items.len == self.git.picker_index) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }).build());
+                try options.append(b.allocator(), try b.fluent().button(.{ .label = branch.name, .children = &.{ try v.icon(b, if (current) .check else .branch, if (current) c.accent else c.muted, 14), try b.fluent().div().gap_px(3).min_w(.{ .px = 0 }).overflow_hidden().flex_col().children(.{ v.text(b, branch.name, c.text, 13), v.text(b, try std.fmt.allocPrint(b.allocator(), "{s} · {s}{s}", .{ branch.author, branch.subject, if (branch.remote) " · remote" else "" }), c.muted, 11) }).build() }, .on_click = if (self.git.updating()) null else try b.onClickWith(chooseBranch, Target{ .index = @intCast(i), .generation = self.git.status_generation }), .style = .{ .direction = .row, .height = .{ .px = 52 }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 8, .right = 8 }, .radius = v.metrics.control_radius, .background = if (options.items.len == self.git.picker_index) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }).build());
             };
             const name = std.mem.trim(u8, query, " ");
             if (canCreate(self, name)) try options.append(b.allocator(), try git_controls.commandRow(self, b, .git_create_branch, try std.fmt.allocPrint(b.allocator(), "Create branch {s}", .{name}), true));
         },
         .stashes => {
-            for (references.stashes, 0..) |entry, i| if (view_module.matches(query, entry.subject)) try options.append(b.allocator(), try b.fluent().button(.{ .label = entry.subject, .children = &.{ try v.icon(b, .stash, c.muted, 14), try v.text(b, entry.subject, c.text, 12) }, .on_click = if (self.git.busy) null else try b.onClickWith(chooseStash, Target{ .index = @intCast(i), .generation = self.git.status_generation }), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 8 }, .background = if (options.items.len == self.git.picker_index) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }).build());
+            for (references.stashes, 0..) |entry, i| if (view_module.matches(query, entry.subject)) try options.append(b.allocator(), try b.fluent().button(.{ .label = entry.subject, .children = &.{ try v.icon(b, .stash, c.muted, 14), try v.text(b, entry.subject, c.text, 12) }, .on_click = if (self.git.updating()) null else try b.onClickWith(chooseStash, Target{ .index = @intCast(i), .generation = self.git.status_generation }), .style = .{ .direction = .row, .height = .{ .px = 32 }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 8 }, .background = if (options.items.len == self.git.picker_index) c.selected else null, .hover_background = c.hover, .overflow = .hidden } }).build());
             if (self.git.stash_selected != null) {
                 try options.append(b.allocator(), try git_controls.commandRow(self, b, .git_stash_apply, "Apply selected stash", true));
                 try options.append(b.allocator(), try git_controls.commandRow(self, b, .git_stash_pop, "Pop selected stash", true));
@@ -121,7 +121,7 @@ pub fn append(self: *const Shell, b: *ui.Ui, rows: *std.ArrayList(ui.Element)) !
         },
         else => {},
     };
-    if (options.items.len == 0) try options.append(b.allocator(), try v.text(b, if (self.git.busy) "Loading…" else "No matching entries", c.muted, 12));
+    if (options.items.len == 0) try options.append(b.allocator(), try v.text(b, if (self.git.updating()) "Loading…" else "No matching entries", c.muted, 12));
     try rows.append(b.allocator(), try b.fluent().div().grow().min_h(.{ .px = 0 }).scroll_y_px(self.git.picker_scroll.offset).overflow_hidden().flex_col().children(options.items).listeners(.{ .on_input = b.onInputWith(onScroll, @as(f32, @floatFromInt(options.items.len)) * (if (self.git.menu == .branches) @as(f32, 52) else 32)) }).build());
 }
 fn switchMode(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), stashes: bool) !void {
@@ -184,7 +184,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
     const count = indices.items.len + @intFromBool(create);
     if (count > 0) {
         self.git.picker_index = @min(self.git.picker_index, count - 1);
-        if (key == .enter and !self.git.busy) {
+        if (key == .enter and !self.git.updating()) {
             var click: ui.Event(ui.Click) = .{ .data = .{} };
             if (self.git.picker_index == indices.items.len) {
                 try self.onCommand(&click, cx, .git_create_branch);

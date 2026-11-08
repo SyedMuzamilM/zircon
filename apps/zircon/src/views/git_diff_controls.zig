@@ -13,6 +13,43 @@ const Shell = shell.Shell;
 const Command = commands.Command;
 const a = std.heap.page_allocator;
 pub const Target = struct { file: usize, generation: u64 };
+const HunkTarget = struct { index: usize, generation: u64, side: zircon_git_ui.hunks.Side };
+
+pub fn hunkHeader(self: *const Shell, b: *ui.Ui, index: usize) !ui.Element {
+    const hunk = self.git.diff.?.hunks[index];
+    var added = false;
+    var deleted = false;
+    for (hunk.lines) |line| {
+        added = added or line.kind == .addition;
+        deleted = deleted or line.kind == .deletion;
+    }
+    const c = self.colors;
+    var children: std.ArrayList(ui.Element) = .empty;
+    try children.append(b.allocator(), try v.text(b, hunk.header, c.muted, 11));
+    try children.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
+    inline for (.{ zircon_git_ui.hunks.Side.added, zircon_git_ui.hunks.Side.deleted }) |side| {
+        if (if (side == .added) added else deleted) {
+            const label = if (side == .added) "Copy added lines" else "Copy deleted lines";
+            try children.append(b.allocator(), try b.fluent().button(.{
+                .label = label,
+                .tooltip = label,
+                .children = &.{ try v.icon(b, .copy, if (side == .added) c.added else c.deleted, 13), try v.text(b, if (side == .added) "Copy added" else "Copy deleted", c.muted, 11) },
+                .on_click = b.onClickWith(copyHunk, HunkTarget{ .index = index, .generation = self.git.diff_generation, .side = side }),
+                .style = .{ .direction = .row, .gap = 4, .align_items = .center, .height = .{ .px = 22 }, .padding = .{ .left = 5, .right = 5 }, .hover_background = c.hover },
+            }).build());
+        }
+    }
+    return b.fluent().row().h_px(layout.context_height).shrink_0().items_center().gap_px(5).padding(.{ .left = 76, .right = 8 }).background(c.sidebar).children(children.items).build();
+}
+
+fn copyHunk(self: *Shell, e: *ui.Event(ui.Click), _: *ui.Context(Shell), target: HunkTarget) !void {
+    if (target.generation != self.git.diff_generation) return;
+    const diff = self.git.diff orelse return;
+    if (target.index >= diff.hunks.len) return;
+    const bytes = try zircon_git_ui.hunks.copyText(self.allocator, diff.hunks[target.index], target.side);
+    defer self.allocator.free(bytes);
+    try e.writeClipboard(bytes);
+}
 fn resolve(self: *const Shell, target: Target) ?layout.File {
     if (target.generation != self.git.diff_generation) return null;
     const projection = self.git.projection orelse return null;
@@ -59,7 +96,7 @@ pub fn header(self: *const Shell, b: *ui.Ui, file: layout.File, index: usize) !u
     const entry = if (self.git.selected_commit.len == 0) statusFor(self, file.path) else null;
     var children: std.ArrayList(ui.Element) = .empty;
     try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (collapsed) "Expand" else "Collapse", file.path }), .children = &.{try v.icon(b, if (collapsed) .chevron_right else .chevron_down, c.muted, 14)}, .on_click = b.onClickWith(toggle, target), .style = v.iconButtonStyle(c, false) }).build());
-    if (entry) |value| try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (value.staged and !value.unstaged) "Unstage" else "Stage", file.path }), .tooltip = "Stage saved file changes", .children = &.{try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16)}, .on_click = if (self.git.busy) null else try b.onClickWith(stage, target), .style = v.iconButtonStyle(c, false) }).build());
+    if (entry) |value| try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (value.staged and !value.unstaged) "Unstage" else "Stage", file.path }), .tooltip = "Stage saved file changes", .children = &.{try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16)}, .on_click = if (self.git.updating()) null else try b.onClickWith(stage, target), .style = v.iconButtonStyle(c, false) }).build());
     try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13), try b.fluent().adopt(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12)).style(.{ .flex_grow = 1, .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }).build(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{file.added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{file.deleted}), c.deleted, 12) });
     if (active or self.git.diff_view.hover_file == index) try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Open File {s}", .{file.path}), .children = &.{try v.text(b, "Open File", c.text, 12)}, .on_click = b.onClickWith(open, target), .style = v.buttonStyle(c, false) }).build());
     const inner = try b.fluent().div().h(.{ .px = 36 }).padding(.{ .left = 7, .right = 10 }).items_center().gap_px(8).rounded_px(v.metrics.control_radius).background(if (active) c.selected else c.sidebar).overflow_hidden().flex().children(children.items).build();

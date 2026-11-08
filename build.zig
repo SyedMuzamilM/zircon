@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const test_filters: []const []const u8 = if (b.option([]const u8, "test-filter", "Run portable editor/application tests matching this substring")) |filter| b.allocator.dupe([]const u8, &.{filter}) catch @panic("OOM") else &.{};
     const dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = false });
     const module = dependency.module("zircon_ui");
     const text_dependency = b.dependency("zircon_text", .{ .target = target, .optimize = optimize });
@@ -51,7 +52,7 @@ pub fn build(b: *std.Build) void {
         feature_tests.append(b.allocator, artifact) catch @panic("OOM");
         feature_runs.append(b.allocator, execute) catch @panic("OOM");
     }
-    const editor_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const editor_tests = b.addTest(.{ .filters = test_filters, .root_module = b.createModule(.{
         .root_source_file = b.path("packages/zircon_editor/tests/all.zig"),
         .target = target,
         .optimize = optimize,
@@ -65,7 +66,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{ .{ .name = "zircon_widgets", .module = widgets_module }, .{ .name = "zircon_git_ui", .module = git_ui_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
     });
-    const app_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const app_tests = b.addTest(.{ .filters = test_filters, .root_module = b.createModule(.{
         .root_source_file = b.path("apps/zircon/tests/all.zig"),
         .target = target,
         .optimize = optimize,
@@ -209,6 +210,14 @@ pub fn build(b: *std.Build) void {
             .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } },
         }) });
         b.installArtifact(zircon);
+        const development_bundle = b.addSystemCommand(&.{ "python3", "tools/package_macos.py", "--bundle-only", "--executable" });
+        development_bundle.addArtifactArg(zircon);
+        development_bundle.addArg("--extension-host");
+        development_bundle.addFileArg(b.path("tools/zed-extension-host/target/release/zircon-extension-host"));
+        development_bundle.addArg("--output");
+        development_bundle.addDirectoryArg(.{ .relative = .{ .base = .install_prefix, .sub_path = "" } });
+        development_bundle.step.dependOn(&extension_host_build.step);
+        b.getInstallStep().dependOn(&development_bundle.step);
         const package_run = b.addSystemCommand(&.{ "python3", "tools/package_macos.py", "--input" });
         package_run.addDirectoryArg(.{ .relative = .{ .base = .install_prefix, .sub_path = "" } });
         package_run.addArgs(&.{ "--output", "artifacts" });
@@ -216,7 +225,9 @@ pub fn build(b: *std.Build) void {
         b.step("package", "Build a signed local-test macOS app bundle and ZIP").dependOn(&package_run.step);
         b.installFile("assets/icons/LICENSES", "share/zircon/icons-LICENSES");
         b.installFile("assets/icons/SOURCE.md", "share/zircon/icons-SOURCE.md");
-        const zircon_run = b.addRunArtifact(zircon);
+        const zircon_run = b.addSystemCommand(&.{ "python3", "tools/run_bundle.py" });
+        zircon_run.addFileArg(.{ .relative = .{ .base = .install_prefix, .sub_path = "Zircon.app/Contents/MacOS/zircon" } });
+        zircon_run.step.dependOn(&development_bundle.step);
 
         b.step("run", "Open the Zircon native text editor").dependOn(&zircon_run.step);
         b.step("build-editor", "Compile the native Zircon editor").dependOn(&zircon.step);

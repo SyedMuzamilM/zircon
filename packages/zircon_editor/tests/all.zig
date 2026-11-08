@@ -3,6 +3,31 @@ const editor = @import("zircon_editor");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const t = std.testing;
+
+test "polish typing retains unaffected grammar colors until the parser catches up" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "function()\nother\n");
+    var state = try editor.Editor.init(t.allocator);
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    try state.setHighlights(snapshot, &.{.{ .start = 0, .end = 8, .kind = .builtin }});
+    state.selections.single(.{ .anchor = snapshot.byteLen(), .head = snapshot.byteLen() });
+    var result = try state.insert(&document, "typing");
+    release(&result);
+    const color = state.theme.tokens[@backingInt(editor.syntax.Kind.builtin)];
+    const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+        state.deinit();
+        document.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var colored = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| {
+        if (item.kind == .text and std.mem.eql(u8, item.text, "function") and std.meta.eql(item.color, color)) colored = true;
+    }
+    try t.expect(colored);
+}
 test "blame details never displace source rows or caret geometry" {
     var document = try text.Document.init(t.allocator, "one\ntwo\nthree\nfour\nfive\n");
     defer document.deinit();

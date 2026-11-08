@@ -988,6 +988,20 @@ test "Git multibuffer drags across source rows survives redraw and edits either 
     try send(&app, h, .git_changes);
     try settle(&app);
     try t.expectEqual(@as(usize, 2), try app.read(owner, Ops.editableGitSources, .{}));
+    var source_canvases: usize = 0;
+    var copy_added = false;
+    var copy_deleted = false;
+    for ((try app.window(h)).frames.committed.nodes.items) |node| {
+        if (node.key) |key| if (key == .string and std.mem.startsWith(u8, key.string, "git-excerpt:")) {
+            source_canvases += 1;
+        };
+        if (node.kind == .button) {
+            copy_added = copy_added or std.mem.eql(u8, node.kind.button.label, "Copy added lines");
+            copy_deleted = copy_deleted or std.mem.eql(u8, node.kind.button.label, "Copy deleted lines");
+        }
+    }
+    try t.expect(source_canvases >= 2);
+    try t.expect(copy_added and copy_deleted);
     const first = try elementBounds(&app, h, "git-live:main.zig:1");
     const begin: ui.Point = .{ .x = first.x + 76, .y = first.y + first.height / 2 };
     try app.dispatch(h, .{ .pointer_down = .{ .position = begin } });

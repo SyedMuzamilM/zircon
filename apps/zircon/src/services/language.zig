@@ -11,6 +11,7 @@ const actions = @import("../actions.zig");
 const model = @import("../settings/model.zig");
 const shell = @import("../shell.zig");
 const host = @import("extension_host.zig");
+const symbol_hover = @import("symbol_hover.zig");
 const Shell = shell.Shell;
 const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false, scope: ?ws.DocumentId = null, retired: bool = false, epoch: u64 = 0 };
 const SyntaxDocument = struct {
@@ -118,6 +119,7 @@ fn closeDocument(self: *Shell, index: usize) !void {
 /// Other documents retain their clients and diagnostics; retired slots keep
 /// resolver indices stable and are reused only with a new epoch.
 pub fn invalidateDocument(self: *Shell, id: ws.DocumentId) !void {
+    if (self.symbol_hover.target) |target| if (std.meta.eql(target.document, id)) self.symbol_hover.deinit();
     cancelCompletion(self, id);
     const i = try syntaxDocument(self, id);
     const tracked = &self.language.syntax_documents.items[i];
@@ -249,6 +251,10 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     changed = true;
                 },
                 .failure => |failure| {
+                    if (self.symbol_hover.pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) {
+                        symbol_hover.clear(self, cx);
+                        continue;
+                    };
                     try self.setStatus(try self.allocator.dupe(u8, failure.message));
                     self.status_is_error = true;
                     changed = true;
@@ -274,6 +280,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     moved = true;
                     changed = true;
                 },
+                .hover => try symbol_hover.accept(self, cx, session_index, message.data),
                 else => {},
             }
         }
@@ -448,6 +455,9 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
     };
     if (self.secondary) |*pane| if (std.meta.eql(pane.document, document)) {
         pane.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
+    };
+    for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, document)) {
+        view.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
     };
     tracked.revision = result.stamp.revision;
     clearSyntaxError(self, document);

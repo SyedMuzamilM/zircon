@@ -46,6 +46,7 @@ pub const Editor = struct {
     show_indent_guides: bool = true,
     highlight_active_line: bool = true,
     show_fold_controls: bool = true,
+    show_scrollbars: bool = true,
     font_size: f32 = 14,
     line_height: f32 = 22,
     tab_width: usize = 4,
@@ -107,6 +108,16 @@ pub const Editor = struct {
         try self.validate();
         return canvas.render(self, document, builder);
     }
+    pub fn symbolAt(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input), point: ui.Point) !?text.Range {
+        if (event._surface == null) return null;
+        const gutter = if (self.show_line_numbers) canvas.gutterWidth(snapshot.lineCount(), self.font_size) else 20;
+        if (point.x < event.bounds.x + gutter or point.x >= event.bounds.x + event.bounds.width - 12 or !annotations.contains(event.bounds, point)) return null;
+        const at = try navigation.position(self, snapshot, event, point);
+        if (at >= snapshot.byteLen()) return null;
+        const byte = try snapshot.byteAt(at);
+        if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte < 0x80) return null;
+        return try navigation.wordRange(snapshot, at);
+    }
     pub fn validate(self: *const Editor) !void {
         if (!std.math.isFinite(self.font_size) or self.font_size <= 0 or self.font_size > 128 or !std.math.isFinite(self.line_height) or self.line_height < self.font_size or !std.math.isFinite(self.scroll.offset) or self.scroll.offset < 0 or !std.math.isFinite(self.horizontal) or self.horizontal < 0 or self.tab_width == 0 or self.tab_width > 32) return error.InvalidEditorOptions;
     }
@@ -124,6 +135,7 @@ pub const Editor = struct {
         };
     }
     pub fn mapChange(self: *Editor, change: *const text.Change) void {
+        self.mapHighlights(change);
         if (self.edit_scope) |*range| {
             range.start = change.map(range.start, .before);
             range.end = change.map(range.end, .after);
@@ -139,6 +151,14 @@ pub const Editor = struct {
         self.selections.normalize();
         self.marked = null;
         self.typing_group = 0;
+    }
+    fn mapHighlights(self: *Editor, change: *const text.Change) void {
+        if (self.grammar_revision != change.before) return;
+        for (self.grammar_spans) |*span| {
+            span.start = change.map(span.start, .after);
+            span.end = @max(span.start, change.map(span.end, .before));
+        }
+        self.grammar_revision = change.after;
     }
     pub fn setBlame(self: *Editor, value: annotations.Blame) !void {
         const prepared = try value.copy(self.allocator);
@@ -222,6 +242,7 @@ pub const Editor = struct {
         errdefer self.allocator.free(after_selections);
         try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
         var change = try document.apply(document.revision(), edits, group);
+        self.mapHighlights(&change);
         if (self.edit_scope) |*range| {
             range.start = change.map(range.start, .before);
             range.end = change.map(range.end, .after);

@@ -7,6 +7,7 @@ const workspace = @import("zircon_workspace");
 const catalogue = @import("commands.zig");
 const services_language = @import("services/language.zig");
 const recovery = @import("services/recovery.zig");
+const symbol_hover = @import("services/symbol_hover.zig");
 const shell = @import("shell.zig");
 const terminal_module = @import("terminal.zig");
 const theme = @import("theme.zig");
@@ -49,6 +50,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const base = try b.fluent().div().background(colors.document).overflow_hidden().flex_col().children(.{ toolbar(self, b), main, statusBar(self, b) }).id(.{ .string = "workspace" }).build();
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
+    if (try symbol_hover.render(self, b)) |popover| try layers.append(b.allocator(), popover);
     if (self.terminal.sessions.items.len > 0) try layers.append(b.allocator(), try terminal_module.wakeElement(b));
     if (self.find.waiting and !self.find.busy) try layers.append(b.allocator(), try services_language.syntaxWake(b));
     if (self.language.syntax_waiting) try layers.append(b.allocator(), try services_language.syntaxWake(b));

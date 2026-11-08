@@ -7,6 +7,7 @@ const Shell = zircon.Shell;
 pub fn main(init: std.process.Init) !void {
     const started = ui.testing.native.now();
     const args = try init.minimal.args.toSlice(init.arena.allocator());
+    try enterApplicationBundle(init, args);
     var requested: ?[]const u8 = null;
     var snapshot_path: ?[]const u8 = null;
     var i: usize = 1;
@@ -67,10 +68,30 @@ pub fn main(init: std.process.Init) !void {
     }
     try app.update(owner, Shell.bootstrap, .{handle});
     if (snapshot_path) |path| {
+        const objc = ui.testing.native.objc;
+        const bundle = objc.send(objc.Id, objc.class("NSBundle"), "mainBundle", .{});
+        std.debug.print("app_bundle_id={s}\n", .{objc.fromString(objc.send(objc.Id, bundle, "bundleIdentifier", .{}))});
         _ = try app.step(ui.testing.native.now());
         try (try app.window(handle)).snapshot(path);
         std.debug.print("rendered_frames={d} first_frame_and_png_ms={d:.3}\n", .{ (try app.window(handle)).frame_count, (ui.testing.native.now() - started) * 1000 });
         return;
     }
     try app.run();
+}
+
+/// Development CLI launches use the same bundle identity as Finder launches.
+fn enterApplicationBundle(init: std.process.Init, args: []const []const u8) !void {
+    const executable = try std.process.executablePathAlloc(init.io, init.arena.allocator());
+    if (!std.mem.endsWith(u8, executable, "/bin/zircon")) return;
+    const path = try std.fs.path.resolve(init.arena.allocator(), &.{ std.fs.path.dirname(executable).?, "../Zircon.app/Contents/MacOS/zircon" });
+    const own = try std.Io.Dir.cwd().statFile(init.io, executable, .{});
+    const bundled = std.Io.Dir.cwd().statFile(init.io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => return err,
+    };
+    if (own.size != bundled.size or own.mtime.nanoseconds != bundled.mtime.nanoseconds) return;
+    const argv = try init.arena.allocator().alloc([]const u8, args.len);
+    @memcpy(argv, args);
+    argv[0] = path;
+    return std.process.replace(init.io, .{ .argv = argv, .environ_map = init.environ_map });
 }
