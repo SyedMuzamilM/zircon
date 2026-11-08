@@ -300,7 +300,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             const message = document.diagnostics orelse break;
             const record = try self.workspace.getConst(active_id);
             if (message.data.diagnostics.version != record.doc.revision()) break;
-            for (message.data.diagnostics.items[0..@min(4, message.data.diagnostics.items.len)], 0..) |diagnostic, index| try children.append(b.allocator(), try b.fluent().button(.{
+            for (message.data.diagnostics.items, 0..) |diagnostic, index| try children.append(b.allocator(), try b.fluent().button(.{
                 .label = try std.fmt.allocPrint(b.allocator(), "{s}  {d}:{d}  {s}", .{ switch (diagnostic.severity) {
                     .error_value => "Error",
                     .warning => "Warning",

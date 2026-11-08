@@ -59,7 +59,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         height += 24;
     }
     for (self.language.documents.items) |doc| if (doc.diagnostics) |message| {
-        for (message.data.diagnostics.items[0..@min(5, message.data.diagnostics.items.len)]) |diagnostic| {
+        for (message.data.diagnostics.items) |diagnostic| {
             try rows.append(b.allocator(), try b.fluent().div()
                 .h(.{ .px = 20 })
                 .shrink_0()
