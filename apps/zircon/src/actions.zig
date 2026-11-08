@@ -11,7 +11,6 @@ const git_editing = @import("git_editing.zig");
 const panes = @import("panes.zig");
 const project_index = @import("project_index.zig");
 const projects = @import("projects.zig");
-const services_agents = @import("services/agents.zig");
 const buffer_find = @import("services/buffer_find.zig");
 const catalog = @import("services/catalog.zig");
 const services_extensions = @import("services/extensions.zig");
@@ -24,7 +23,6 @@ const settings_view = @import("settings/view.zig");
 const model = @import("shell.zig");
 const terminal_module = @import("terminal.zig");
 const view_module = @import("view.zig");
-const views_agents = @import("views/agents.zig");
 const git_controls = @import("views/git_controls.zig");
 const git_diff_controls = @import("views/git_diff_controls.zig");
 const views_image = @import("views/image.zig");
@@ -441,28 +439,8 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
     if (which != .complete) self.language.clearCompletion();
     if (try git_editing.command(self, cx, which)) return;
     switch (which) {
-        .agent_mode => {
-            try services_agents.ensure(self);
-            self.agent_mode = !self.agent_mode;
-            self.agents.focus +%= 1;
-        },
-        .agent_transcript => {
-            self.agent_mode = false;
-            if (self.agents.current()) |session| if (session.path) |path| try self.openPath(path);
-        },
-        .agent_new => {
-            try services_agents.newSession(self);
-            self.agent_mode = true;
-        },
-        .agent_connect => try services_agents.connect(self),
-        .agent_send => try services_agents.send(self, cx),
-        .agent_cancel => {
-            if (self.agents.current()) |session| try session.conversation.cancel();
-        },
-        .agent_config => try services_agents.editConfig(self),
-        .agent_reload => try services_agents.reload(self),
-        .agent_context => try views_agents.attach(self, cx),
-        .agent_toggle_editor => self.agent_editor = !self.agent_editor,
+        // Retired actions can still occur in saved key bindings.
+        .agent_mode, .agent_transcript, .agent_new, .agent_connect, .agent_send, .agent_cancel, .agent_config, .agent_reload, .agent_context, .agent_toggle_editor, .layout_agentic => {},
         .open_project => {
             self.overlay = .open_project;
             self.open_kind = .local_folder;
@@ -530,10 +508,6 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .layout_classic => {
             self.agent_mode = false;
             try cx.update(self.settings.?, settings_model.Settings.apply, .{settings_model.Patch{ .panel_layout = .classic }});
-        },
-        .layout_agentic => {
-            if (!self.agent_mode) try execute(self, cx, .agent_mode, null);
-            try cx.update(self.settings.?, settings_model.Settings.apply, .{settings_model.Patch{ .panel_layout = .agentic }});
         },
         .toggle_terminal => {
             if (self.terminal.sessions.items.len == 0) try terminal_module.create(self) else {

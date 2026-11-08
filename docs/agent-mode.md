@@ -1,5 +1,7 @@
 # Agent workspace and test build
 
+Agent features are temporarily removed from the application. Provider startup, agent controls, shortcuts and settings are disabled. The material below records the earlier implementation for future work.
+
 Build the native macOS package with `./tools/zig build package -Doptimize=ReleaseFast`. Open `artifacts/Zircon.app`, or extract `artifacts/Zircon-macos-arm64.zip` and drag the app to Applications. The bundle is locally signed for testing and includes the Zed extension worker. It is not a notarized release.
 
 ## Try the editor and extensions

@@ -254,11 +254,8 @@ pub const Shell = struct {
         try cx.read(settings, preferences.Settings.copy, .{ arena.allocator(), &values });
         self.key_bindings = values.key_bindings;
         self.terminal.dock = values.terminal_dock;
-        if (self.layout_setting != values.panel_layout) {
-            self.agent_mode = values.panel_layout == .agentic;
-            self.layout_setting = values.panel_layout;
-            if (self.agent_mode) try services_agents.ensure(self);
-        }
+        self.agent_mode = false;
+        self.layout_setting = .classic;
         if (values.project_panel_width != self.project_default_width) {
             self.sidebar_width = values.project_panel_width;
             self.project_default_width = values.project_panel_width;
@@ -272,11 +269,6 @@ pub const Shell = struct {
             self.find.case_sensitive = values.search_case_sensitive;
             self.find.whole_word = values.search_whole_word;
         }
-        if (values.agent_editor != self.agent_editor_setting) {
-            self.agent_editor = values.agent_editor;
-            self.agent_editor_setting = values.agent_editor;
-        }
-
         self.inline_blame_enabled = values.git_inline_blame;
         if (!self.inline_blame_enabled) {
             for (self.tabs.items) |*tab| if (tab.editor.inline_blame != null and !tab.editor.inline_blame.?.expanded) tab.editor.hideBlame();
@@ -366,8 +358,6 @@ pub const Shell = struct {
         cx.notify();
     }
     pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
-        if (self.agents.composer) |*compose| compose.editor.theme = self.editor_options.theme;
-        for (self.agents.sessions.items) |session| session.preview.colors = self.previewColors();
         const appearance = components.inputAppearance(self.colors);
         if (self.fields) |fields| inline for (.{ "find_query", "agent_query", "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
     }
@@ -695,7 +685,6 @@ pub const Shell = struct {
         try services_recovery.poll(self, cx);
         try terminal_module.poll(self, cx);
         try buffer_find.poll(self, cx);
-        try services_agents.poll(self, cx);
         try services_language.poll(self, cx);
         try services_project.poll(self, cx);
         try services_git.pollBlame(self, cx);

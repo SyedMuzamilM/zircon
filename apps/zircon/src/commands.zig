@@ -13,21 +13,10 @@ pub const commands = [_]Entry{
     .{ .command = .stop_language_servers, .label = "Language: stop servers" },
     .{ .command = .editor_options, .label = "Editor: options" },
     .{ .command = .layout_classic, .label = "Panel layout: Classic" },
-    .{ .command = .layout_agentic, .label = "Panel layout: Agentic" },
     .{ .command = .toggle_terminal, .label = "Terminal: toggle panel" },
     .{ .command = .new_terminal, .label = "Terminal: new tab" },
     .{ .command = .terminal_bottom, .label = "Terminal: dock at bottom" },
     .{ .command = .terminal_right, .label = "Terminal: dock at right" },
-    .{ .command = .agent_mode, .label = "Agent: toggle workspace", .shortcut = "⇧⌘J" },
-    .{ .command = .agent_new, .label = "Agent: new conversation", .shortcut = "⌥⌘N" },
-    .{ .command = .agent_send, .label = "Agent: send prompt", .shortcut = "⌘Enter" },
-    .{ .command = .agent_toggle_editor, .label = "Agent: toggle editor and changes" },
-    .{ .command = .agent_transcript, .label = "Agent: open saved conversation transcript" },
-    .{ .command = .agent_connect, .label = "Agent: connect or resume" },
-    .{ .command = .agent_config, .label = "Agent: configure providers" },
-    .{ .command = .agent_reload, .label = "Agent: reload provider configuration" },
-    .{ .command = .agent_context, .label = "Agent: attach editor selection or file" },
-    .{ .command = .agent_cancel, .label = "Agent: stop current turn" },
     .{ .command = .toggle_comment, .label = "Editor: toggle line comments", .shortcut = "⌘/" },
     .{ .command = .restart_language_servers, .label = "Language: restart servers" },
     .{ .command = .install_language_support, .label = "Extensions: install language support for this file" },
@@ -89,9 +78,6 @@ pub const commands = [_]Entry{
     .{ .command = .zoom_out, .label = "Decrease font size" },
 };
 pub const bindings = [_]ui.Keymap(Command).Binding{
-    .{ .chord = .{ .key = .n, .modifiers = .{ .command = true, .alt = true } }, .action = .agent_new },
-    .{ .chord = .{ .key = .enter, .modifiers = .{ .command = true } }, .action = .agent_send },
-    .{ .chord = .{ .key = .j, .modifiers = .{ .command = true, .shift = true } }, .action = .agent_mode },
     .{ .chord = .{ .key = .slash, .modifiers = .{ .command = true } }, .action = .toggle_comment },
     .{ .chord = .{ .key = .z, .modifiers = .{ .alt = true } }, .action = .toggle_soft_wrap },
     .{ .chord = .{ .key = .k, .modifiers = .{ .command = true, .shift = true } }, .action = .delete_line },
@@ -123,4 +109,11 @@ pub const bindings = [_]ui.Keymap(Command).Binding{
 pub fn entry(action: Command) Entry {
     for (commands) |item| if (item.command == action) return item;
     return .{ .command = action, .label = @tagName(action) };
+}
+
+pub fn retired(action: Command) bool {
+    return switch (action) {
+        .agent_mode, .agent_transcript, .agent_new, .agent_connect, .agent_send, .agent_cancel, .agent_config, .agent_reload, .agent_context, .agent_toggle_editor, .layout_agentic => true,
+        else => false,
+    };
 }

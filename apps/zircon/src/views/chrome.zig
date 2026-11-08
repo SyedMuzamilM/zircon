@@ -18,7 +18,6 @@ pub fn titlebar(self: *const Shell, b: *ui.Ui) !ui.Element {
     try items.append(b.allocator(), try b.fluent().button(.{ .label = "Open", .children = &.{ try v.text(b, std.fs.path.basename(self.workspace.root_path), c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.recent_projects), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 6, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .viewport_width = 40 }, .overflow = .hidden } }).build());
     if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.fluent().button(.{ .label = "Branches and stashes", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, status.branch, c.muted, 12) }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.git_branches), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 1, .overflow = .hidden } }).build());
     try items.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
-    try items.append(b.allocator(), try v.iconButton(b, c, .agent_mode, "Agent workspace", .commands, self.agent_mode));
     try items.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .quick_open, "Go to file", .search, false), try v.iconButton(b, c, .workspace_menu, "Workspace menu", .more, self.menu_open) });
     const row = try b.fluent().div().h(.{ .px = v.metrics.titlebar - 1 }).shrink_0().items_center().gap_px(6).padding(.{ .left = 8, .right = 8 }).background(c.chrome).flex().children(items.items).id(.{ .string = "toolbar" }).drag_region().build();
     return b.fluent().div().h(.{ .px = v.metrics.titlebar }).shrink_0().flex_col().children(.{ row, v.rule(b, c) }).build();
@@ -194,11 +193,7 @@ pub fn menu(self: *const Shell, b: *ui.Ui) !ui.Element {
     inline for (.{ .{ commands_module.Command.open_project, "Open project…", "⇧⌘O" }, .{ commands_module.Command.open_path, "Open file…", "⌘O" }, .{ commands_module.Command.palette, "Command palette", "⇧⌘P" }, .{ commands_module.Command.extensions, "Extensions", "" }, .{ commands_module.Command.settings, "Settings", "⌘," } }) |entry| {
         try items.append(b.allocator(), try v.menuRow(b, c, entry[0], entry[1], try self.key_bindings.shortcut(b.allocator(), entry[0]), false));
     }
-    try items.append(b.allocator(), try v.rule(b, c));
-    try items.append(b.allocator(), try v.text(b, "Panel layout", c.muted, 11));
-    try items.append(b.allocator(), try v.menuRow(b, c, .layout_classic, "Classic", if (!self.agent_mode) "✓" else "", false));
-    try items.append(b.allocator(), try v.menuRow(b, c, .layout_agentic, "Agentic", if (self.agent_mode) "✓" else "", false));
-    const placement = v.popoverBounds(b.viewport(), self.menu_anchor, .{ .width = 260, .height = 264 });
+    const placement = v.popoverBounds(b.viewport(), self.menu_anchor, .{ .width = 260, .height = 196 });
     const popup = try b.fluent().adopt(try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, items.items)).id(.{ .string = "workspace-menu" }).build();
     return b.fluent().div().items(.start).padding(.{ .top = placement.y, .left = placement.x }).stack().children(.{popup}).listeners(.{ .on_input = b.onInput(Shell.onMenuInput) }).modal().build();
 }

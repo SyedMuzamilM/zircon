@@ -37,4 +37,4 @@ Independent Git, extension, search, Markdown and language-server packages now po
 
 See the [editor guide](docs/editor-guide.md) for controls, installation paths and limits. Search excerpts currently open the original document for editing; arbitrary pane trees and broad LSP navigation/refactoring remain work. Zed extension compatibility and word wrapping are described in [the compatibility guide](docs/zed-extensions.md). The [implementation status](docs/status.md) distinguishes tested behavior from the remaining framework/editor scope.
 
-Native agent mode and installable test builds are documented in [docs/agent-mode.md](docs/agent-mode.md). Build the app bundle with `./tools/zig build package -Doptimize=ReleaseFast`.
+Agent features are temporarily unavailable while editor work continues. Build the app bundle with `./tools/zig build package -Doptimize=ReleaseFast`.

@@ -52,6 +52,7 @@ pub fn parse(value: std.json.Value) !Overrides {
         if (key == null or key.? == .unknown or (!modifiers.command and !modifiers.control)) return error.InvalidKeyBindings;
         const action = entry.value_ptr.*;
         const command = if (action == .null) catalogue.Command.dismiss else if (action == .string) std.meta.stringToEnum(catalogue.Command, action.string) orelse return error.InvalidKeyBindings else return error.InvalidKeyBindings;
+        if (catalogue.retired(command)) continue;
         if (action != .null) {
             var public = false;
             for (catalogue.commands) |item| if (item.command == command) {

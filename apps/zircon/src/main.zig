@@ -47,13 +47,7 @@ pub fn main(init: std.process.Init) !void {
         return err;
     };
     const owner = try app.windowEntity(Shell, handle);
-    var agent_environment = try init.environ_map.clone(init.gpa);
-    defer agent_environment.deinit();
     if (init.environ_map.get("HOME")) |user_directory| {
-        const search_path = try std.fmt.allocPrint(init.arena.allocator(), "{s}/.local/bin:{s}/.bun/bin:{s}/.vite-plus/bin:/opt/homebrew/bin:/usr/local/bin:{s}", .{ user_directory, user_directory, user_directory, init.environ_map.get("PATH") orelse "/usr/bin:/bin:/usr/sbin:/sbin" });
-        try agent_environment.put("PATH", search_path);
-        const agent_home = try std.fs.path.join(init.arena.allocator(), &.{ user_directory, "Library", "Application Support", "Zircon" });
-        try app.update(owner, Shell.configureAgents, .{ agent_home, @as(?*const std.process.Environ.Map, &agent_environment) });
         const extension_home = try std.fs.path.join(init.arena.allocator(), &.{ user_directory, "Library", "Application Support", "Zircon", "extensions" });
         try app.update(owner, Shell.loadExtensions, .{extension_home});
         const settings_path = try std.fs.path.join(init.arena.allocator(), &.{ user_directory, "Library", "Application Support", "Zircon", "settings.json" });

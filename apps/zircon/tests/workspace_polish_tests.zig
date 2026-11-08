@@ -678,7 +678,7 @@ test "recent-project menu loads persisted paths and layout selection preserves t
             return self.agent_mode;
         }
     };
-    try t.expect(try app.read(owner, Agentic.active, .{}));
+    try t.expect(!try app.read(owner, Agentic.active, .{}));
     try app.update(owner, Ops.command, .{.layout_classic});
     _ = try app.step(0);
     const Read = struct {

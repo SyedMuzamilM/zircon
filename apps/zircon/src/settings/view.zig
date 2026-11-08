@@ -12,10 +12,10 @@ const view_module = @import("../view.zig");
 const v = @import("../views/components.zig");
 const model = @import("model.zig");
 const Shell = shell_module.Shell;
-const Category = enum { general, appearance, typography, editor, gutter, keymap, search, panels, project_panel, version_control, agent, languages, accessibility };
-const Change = enum { indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, width_down, width_up, spacing_down, spacing_up, tooltips, delay_down, delay_up, search_case_sensitive, search_whole_word, agent_editor, keymap_json, languages_manager, agent_settings, wrap, vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
+const Category = enum { general, appearance, typography, editor, gutter, keymap, search, panels, project_panel, version_control, languages, accessibility };
+const Change = enum { indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, width_down, width_up, spacing_down, spacing_up, tooltips, delay_down, delay_up, search_case_sensitive, search_whole_word, keymap_json, languages_manager, wrap, vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
 const Picker = enum { none, theme, icons, code_font, ui_font };
-const Row = enum { wrap, vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion, indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, project_panel_width, project_entry_spacing, tooltips, tooltip_delay, search_case_sensitive, search_whole_word, agent_editor, keymap_json, languages_manager, agent_settings };
+const Row = enum { wrap, vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion, indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, project_panel_width, project_entry_spacing, tooltips, tooltip_delay, search_case_sensitive, search_whole_word, keymap_json, languages_manager };
 const row_height: f32 = 88;
 pub const View = struct {
     allocator: std.mem.Allocator,
@@ -279,7 +279,7 @@ pub const View = struct {
             var e: ui.Event(ui.Click) = .{ .data = .{} };
             return self.editJson(&e, cx);
         }
-        if (which == .languages_manager or which == .agent_settings) {
+        if (which == .languages_manager) {
             const Open = struct {
                 fn call(shell: *Shell, context: *ui.Context(Shell), command: commands.Command) !void {
                     var e: ui.Event(ui.Click) = .{ .data = .{} };
@@ -287,7 +287,7 @@ pub const View = struct {
                     if (shell.window) |window| try context.app.raiseWindow(window);
                 }
             };
-            if (self.workspace) |workspace| try cx.update(workspace, Open.call, .{if (which == .languages_manager) commands.Command.extensions else .agent_config});
+            if (self.workspace) |workspace| try cx.update(workspace, Open.call, .{commands.Command.extensions});
             if (self.window) |window| try cx.app.requestCloseWindow(window);
             return;
         }
@@ -310,8 +310,7 @@ pub const View = struct {
             .delay_up => .{ .tooltip_delay = @min(2000, values.tooltip_delay + 100) },
             .search_case_sensitive => .{ .search_case_sensitive = !values.search_case_sensitive },
             .search_whole_word => .{ .search_whole_word = !values.search_whole_word },
-            .agent_editor => .{ .agent_editor = !values.agent_editor },
-            .keymap_json, .languages_manager, .agent_settings => unreachable,
+            .keymap_json, .languages_manager => unreachable,
             .wrap => .{ .soft_wrap = if (values.soft_wrap == .none) .editor_width else .none },
             .vim => .{ .vim_mode = !values.vim_mode },
             .lilex => .{ .font_family = .lilex },
@@ -353,7 +352,6 @@ fn categoryName(category: Category) []const u8 {
         .panels => "Panels",
         .project_panel => "Project panel",
         .languages => "Languages and tools",
-        .agent => "Agent workspace",
         .accessibility => "Accessibility",
     };
 }
@@ -361,7 +359,7 @@ fn parentCategory(category: Category) ?Category {
     return switch (category) {
         .typography => .appearance,
         .gutter => .editor,
-        .project_panel, .version_control, .agent => .panels,
+        .project_panel, .version_control => .panels,
         else => null,
     };
 }
@@ -378,7 +376,6 @@ fn contains(category: Category, row: Row) bool {
         .project_file_icons, .project_folder_icons, .project_panel_width, .project_entry_spacing => category == .project_panel or category == .panels,
         .search_case_sensitive, .search_whole_word => category == .search,
         .languages_manager => category == .languages,
-        .agent_editor, .agent_settings => category == .agent or category == .panels,
     };
 }
 fn rowSearch(row: Row) []const u8 {
@@ -409,10 +406,8 @@ fn rowSearch(row: Row) []const u8 {
         .tooltip_delay => "Tooltip delay hover accessibility",
         .search_case_sensitive => "Default match case search",
         .search_whole_word => "Default whole word search",
-        .agent_editor => "Agent editor review pane",
         .keymap_json => "Keyboard shortcuts keymap settings JSON",
         .languages_manager => "Language servers extensions tools",
-        .agent_settings => "Agent providers ACP Codex OpenCode Gemini proxy",
     };
 }
 fn choiceStyle(c: v.Palette) ui.Style {
@@ -452,10 +447,8 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         .tooltip_delay => "Tooltip delay",
         .search_case_sensitive => "Default match case",
         .search_whole_word => "Default whole word",
-        .agent_editor => "Show editor beside conversations",
         .keymap_json => "Keyboard shortcuts",
         .languages_manager => "Language support",
-        .agent_settings => "Agent providers",
     };
     const help: []const u8 = switch (row) {
         .wrap => "Wrap long lines at the editor width without changing the file.",
@@ -484,10 +477,8 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         .tooltip_delay => "Delay before a tooltip appears, in milliseconds.",
         .search_case_sensitive => "Start buffer searches with case-sensitive matching.",
         .search_whole_word => "Start buffer searches by matching complete words.",
-        .agent_editor => "Show the editor and change review in wide agent windows.",
         .keymap_json => "Configure command shortcuts and Vim mappings in settings.json.",
         .languages_manager => "Install language grammars and servers from Extensions.",
-        .agent_settings => "Configure ACP and Codex providers, paths and proxy profiles.",
     };
     var controls: std.ArrayList(ui.Element) = .empty;
     switch (row) {
@@ -509,14 +500,14 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
             };
             try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, down, "−"), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{n}), c.text, 13), try changeButton(b, c, up, "+") });
         },
-        .keymap_json, .languages_manager, .agent_settings => try controls.append(b.allocator(), try changeButton(b, c, switch (row) {
+        .keymap_json, .languages_manager => try controls.append(b.allocator(), try changeButton(b, c, switch (row) {
             .keymap_json => .keymap_json,
             .languages_manager => .languages_manager,
-            else => .agent_settings,
+            else => unreachable,
         }, switch (row) {
             .keymap_json => "Edit shortcuts…",
             .languages_manager => "Open extensions",
-            else => "Configure providers…",
+            else => unreachable,
         })),
         .theme, .icons => {
             var name: []const u8 = if (row == .theme) (if (std.mem.eql(u8, values.theme, "zircon.system")) "System" else if (std.mem.eql(u8, values.theme, "zircon.light")) "One Light" else "One Dark") else "Zircon icons";
@@ -553,7 +544,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 try controls.append(b.allocator(), try b.fluent().button(.{ .label = choice[1], .on_click = b.onClickWith(View.change, choice[0]), .style = style }).build());
             }
         },
-        .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor => {
+        .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word => {
             const enabled = switch (row) {
                 .indent_guides => values.indent_guides,
                 .active_line => values.active_line,
@@ -563,7 +554,6 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .tooltips => values.tooltips,
                 .search_case_sensitive => values.search_case_sensitive,
                 .search_whole_word => values.search_whole_word,
-                .agent_editor => values.agent_editor,
                 .vim => values.vim_mode,
                 .ligatures => values.font_ligatures,
                 .wrap => values.soft_wrap != .none,
@@ -581,7 +571,6 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .tooltips => .tooltips,
                 .search_case_sensitive => .search_case_sensitive,
                 .search_whole_word => .search_whole_word,
-                .agent_editor => .agent_editor,
                 .wrap => .wrap,
                 .vim => .vim,
                 .ligatures => .ligatures,
