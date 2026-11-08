@@ -2,7 +2,6 @@
 const ui = @import("zircon_ui");
 pub const Command = enum {
     show_symbol_info,
-    go_to_definition,
     cut,
     copy,
     paste,
@@ -125,6 +124,7 @@ pub const Command = enum {
     submit_path,
     save_dirty,
     discard_dirty,
+    go_to_definition,
 };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{

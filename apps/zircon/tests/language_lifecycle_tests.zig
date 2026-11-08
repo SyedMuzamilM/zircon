@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zircon = @import("zircon");
-const lsp = @import("zircon_language");
+const lsp = zircon.language;
 const ui = @import("zircon_ui");
 const t = std.testing;
 
