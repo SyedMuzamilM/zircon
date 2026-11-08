@@ -93,6 +93,24 @@ pub fn refreshTree(self: *Shell) !void {
     previous.deinit(self.allocator);
 }
 
+/// Reload clean file documents whose disk stamp changed outside the editor.
+/// Dirty documents stay untouched so a later save can surface the conflict.
+pub fn refreshExternalDocuments(self: *Shell) !bool {
+    var changed = false;
+    for (self.tabs.items) |*tab| {
+        if (!try self.workspace.reloadClean(tab.document)) continue;
+        var snapshot = try self.workspace.snapshot(tab.document);
+        defer snapshot.deinit();
+        tab.editor.synchronize(snapshot);
+        if (tab.secondary_state) |*state| state.synchronize(snapshot);
+        if (self.secondary) |*pane| if (std.meta.eql(pane.document, tab.document)) pane.editor.synchronize(snapshot);
+        for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, tab.document)) view.editor.synchronize(snapshot);
+        services_language.invalidateDocument(self, tab.document) catch |err| try self.reportError(err);
+        changed = true;
+    }
+    return changed;
+}
+
 fn copyRow(a: std.mem.Allocator, entry: ws.Entry, depth: u16) !model.TreeRow {
     const name = try a.dupe(u8, entry.name);
     errdefer a.free(name);
@@ -683,10 +701,25 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 try self.workspace.save(id, path);
                 historyBoundary(self, id);
                 const record = try self.workspace.getConst(id);
-                self.configureEditor(&self.tabs.items[index].editor, record.path.?);
                 var snapshot = record.doc.snapshot();
                 defer snapshot.deinit();
-                self.tabs.items[index].editor.synchronize(snapshot);
+                for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
+                    self.configureEditor(&tab.editor, record.path.?);
+                    tab.editor.synchronize(snapshot);
+                    if (tab.secondary_state) |*state| {
+                        self.configureEditor(state, record.path.?);
+                        state.synchronize(snapshot);
+                    }
+                };
+                if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
+                    self.configureEditor(&pane.editor, record.path.?);
+                    pane.editor.synchronize(snapshot);
+                };
+                for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) {
+                    self.configureEditor(&view.editor, record.path.?);
+                    view.editor.synchronize(snapshot);
+                };
+                try services_language.invalidateDocument(self, id);
                 self.overlay = .none;
                 try finishPending(self, cx);
             }
