@@ -19,7 +19,7 @@ const Ops = struct {
         try cx.update(fields.workspace.path, Set.call, .{"/tmp/open-draft"});
         try cx.update(fields.workspace.query, Set.call, .{"Command draft"});
         try cx.update(fields.project.destination, Set.call, .{"/tmp/clone-draft"});
-        try cx.update(fields.git_commit.message, Set.call, .{"Commit draft"});
+        try cx.update(fields.git_commit.message, zircon.CommitMessage.replace, .{"Commit draft"});
     }
 
     fn command(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), which: zircon.Command) !void {
@@ -37,16 +37,19 @@ const Ops = struct {
         try cx.read(fields.workspace.path, Check.call, .{"/tmp/open-draft"});
         try cx.read(fields.workspace.query, Check.call, .{"Command draft"});
         try cx.read(fields.project.destination, Check.call, .{"/tmp/clone-draft"});
-        try cx.read(fields.git_commit.message, Check.call, .{"Commit draft"});
+        var draft: []u8 = undefined;
+        try cx.read(fields.git_commit.message, zircon.CommitMessage.copy, .{ t.allocator, &draft });
+        defer t.allocator.free(draft);
+        try t.expectEqualStrings("Commit draft", draft);
     }
 
     fn style(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), theme: []const u8) !void {
         try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .theme = theme }});
         try self.onSettings(cx, self.settings.?);
         const Check = struct {
-            fn call(value: *const ui.controls.TextInput) !void {
-                try t.expectEqual(@as(f32, 0), value.appearance.border.a);
-                try t.expect(!value.show_focus_border);
+            fn call(value: *const zircon.CommitMessage) !void {
+                try t.expect(!value.editor.show_line_numbers);
+                try t.expect(!value.editor.show_indent_guides);
                 try t.expectEqualStrings("Commit message…", value.placeholder);
             }
         };

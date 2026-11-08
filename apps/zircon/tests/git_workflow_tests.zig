@@ -253,7 +253,7 @@ test "Git commit preserves an explicit index and failed hooks retain the message
         }
         fn messageText(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), expected: []const u8) !void {
             var bytes: []u8 = undefined;
-            try cx.read(self.fields.?.git_commit.message, ui.controls.TextInput.copy, .{ t.allocator, &bytes });
+            try cx.read(self.fields.?.git_commit.message, zircon.CommitMessage.copy, .{ t.allocator, &bytes });
             defer t.allocator.free(bytes);
             try t.expectEqualStrings(expected, bytes);
         }
@@ -388,4 +388,26 @@ test "Git staging rejects a newer edit made after preparation captured the sourc
     defer t.allocator.free(staged);
     try t.expectEqualStrings("initial\n", staged);
     try app.read(owner, Ops.source, .{"newer disk\n"});
+}
+
+test "Git commit accepts a subject and multiline body in the message editor" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try initRepo(tmp);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "changed\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try open(&app, root);
+    try message(&app, handle, "Subject");
+    try app.dispatch(handle, .{ .key_down = .{ .key = .enter } });
+    try app.dispatch(handle, .{ .key_down = .{ .key = .enter } });
+    try app.dispatch(handle, .{ .text = "First paragraph.\nSecond line." });
+    try app.dispatch(handle, .{ .key_down = .{ .key = .z, .modifiers = .{ .command = true } } });
+    try app.dispatch(handle, .{ .key_down = .{ .key = .z, .modifiers = .{ .command = true, .shift = true } } });
+    try app.dispatch(handle, .{ .key_down = .{ .key = .enter, .modifiers = .{ .command = true } } });
+    try settle(&app);
+    const committed = try git(root, &.{ "log", "-1", "--format=%B" });
+    defer t.allocator.free(committed);
+    try t.expectEqualStrings("Subject\n\nFirst paragraph.\nSecond line.\n\n", committed);
 }

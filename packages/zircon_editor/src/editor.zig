@@ -26,6 +26,7 @@ pub const Editor = struct {
     vim: vim_module.State = .{},
     selections: selection.Set,
     pairs: pairing.State = .{},
+    auto_close_pairs: bool = true,
     bracket_cache: *brackets.Cache,
     /// Optional source range exposed by an excerpt view. Edits cannot consume
     /// bytes outside it; insertion at either endpoint remains valid.

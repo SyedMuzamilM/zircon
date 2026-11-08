@@ -13,9 +13,11 @@ const store = @import("settings/store.zig");
 const settings_view = @import("settings/view.zig");
 const shell = @import("shell.zig");
 pub const view = @import("view.zig");
+const commit_message = @import("views/git/commit_message.zig");
 pub const overlays = @import("views/overlays.zig");
 pub const diff_layout = zircon_git_ui.layout;
 pub const Shell = shell.Shell;
+pub const CommitMessage = commit_message.Message;
 pub const Command = commands_module.Command;
 pub const commands = commands_module.commands;
 

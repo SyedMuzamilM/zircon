@@ -83,7 +83,7 @@ fn allowed(self: *model.Editor, snapshot: text.Snapshot, at: usize, byte: u8, a:
 }
 
 pub fn typeText(self: *model.Editor, document: *text.Document, bytes: []const u8) !?model.Outcome {
-    if (bytes.len != 1 or std.mem.indexOfScalar(u8, "()[]{}\"'`", bytes[0]) == null or self.marked != null) return null;
+    if (!self.auto_close_pairs or bytes.len != 1 or std.mem.indexOfScalar(u8, "()[]{}\"'`", bytes[0]) == null or self.marked != null) return null;
     self.selections.normalize();
     var snapshot = document.snapshot();
     defer snapshot.deinit();

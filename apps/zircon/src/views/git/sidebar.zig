@@ -258,7 +258,7 @@ fn changedFiles(self: *const Shell, b: *ui.Ui, height: f32, notices: f32) !ui.El
     if (self.git.status) |status| {
         const model_rows = try self.git.tree.rows(b.allocator(), status.entries);
         total = @as(f32, @floatFromInt(model_rows.len)) * row_height;
-        const reserved = v.metrics.tabs + 34 + 1 + 30 + 1 + 112 + if (self.git.commits.len > 0) @as(f32, 28) else 0;
+        const reserved = v.metrics.tabs + 34 + 1 + 30 + 1 + commit_form.height + if (self.git.commits.len > 0) @as(f32, 28) else 0;
         const visible = try ui.controls.visibleRows(model_rows.len, row_height, self.git.sidebar_scroll.offset, @max(1, height - reserved - notices), 0);
         scroll_y = @max(0, -visible.top);
         for (model_rows[visible.start..visible.end]) |row| try rows.append(b.allocator(), try files.renderRow(self, b, status.entries, row));
