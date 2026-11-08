@@ -117,6 +117,9 @@ pub const Editor = struct {
         try self.validate();
         return canvas.render(self, document, builder);
     }
+    pub fn offsetAtPoint(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input), point: ui.Point) !usize {
+        return navigation.position(self, snapshot, event, point);
+    }
     pub fn symbolAt(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input), point: ui.Point) !?text.Range {
         if (event._surface == null) return null;
         const gutter = if (self.show_line_numbers) canvas.gutterWidth(snapshot.lineCount(), self.font_size) else 20;

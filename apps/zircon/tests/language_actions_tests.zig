@@ -127,6 +127,10 @@ const ServerOps = struct {
     fn identity(self: *const zircon.Shell) usize {
         return @intFromPtr(self.language.sessions.items[0].client.?);
     }
+    fn definitionSelected(self: *const zircon.Shell) bool {
+        const selected = self.tabs.items[self.active].editor.primary();
+        return self.panel == .editor and self.language.definition_pending == null and selected.anchor == 0 and selected.head == 1;
+    }
     fn signatureReady(self: *const zircon.Shell) bool {
         return self.language.signature != null;
     }
@@ -185,4 +189,25 @@ test "language action survives the full response path and keeps its server alive
     const saved = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(128));
     defer t.allocator.free(saved);
     try t.expectEqualStrings("fixedld\n", saved);
+    try app.update(owner, ServerOps.command, .{.back_to_editor});
+    _ = try app.step(0);
+    const frame = &(try app.window(h)).frames.committed;
+    const editor_bounds = for (frame.nodes.items, 0..) |node, index| {
+        if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "primary-editor")) break frame.bounds[index];
+    } else return error.EditorMissing;
+    const position: ui.Point = .{ .x = editor_bounds.x + 100, .y = editor_bounds.y + 11 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = position, .button = .secondary } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = position, .button = .secondary } });
+    _ = try app.step(0);
+    const action_bounds = for (frame.nodes.items, 0..) |node, index| {
+        if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Go to Definition")) {
+            try t.expect(node.kind.button.on_click != null);
+            break frame.bounds[index];
+        }
+    } else return error.DefinitionMenuActionMissing;
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-editor-context-menu-lsp.png");
+    const action_position: ui.Point = .{ .x = action_bounds.x + 20, .y = action_bounds.y + action_bounds.height / 2 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = action_position } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = action_position } });
+    try waitFor(&app, owner, ServerOps.definitionSelected);
 }

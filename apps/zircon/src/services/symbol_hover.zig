@@ -44,7 +44,7 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, doc
     }
     const point = e.data.pointer_move.position;
     if (overPopup(self, cx, point)) return;
-    if (state.dragging or self.overlay != .none or self.menu_open) return clear(self, cx);
+    if (state.dragging or self.overlay != .none or self.menu_open or self.editor_context_menu != null) return clear(self, cx);
     var snapshot = document.snapshot();
     defer snapshot.deinit();
     const range = (try state.symbolAt(snapshot, e, point)) orelse return clear(self, cx);

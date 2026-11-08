@@ -22,6 +22,7 @@ const settings_model = @import("settings/model.zig");
 const settings_view = @import("settings/view.zig");
 const model = @import("shell.zig");
 const terminal_module = @import("terminal.zig");
+const editor_context_menu = @import("views/editor_context_menu.zig");
 const git_commands = @import("views/git/commands.zig");
 const git_diff_controls = @import("views/git/diff_controls.zig");
 const git_controls = @import("views/git/menus.zig");
@@ -355,6 +356,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
     const record = try self.workspace.get(selected.id);
+    if (try editor_context_menu.pointer(self, cx, selected.editor, &record.doc, selected.id, pane, e)) return true;
     try symbol_hover.pointer(self, cx, selected.editor, &record.doc, selected.id, e);
     if (try editor_git.handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
     const old_gutter_hover = selected.editor.gutter_hovered;
@@ -798,6 +800,7 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
 }
 
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (try editor_context_menu.input(self, e, cx)) return;
     symbol_hover.dismissOutside(self, cx, e.data);
     if (e.data == .action) {
         const which = std.enums.fromInt(Command, e.data.action) orelse return;

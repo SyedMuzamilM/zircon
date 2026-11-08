@@ -307,7 +307,11 @@ pub const Model = struct {
     }
 };
 pub fn create(self: *Shell) !void {
-    var session = try Session.init(self.allocator, self.terminal.next_id, self.workspace.root_path, self.terminal.options);
+    return createAt(self, self.workspace.root_path);
+}
+
+pub fn createAt(self: *Shell, directory: []const u8) !void {
+    var session = try Session.init(self.allocator, self.terminal.next_id, directory, self.terminal.options);
     errdefer session.deinit(self.allocator);
     try self.terminal.sessions.append(self.allocator, session);
     self.terminal.next_id +%= 1;

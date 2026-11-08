@@ -40,6 +40,8 @@ pub fn message(err: anyerror) []const u8 {
         error.SignatureHelpNotSupported => "This server does not provide signature help.",
         error.CodeActionsNotSupported => "This server does not provide code actions.",
         error.DuplicateWorkspaceEdit => "The language action edits the same file more than once. No changes were applied.",
+        error.StaleContextMenu => "The source changed. Open the context menu again.",
+        error.RevealFileFailed => "The file manager could not reveal this file.",
         error.StaleCodeActions => "The document changed before the code action was applied.",
         error.StaleCompletion, error.StaleDiagnostics => "The document or caret changed. Request fresh language results.",
         error.SnippetNotSupported => "Snippet completions are not supported yet.",

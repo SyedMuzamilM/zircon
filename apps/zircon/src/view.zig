@@ -15,6 +15,7 @@ const buffer_find = @import("views/buffer_find.zig");
 const chrome = @import("views/chrome.zig");
 const components = @import("views/components.zig");
 const views_diagnostics = @import("views/diagnostics.zig");
+const editor_context_menu = @import("views/editor_context_menu.zig");
 const views_extensions = @import("views/extensions.zig");
 const views_git_diff = @import("views/git/diff.zig");
 const git_controls = @import("views/git/menus.zig");
@@ -72,6 +73,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.split_menu_open) try layers.append(b.allocator(), try chrome.splitMenu(self, b));
     if (self.popup != .none) try layers.append(b.allocator(), try workspace_controls.render(self, b));
     if (self.menu_open) try layers.append(b.allocator(), try chrome.menu(self, b));
+    if (self.editor_context_menu != null) try layers.append(b.allocator(), try editor_context_menu.render(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlays.render(self, b));
     if (self.overlay == .none) if (self.language.completions) |message| {
         var choices: std.ArrayList(ui.Element) = .empty;
