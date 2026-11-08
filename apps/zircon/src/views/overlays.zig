@@ -47,6 +47,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .save_as => "Save file as",
         .find => "Find",
         .replace => "Find and replace",
+        .rename => "Rename symbol",
         .dirty => "Save your changes?",
         .none => unreachable,
     };
@@ -128,6 +129,11 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             try children.append(b.allocator(), try footer(b, buttons.items));
             try children.append(b.allocator(), try label(b, colors, "Search matches exact text. Escape returns to the editor.", colors.muted, 11));
         },
+        .rename => {
+            try children.append(b.allocator(), try label(b, colors, "Rename the symbol in every file supported by the language server.", colors.muted, 12));
+            try children.append(b.allocator(), try inputField(b, fields.workspace.query, "rename", true));
+            try children.append(b.allocator(), try footer(b, &.{ try commandButton(b, colors, .dismiss, "Cancel", false), try commandButton(b, colors, .submit_rename, "Rename", true) }));
+        },
         .dirty => {
             try children.append(b.allocator(), try label(b, colors, "Your changes will be lost if you discard them.", colors.muted, 13));
             const dirty_title = try pendingTitle(self, b);
@@ -171,6 +177,7 @@ fn overlayHeight(self: *const Shell, b: *ui.Ui) !f32 {
         .find => 196,
         .project_search => 174,
         .replace => 246,
+        .rename => 174,
         .dirty => 188,
         .none => 0,
     };
@@ -261,6 +268,7 @@ pub fn show(self: *Shell, cx: *ui.Context(Shell), which: shell.Overlay) !void {
             try field_input.reset(cx, fields.workspace.path, record.path orelse "untitled.zig", .{ .placeholder = "Save file as…" });
         },
         .find, .replace => try field_input.reset(cx, fields.workspace.query, "", .{ .placeholder = "Find in document…" }),
+        .rename => try field_input.reset(cx, fields.workspace.query, "", .{ .placeholder = "New symbol name…" }),
         else => {},
     };
 }

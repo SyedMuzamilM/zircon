@@ -14,6 +14,7 @@ pub const Position = model.Position;
 pub const Range = model.Range;
 pub const TextEdit = model.TextEdit;
 pub const Location = model.Location;
+pub const FileEdits = model.FileEdits;
 pub const Diagnostic = model.Diagnostic;
 pub const Completion = model.Completion;
 pub const Message = model.Message;

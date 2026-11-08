@@ -13,7 +13,7 @@ const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
-const Pending = struct { kind: enum { initialize, completion, hover, definition, references, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
+const Pending = struct { kind: enum { initialize, completion, hover, definition, references, rename, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
     pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0, change_text_bytes: u64 = 0, incremental_changes: u64 = 0, resync_changes: u64 = 0 };
     counters: Stats = .{},
@@ -34,6 +34,7 @@ pub const Client = struct {
     hover_supported: std.atomic.Value(bool) = .init(false),
     definition_supported: std.atomic.Value(bool) = .init(false),
     references_supported: std.atomic.Value(bool) = .init(false),
+    rename_supported: std.atomic.Value(bool) = .init(false),
     sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
@@ -254,6 +255,28 @@ pub const Client = struct {
             self.lock.unlock(self.io);
         }
         try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/references", .params = .{ .textDocument = .{ .uri = uri }, .position = cursor_position, .context = .{ .includeDeclaration = true } } });
+        return id;
+    }
+    pub fn supportsRename(self: *const Client) bool {
+        return self.rename_supported.load(.acquire);
+    }
+    pub fn rename(self: *Client, uri: []const u8, version: u64, cursor_position: model.Position, new_name: []const u8) !u64 {
+        try self.check();
+        if (!self.supportsRename()) return error.RenameNotSupported;
+        if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
+        const id = try self.requestId();
+        const owned = try transport_allocator.dupe(u8, uri);
+        errdefer transport_allocator.free(owned);
+        self.lock.lockUncancelable(self.io);
+        const inserted = self.pending.put(transport_allocator, id, .{ .kind = .rename, .uri = owned, .version = version });
+        self.lock.unlock(self.io);
+        try inserted;
+        errdefer {
+            self.lock.lockUncancelable(self.io);
+            _ = self.pending.remove(id);
+            self.lock.unlock(self.io);
+        }
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/rename", .params = .{ .textDocument = .{ .uri = uri }, .position = cursor_position, .newName = new_name } });
         return id;
     }
     fn requestId(self: *Client) !u64 {
@@ -618,6 +641,8 @@ fn parse(self: *Client, body: []const u8) !void {
             self.definition_supported.store(definition_provider, .release);
             const references_provider = if (field(capabilities, "referencesProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.references_supported.store(references_provider, .release);
+            const rename_provider = if (field(capabilities, "renameProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
+            self.rename_supported.store(rename_provider, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
             if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
@@ -667,6 +692,24 @@ fn parse(self: *Client, body: []const u8) !void {
                 break :blk one;
             };
             self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = items } } });
+        },
+        .rename => {
+            if (result == .null) {
+                self.publish(.{ .arena = arena, .data = .{ .workspace_edit = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .files = &.{} } } });
+                return;
+            }
+            const changes = field(result, "changes") orelse return error.InvalidWorkspaceEdit;
+            if (changes != .object or changes.object.count() > 1024) return error.InvalidWorkspaceEdit;
+            const files = try a.alloc(model.FileEdits, changes.object.count());
+            var index: usize = 0;
+            var iterator = changes.object.iterator();
+            while (iterator.next()) |entry| : (index += 1) {
+                if (entry.value_ptr.* != .array or entry.value_ptr.array.items.len > 4096) return error.InvalidWorkspaceEdit;
+                const edits = try a.alloc(model.TextEdit, entry.value_ptr.array.items.len);
+                for (entry.value_ptr.array.items, edits) |value, *actual| actual.* = try edit(value);
+                files[index] = .{ .uri = entry.key_ptr.*, .edits = edits };
+            }
+            self.publish(.{ .arena = arena, .data = .{ .workspace_edit = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .files = files } } });
         },
     }
 }

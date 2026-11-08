@@ -443,6 +443,13 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             error.NoLanguageServer, error.ServerNotReady, error.ReferencesNotSupported => {},
             else => return err,
         },
+        .rename_symbol => try overlays.show(self, cx, .rename),
+        .submit_rename => {
+            const name = try field_input.read(cx, self.fields.?.workspace.query, self.allocator);
+            defer self.allocator.free(name);
+            try services_language.requestRename(self, cx, std.mem.trim(u8, name, " \t\r\n"));
+            self.overlay = .none;
+        },
         .cut, .copy, .paste => {
             // Native menu actions arrive through globalInput with the original
             // event surface. Palette actions are handled by the focused editor.
@@ -880,6 +887,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
                 .open_project => .submit_project,
                 .open_path, .save_as, .extension_path => .submit_path,
                 .find, .replace => if (key.modifiers.shift) .find_previous else .find_next,
+                .rename => .submit_rename,
                 .project_search => .run_project_search,
                 else => .dismiss,
             };

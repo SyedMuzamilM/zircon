@@ -8,6 +8,7 @@ pub const Diagnostic = struct { range: Range, severity: enum { error_value, warn
 pub const TextEdit = struct { range: Range, new_text: []const u8 };
 pub const Location = struct { uri: []const u8, range: Range };
 pub const LocationsKind = enum { definition, references };
+pub const FileEdits = struct { uri: []const u8, edits: []const TextEdit };
 pub const Completion = struct { label: []const u8, insert_text: []const u8, detail: ?[]const u8 = null, text_edit: ?TextEdit = null, additional_edits: []const TextEdit = &.{}, snippet: bool = false };
 pub const Message = struct {
     arena: std.heap.ArenaAllocator,
@@ -17,6 +18,7 @@ pub const Message = struct {
         completion: struct { id: u64, uri: []const u8, version: u64, items: []const Completion, incomplete: bool = false },
         hover: struct { id: u64, uri: []const u8, version: u64, contents: []const u8 },
         locations: struct { id: u64, uri: []const u8, version: u64, kind: LocationsKind, items: []const Location },
+        workspace_edit: struct { id: u64, uri: []const u8, version: u64, files: []const FileEdits },
         log: struct { message: []const u8, severity: u8 = 3 },
         failure: struct { message: []const u8, request_id: ?u64 = null },
         exited,

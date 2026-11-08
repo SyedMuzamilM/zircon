@@ -49,6 +49,7 @@ pub const Overlay = enum {
     project_search,
     find,
     replace,
+    rename,
     dirty,
 };
 pub const CloseTarget = union(enum) { tab: usize, window };

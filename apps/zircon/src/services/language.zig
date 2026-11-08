@@ -38,6 +38,7 @@ const Document = struct {
 pub const Pending = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64, cursor: usize };
 const PendingDefinition = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64 };
 const PendingReferences = PendingDefinition;
+const PendingRename = PendingDefinition;
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
@@ -52,6 +53,7 @@ pub const Model = struct {
     definition_pending: ?PendingDefinition = null,
     references: ?lsp.Message = null,
     references_pending: ?PendingReferences = null,
+    rename_pending: ?PendingRename = null,
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -83,10 +85,14 @@ pub const Model = struct {
         self.references = null;
         self.references_pending = null;
     }
+    pub fn clearRename(self: *Model) void {
+        self.rename_pending = null;
+    }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         self.clearCompletion();
         self.clearDefinition();
         self.clearReferences();
+        self.clearRename();
         for (self.documents.items) |*doc| {
             if (doc.diagnostics) |*value| value.deinit();
             a.free(doc.uri);
@@ -343,6 +349,12 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                         self.showTool(.search);
                     }
                 },
+                .workspace_edit => |value| if (self.language.rename_pending) |pending| {
+                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                    try acceptRename(self, cx, value.files);
+                    moved = true;
+                    changed = true;
+                },
                 else => {},
             }
         }
@@ -398,6 +410,63 @@ pub fn requestReferences(self: *Shell, cx: *ui.Context(Shell)) !void {
         return;
     };
     return error.NoLanguageServer;
+}
+
+pub fn requestRename(self: *Shell, cx: *ui.Context(Shell), new_name: []const u8) !void {
+    if (new_name.len == 0) return error.InvalidRename;
+    const current = try actions.active(self);
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
+        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const request_id = try client.rename(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head), new_name);
+        self.language.clearRename();
+        self.language.rename_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+        cx.notify();
+        return;
+    };
+    return error.NoLanguageServer;
+}
+
+fn acceptRename(self: *Shell, cx: *ui.Context(Shell), files: []const lsp.FileEdits) !void {
+    for (files) |file| {
+        var id: ?ws.DocumentId = null;
+        for (self.language.documents.items) |doc| if (std.mem.eql(u8, doc.uri, file.uri)) {
+            id = doc.id;
+            break;
+        };
+        if (id == null) {
+            const path = try filePathFromUri(self.allocator, file.uri);
+            defer self.allocator.free(path);
+            id = try self.workspace.open(path);
+        }
+        const document_id = id.?;
+        var snapshot = try self.workspace.snapshot(document_id);
+        defer snapshot.deinit();
+        const edits = try self.allocator.alloc(text.Edit, file.edits.len);
+        defer self.allocator.free(edits);
+        for (file.edits, edits) |edit, *actual| actual.* = .{ .range = .{ .start = try lsp.offsetAt(snapshot, edit.range.start), .end = try lsp.offsetAt(snapshot, edit.range.end) }, .text = edit.new_text };
+        std.mem.sort(text.Edit, edits, {}, struct {
+            fn less(_: void, a: text.Edit, b: text.Edit) bool {
+                return a.range.start < b.range.start;
+            }
+        }.less);
+        var applied = false;
+        for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, document_id)) {
+            const record = try self.workspace.get(document_id);
+            var outcome = try tab.editor.applyEdits(&record.doc, edits, try zircon_editor.Editor.freshGroup());
+            try actions.applyOutcome(self, cx, document_id, 0, &outcome, .project_edit);
+            applied = true;
+            break;
+        };
+        if (!applied) {
+            var change = try self.workspace.apply(document_id, snapshot.revision(), edits, try zircon_editor.Editor.freshGroup(), .project_edit);
+            change.deinit();
+        }
+        try invalidateDocument(self, document_id);
+    }
+    self.language.clearRename();
+    cx.notify();
 }
 
 fn selectDocument(self: *Shell, id: ws.DocumentId) !bool {
