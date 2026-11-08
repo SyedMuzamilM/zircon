@@ -35,6 +35,7 @@ pub const Color = struct {
     a: f32 = 1,
     pub const white: Color = .{ .r = 1, .g = 1, .b = 1 };
     pub const black: Color = .{ .r = 0, .g = 0, .b = 0 };
+    pub const transparent: Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
     pub fn rgb(value: u24) Color {
         return .{ .r = @as(f32, @floatFromInt((value >> 16) & 255)) / 255, .g = @as(f32, @floatFromInt((value >> 8) & 255)) / 255, .b = @as(f32, @floatFromInt(value & 255)) / 255 };
     }

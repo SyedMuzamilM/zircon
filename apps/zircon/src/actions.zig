@@ -73,6 +73,8 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
         const destination = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         const path = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
         var commit_input = try ui.controls.TextInput.init(self.allocator, "");
+        // I don't want the border in the commit_input
+        commit_input.appearance.border = .transparent;
         commit_input.placeholder = "Commit message…";
         const commit = cx.createChild(ui.controls.TextInput, commit_input) catch |err| {
             commit_input.deinit(self.allocator);
@@ -263,8 +265,12 @@ fn show(self: *Shell, cx: *ui.Context(Shell), which: model.Overlay) !void {
             fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), picker: bool) void {
                 input.height = if (picker) 38 else 30;
                 input.font_size = if (picker) 14 else 13;
-                input.leading_icon = if (picker) .search else null;
+                input.leading_icon = null;
                 input.show_focus_border = !picker;
+                if (picker) {
+                    input.appearance.background = ui.Color.transparent;
+                    input.appearance.border = ui.Color.transparent;
+                }
                 context.notify();
             }
         };
