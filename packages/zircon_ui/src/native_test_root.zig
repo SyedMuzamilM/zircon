@@ -4,6 +4,7 @@ pub const metal = @import("graphics/backends/metal.zig");
 pub const objc = @import("platform/macos/objc.zig");
 pub const scene = @import("graphics/scene.zig");
 pub const images = @import("graphics/images.zig");
+pub const icon = @import("platform/macos/icon.zig");
 pub const Painter = @import("graphics/painter.zig").Painter;
 
 test {

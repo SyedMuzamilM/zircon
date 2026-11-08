@@ -4,6 +4,24 @@ const ui = @import("zircon_ui");
 const images = ui.graphics.images;
 const t = std.testing;
 const rgba = [_]u8{ 255, 128, 64, 128, 0, 255, 0, 255 };
+test "application retains an icon and validates a window override before taking its model" {
+    const View = struct {
+        pub fn render(_: *const @This(), b: *ui.Ui) !ui.Element {
+            return b.text("Icon");
+        }
+    };
+    var image = try images.Image.fromRgba(t.allocator, 1, 1, &.{ 12, 34, 56, 255 });
+    const pixels = image.view().pixels;
+    var app = ui.App.init(.{ .allocator = t.allocator, .icon = image }) catch |err| {
+        image.deinit();
+        return err;
+    };
+    defer app.deinit();
+    image.deinit();
+    _ = try app.openWindow(View, .{ .visible = false }, .{});
+    try t.expectEqualSlices(u8, &.{ 12, 34, 56, 255 }, pixels);
+    try t.expectError(error.InvalidImage, app.openWindow(View, .{ .visible = false, .icon = .{ .id = 0, .width = 1, .height = 1, .pixels = pixels } }, .{}));
+}
 test "image assets copy once premultiply alpha and retain immutable identity" {
     var input = rgba;
     var image = try images.Image.fromRgba(t.allocator, 2, 1, &input);

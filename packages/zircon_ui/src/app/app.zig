@@ -25,14 +25,20 @@ const State = struct {
     close_requests: std.ArrayList(windows.Handle) = .empty,
     external: std.ArrayList(External) = .empty,
     typography: @import("../text/typography.zig").Typography = .{},
+    icon: ?@import("../graphics/images.zig").Image = null,
 };
-pub const Options = struct { allocator: std.mem.Allocator };
+pub const Options = struct {
+    allocator: std.mem.Allocator,
+    /// The application retains its own image reference until deinit.
+    icon: ?@import("../graphics/images.zig").Image = null,
+};
 pub const App = struct {
     state: *State,
     pub fn init(options: Options) !App {
         const app_id = try reserveId();
         const state = try options.allocator.create(State);
         state.* = .{ .allocator = options.allocator, .store = .init(options.allocator, app_id), .thread = std.Thread.getCurrentId(), .jobs = .init(options.allocator) };
+        state.icon = if (options.icon) |image| image.clone() else null;
         return .{ .state = state };
     }
     pub fn deinit(app: *App) void {
@@ -49,6 +55,7 @@ pub const App = struct {
         app.state.external.deinit(allocator);
         app.state.reactive.deinit(allocator);
         app.state.store.deinit();
+        if (app.state.icon) |*image| image.deinit();
         allocator.destroy(app.state);
         app.* = undefined;
     }
@@ -75,7 +82,11 @@ pub const App = struct {
         const slot = app.state.windows.items.len;
         if (slot >= std.math.maxInt(u32)) return error.WindowCapacityExceeded;
         try app.state.windows.ensureUnusedCapacity(app.state.allocator, 1);
-        const record = try windows.Window.create(app.*, app.state.allocator, T, options, value);
+        var actual = options;
+        if (actual.icon == null) if (app.state.icon) |image| {
+            actual.icon = image.view();
+        };
+        const record = try windows.Window.create(app.*, app.state.allocator, T, actual, value);
         record.surface.?.setTypography(app.state.typography);
         errdefer record.deinit();
         app.state.windows.appendAssumeCapacity(record);

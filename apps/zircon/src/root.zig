@@ -16,3 +16,4 @@ pub const languageSuggestion = @import("language_suggestions.zig").query;
 
 pub const git = @import("zircon_git");
 pub const diff_layout = @import("models/diff_layout.zig");
+pub const applicationIcon = @import("app_icon.zig").create;

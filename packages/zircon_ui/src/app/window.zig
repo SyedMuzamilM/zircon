@@ -47,6 +47,7 @@ pub const Window = struct {
         comptime adapter.requireView(T);
         if (!std.math.isFinite(options.width) or !std.math.isFinite(options.height) or options.width <= 0 or options.height <= 0 or options.width > 32768 or options.height > 32768) return error.InvalidWindowSize;
         if (!std.unicode.utf8ValidateSlice(options.title)) return error.InvalidUtf8;
+        if (options.icon) |icon| try icon.validate();
         var owner = app;
         const scope = try owner.createScope();
         errdefer owner.destroyScope(scope) catch {};

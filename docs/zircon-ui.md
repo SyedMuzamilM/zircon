@@ -177,6 +177,8 @@ Implementation: [`controls/text_input.zig`](../packages/zircon_ui/src/controls/t
 
 ## Custom elements, painting, and images
 
+`App.init` accepts an optional `icon: Image` and retains its own reference. `WindowOptions.icon` accepts an `images.View` borrowed during creation. The native macOS adapter copies it, tags it as sRGB, and publishes the application-wide Dock icon after the window's first successful presentation. Window failure or frame discard preserves the previous icon. Distribution resources and Linux/Windows adapters remain open. See [application icon ownership and current scope](progress/2026-11-08-application-icons.md).
+
 The `Ui.custom` contract is defined in [`ui/custom.zig`](../packages/zircon_ui/src/ui/custom.zig). A custom type declares `LayoutState` and `PrepaintState`, and supplies these methods:
 
 ```zig

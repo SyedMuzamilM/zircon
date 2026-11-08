@@ -58,6 +58,7 @@ const State = struct {
     layer: Id,
     renderer: *metal.Renderer,
     marked: Id = null,
+    pending_icon: Id = null,
     input: ?platform.TextSnapshot = null,
     awaiting_snapshot: bool = false,
     font_generation: u64 = 0,
@@ -132,6 +133,8 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     const pool = objc.Pool.init();
     defer pool.deinit();
     const app = objc.send(Id, objc.class("NSApplication"), "sharedApplication", .{}) orelse return error.AppKitUnavailable;
+    const icon = if (options.icon) |view| try @import("icon.zig").create(view) else null;
+    errdefer objc.release(icon);
     application.store(@intFromPtr(app), .release);
     _ = objc.send(bool, app, "setActivationPolicy:", .{@as(isize, 0)});
     objc.send(void, app, "finishLaunching", .{});
@@ -154,7 +157,7 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     errdefer objc.release(layer);
     const s = try allocator.create(State);
     errdefer allocator.destroy(s);
-    s.* = .{ .allocator = allocator, .sink = sink, .window = window, .view = view, .layer = layer, .renderer = renderer };
+    s.* = .{ .allocator = allocator, .sink = sink, .window = window, .view = view, .layer = layer, .renderer = renderer, .pending_icon = icon };
     _ = object_setInstanceVariable(view, "zirconState", s);
     errdefer _ = object_setInstanceVariable(view, "zirconState", null);
     objc.send(void, layer, "setDevice:", .{renderer.device});
@@ -269,6 +272,7 @@ fn deinit(raw: *anyopaque) void {
     objc.send(void, s.view, "setLayer:", .{@as(Id, null)});
     metal.destroy(s.renderer);
     objc.release(s.marked);
+    objc.release(s.pending_icon);
     for (s.text_requests.items) |request| objc.release(request.value);
     s.text_requests.deinit(s.allocator);
     objc.release(s.layer);
@@ -298,6 +302,11 @@ fn present(raw: *anyopaque, frame: scene.Frame) !bool {
     const texture = objc.send(Id, drawable, "texture", .{}) orelse return error.InvalidDrawable;
     const scale: f32 = @floatCast(objc.send(f64, s.window, "backingScaleFactor", .{}));
     try metal.draw(s.renderer, frame, dimensions, scale, texture, drawable, false);
+    if (s.pending_icon != null) {
+        objc.send(void, objc.send(Id, objc.class("NSApplication"), "sharedApplication", .{}), "setApplicationIconImage:", .{s.pending_icon});
+        objc.release(s.pending_icon);
+        s.pending_icon = null;
+    }
     return true;
 }
 fn measurer(raw: *anyopaque) measurement.Measurer {

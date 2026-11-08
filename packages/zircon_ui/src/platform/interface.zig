@@ -10,6 +10,9 @@ pub const WindowOptions = struct {
     width: f32 = 1080,
     height: f32 = 720,
     visible: bool = true,
+    /// Borrowed only during window creation. macOS uses an application-wide
+    /// Dock icon; other desktop adapters use their native window icon.
+    icon: ?@import("../graphics/images.zig").View = null,
     chrome: enum { system, integrated } = .system,
     background: g.Color = .{ .r = 0.07, .g = 0.08, .b = 0.1 },
 };

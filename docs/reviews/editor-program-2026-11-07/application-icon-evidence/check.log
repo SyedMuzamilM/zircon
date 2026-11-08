@@ -1,0 +1,61 @@
+    Finished `release` profile [optimized] target(s) in 0.42s
+1 UI example matches compiled source
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.478s
+
+OK
+Build Summary: 42/42 steps succeeded; 252/256 tests passed (4 skipped)
+check success
++- run test cached
+|  +- compile test debug native cached 50ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 78ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 48ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 76ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 94ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 94ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 85ms MaxRSS:31M
++- contracts success
+|  +- compile test debug native success 244ms MaxRSS:100M
+|  |  +- options cached
+|  +- compile test debug native success 260ms MaxRSS:100M
+|  |  +- options (reused)
+|  +- compile test debug native success 299ms MaxRSS:103M
+|  |  +- options (reused)
+|  +- compile test debug native success 264ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 251ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 302ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 205ms MaxRSS:101M
+|     +- options (reused)
++- examples-check success
+|  +- compile exe counter-tree debug native success 1s MaxRSS:264M
+|  |  +- options (reused)
+|  +- run python3 success 58ms
+|  +- run python3 success 534ms
+|  +- compile exe zircon-counter debug native success 2s MaxRSS:319M
+|     +- options cached
++- run test 113 pass (113 total) 1s MaxRSS:28M
+|  +- compile test debug native success 3s MaxRSS:386M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 48ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 44ms MaxRSS:31M
++- run test 45 pass (45 total) 1s MaxRSS:13M
+|  +- compile test debug native success 2s MaxRSS:320M
+|     +- options (reused)
++- run test 94 pass, 4 skip (98 total) 16s MaxRSS:368M
+|  +- compile test debug native success 7s MaxRSS:765M
+|  |  +- options (reused)
+|  +- run cargo success 545ms
++- zig fmt --check success
+
