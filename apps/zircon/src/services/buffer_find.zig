@@ -50,6 +50,7 @@ pub fn open(self: *Shell, cx: *ui.Context(Shell), replace: bool) !void {
     self.panel = .editor;
     try changed(self, cx);
 }
+
 pub fn bind(self: *Shell, cx: *ui.Context(Shell), document: ws.DocumentId, pane: u8) !void {
     if (self.find.document != null and std.meta.eql(self.find.document.?, document) and self.find.pane == pane) return;
     if (target(self)) |previous| {
@@ -61,6 +62,7 @@ pub fn bind(self: *Shell, cx: *ui.Context(Shell), document: ws.DocumentId, pane:
     self.find.queued = null;
     try changed(self, cx);
 }
+
 pub fn changed(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (target(self)) |current| {
         current.editor.search_visible = false;
@@ -74,6 +76,7 @@ pub fn changed(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.find.error_text = &.{};
     cx.notify();
 }
+
 pub fn close(self: *Shell, cx: *ui.Context(Shell)) void {
     if (target(self)) |current| {
         current.editor.search_visible = false;
@@ -85,6 +88,7 @@ pub fn close(self: *Shell, cx: *ui.Context(Shell)) void {
     self.editor_focus_request +%= 1;
     cx.notify();
 }
+
 fn target(self: *Shell) !struct { id: ws.DocumentId, editor: *zircon_editor.Editor } {
     if (self.find.document) |id| {
         if (self.find.pane == 1) {
@@ -93,6 +97,7 @@ fn target(self: *Shell) !struct { id: ws.DocumentId, editor: *zircon_editor.Edit
     }
     return error.FindDocumentClosed;
 }
+
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (!self.find.visible and !self.find.waiting) return;
     if (self.find.visible and self.find.pane == 0 and self.tabs.items.len > 0) try bind(self, cx, self.tabs.items[self.active].document, 0);
@@ -108,8 +113,8 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     const a = arena.allocator();
     var query: []u8 = &.{};
     var replacement: []u8 = &.{};
-    try cx.read(self.fields.?.find_query, ui.controls.TextInput.copy, .{ a, &query });
-    try cx.read(self.fields.?.replacement, ui.controls.TextInput.copy, .{ a, &replacement });
+    try cx.read(self.fields.?.buffer_search.query, ui.controls.TextInput.copy, .{ a, &query });
+    try cx.read(self.fields.?.buffer_search.replacement, ui.controls.TextInput.copy, .{ a, &replacement });
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
     if (snapshot.byteLen() > 8 * 1024 * 1024) {
@@ -140,6 +145,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.find.waiting = false;
     self.find.busy = true;
 }
+
 fn completed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
     self.find.busy = false;
     const box = raw catch |err| {
@@ -174,7 +180,7 @@ fn completed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
         try snapshot.validateRange(range.*);
     }
     var query: []u8 = &.{};
-    try cx.read(self.fields.?.find_query, ui.controls.TextInput.copy, .{ self.allocator, &query });
+    try cx.read(self.fields.?.buffer_search.query, ui.controls.TextInput.copy, .{ self.allocator, &query });
     self.allocator.free(current.editor.search_query);
     current.editor.search_query = query;
     current.editor.search_case_sensitive = self.find.case_sensitive;
@@ -192,6 +198,7 @@ fn completed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
     }
     cx.notify();
 }
+
 pub fn action(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !void {
     if (self.find.busy or self.find.waiting) {
         self.find.queued = which;

@@ -68,6 +68,7 @@ pub fn parse(value: std.json.Value) !Overrides {
     }
     return result;
 }
+
 fn format(a: std.mem.Allocator, binding: ui.Keymap(catalogue.Command).Binding) ![]const u8 {
     const m = binding.chord.modifiers;
     const key: []const u8 = switch (binding.chord.key) {

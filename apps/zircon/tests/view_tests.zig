@@ -1,6 +1,7 @@
 const std = @import("std");
 const zircon = @import("zircon");
 const ui = @import("zircon_ui");
+const overlays = zircon.overlays;
 const t = std.testing;
 
 fn open(app: *ui.App) !ui.WindowHandle {
@@ -15,11 +16,11 @@ fn open(app: *ui.App) !ui.WindowHandle {
 }
 
 test "palette filtering is deterministic ASCII case-insensitive substring matching" {
-    try t.expect(zircon.view.matches("  SPLIT ", "Split editor"));
-    try t.expect(zircon.view.matches("file", "Open file by path"));
-    try t.expect(zircon.view.matches("", "Any command"));
-    try t.expect(!zircon.view.matches("split", "Save file as…"));
-    try t.expect(!zircon.view.matches("long query", "tiny"));
+    try t.expect(zircon.overlays.matches("  SPLIT ", "Split editor"));
+    try t.expect(zircon.overlays.matches("file", "Open file by path"));
+    try t.expect(zircon.overlays.matches("", "Any command"));
+    try t.expect(!zircon.overlays.matches("split", "Save file as…"));
+    try t.expect(!zircon.overlays.matches("long query", "tiny"));
 }
 
 test "workspace chrome leaves the canvas room and focuses the editor initially" {

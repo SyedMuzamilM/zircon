@@ -12,6 +12,7 @@ const store = @import("settings/store.zig");
 const settings_view = @import("settings/view.zig");
 const shell = @import("shell.zig");
 pub const view = @import("view.zig");
+pub const overlays = @import("views/overlays.zig");
 pub const diff_layout = zircon_git_ui.layout;
 pub const Shell = shell.Shell;
 pub const Command = commands_module.Command;

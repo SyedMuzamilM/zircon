@@ -312,6 +312,7 @@ fn contentBounds(self: *const Shell, cx: *ui.Context(Shell)) ?ui.Rect {
     for (frame.nodes.items, 0..) |node, index| if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "git-diff-lines")) return frame.bounds[index];
     return null;
 }
+
 fn reveal(self: *Shell, cx: *ui.Context(Shell), view: *const View) !void {
     const projection = self.git.projection orelse return;
     const diff = self.git.diff orelse return;

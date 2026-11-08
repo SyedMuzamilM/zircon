@@ -19,23 +19,33 @@ pub const metrics = struct {
     pub const inset: f32 = 12;
 };
 pub fn text(b: *ui.Ui, bytes: []const u8, color: ui.Color, size: f32) !ui.Element {
-    return b.fluent().text(bytes).style(.{ .text = .{ .size = size, .color = color }, .overflow = .hidden, .flex_shrink = 0 }).build();
+    return b.fluent().text(bytes).style(.{
+        .text = .{ .size = size, .color = color },
+        .overflow = .hidden,
+        .flex_shrink = 0,
+    }).build();
 }
+
 pub fn icon(b: *ui.Ui, name: Icon, color: ui.Color, size: f32) !ui.Element {
     return ui.controls.icons.element(b, name, color, size);
 }
+
 pub fn iconButtonStyle(c: Palette, selected: bool) ui.Style {
     return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover };
 }
+
 pub fn buttonStyle(c: Palette, primary: bool) ui.Style {
     return .{ .direction = .row, .height = .{ .px = metrics.control }, .gap = 6, .align_items = .center, .justify_content = .center, .padding = .{ .left = 8, .right = 8 }, .radius = metrics.control_radius, .background = if (primary) c.primary else c.element, .hover_background = if (primary) c.primary_hover else c.hover, .text = .{ .size = 12, .color = if (primary) c.on_primary else c.text }, .flex_shrink = 0 };
 }
+
 pub fn inputAppearance(c: Palette) ui.controls.TextInput.Appearance {
     return .{ .background = c.document, .border = c.line, .foreground = c.text, .placeholder = c.muted, .selection = c.selection, .caret = c.accent, .focus_border = c.accent };
 }
+
 pub fn rule(b: *ui.Ui, c: Palette) !ui.Element {
     return b.fluent().div().h(.{ .px = 1 }).shrink_0().background(c.line).children(.{}).build();
 }
+
 pub fn popoverBounds(viewport: ui.Size, anchor: ui.Rect, requested: ui.Size) ui.Rect {
     const inset: f32 = 6;
     const width = @min(requested.width, @max(0, viewport.width - inset * 2));
@@ -46,7 +56,10 @@ pub fn popoverBounds(viewport: ui.Size, anchor: ui.Rect, requested: ui.Size) ui.
 }
 
 pub fn floatingPanel(b: *ui.Ui, c: Palette, size: ui.Size, padding: ui.Insets, gap: f32, children: []const ui.Element) !ui.Element {
-    return b.fluent().div().w(.{ .px = size.width }).h(.{ .px = size.height }).shrink_0().stack().children(.{ b.custom(PanelSurface, .{ .colors = c }, .{ .flex_grow = 1 }), b.fluent().div().padding(padding).gap_px(gap).overflow_hidden().flex_col().children(children) }).build();
+    return b.fluent().div().w(.{ .px = size.width }).h(.{ .px = size.height }).shrink_0().stack().children(.{
+        b.custom(PanelSurface, .{ .colors = c }, .{ .flex_grow = 1 }),
+        b.fluent().div().padding(padding).gap_px(gap).overflow_hidden().flex_col().children(children),
+    }).build();
 }
 const PanelSurface = struct {
     colors: Palette,

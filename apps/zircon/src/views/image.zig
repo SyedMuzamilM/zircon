@@ -25,6 +25,7 @@ pub fn supported(path: []const u8) bool {
     for ([_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff", ".bmp", ".webp" }) |candidate| if (std.ascii.eqlIgnoreCase(extension, candidate)) return true;
     return false;
 }
+
 pub fn element(b: *ui.Ui, image: Image, style: ui.Style) !ui.Element {
     var owned = image.clone();
     errdefer owned.deinit();
@@ -56,6 +57,7 @@ fn zoomElement(b: *ui.Ui, source: Image, zoom: f32, scroll: ui.Point) !ui.Elemen
     errdefer owned.deinit();
     return b.custom(Canvas, .{ .image = owned, .zoom = zoom, .scroll = scroll }, .{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden });
 }
+
 pub fn render(self: *const shell.Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     const asset = self.image orelse return error.NoImage;
@@ -64,12 +66,44 @@ pub fn render(self: *const shell.Shell, b: *ui.Ui) !ui.Element {
     const canvas = try zoomElement(b, asset.image, self.image_zoom, self.image_scroll);
     var path: []const u8 = asset.path;
     if (std.mem.startsWith(u8, path, self.workspace.root_path)) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
-    return b.fluent().div().grow().min_h(.{ .px = 0 }).background(c.document).overflow_hidden().flex_col().children(&.{
-        try b.fluent().div().h(.{ .px = v.metrics.file_header }).shrink_0().gap_px(8).items_center().padding(.{ .left = 13, .right = 7 }).background(c.document).flex().children(.{ b.fluent().adopt(try v.text(b, path, c.muted, 12)).style(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }), v.iconButton(b, c, .image_zoom_out, "Zoom image out", .minus, false), v.actionButton(b, c, .image_zoom_reset, try std.fmt.allocPrint(b.allocator(), "{d:.0}%", .{self.image_zoom * 100}), false), v.iconButton(b, c, .image_zoom_in, "Zoom image in", .plus, false) }).build(),
-        try b.fluent().adopt(canvas).id(.{ .string = "image-canvas" }).listeners(.{ .on_input = b.onInput(onInput) }).build(),
-        try b.fluent().div().h(.{ .px = 22 }).shrink_0().padding(.{ .left = 13 }).items_center().flex().children(.{v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0} × {d:.0} px · {s}", .{ size.width, size.height, std.fs.path.extension(asset.path) }), c.muted, 11)}).build(),
-    }).build();
+    return b.fluent().div()
+        .grow()
+        .min_h(.{ .px = 0 })
+        .background(c.document)
+        .overflow_hidden()
+        .flex_col()
+        .children(&.{
+            try b.fluent().div()
+                .h(.{ .px = v.metrics.file_header })
+                .shrink_0()
+                .gap_px(8)
+                .items_center()
+                .padding(.{ .left = 13, .right = 7 })
+                .background(c.document)
+                .flex()
+                .children(.{
+                    b.fluent().adopt(try v.text(b, path, c.muted, 12))
+                        .style(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }),
+                    v.iconButton(b, c, .image_zoom_out, "Zoom image out", .minus, false),
+                    v.actionButton(b, c, .image_zoom_reset, try std.fmt.allocPrint(b.allocator(), "{d:.0}%", .{self.image_zoom * 100}), false),
+                    v.iconButton(b, c, .image_zoom_in, "Zoom image in", .plus, false),
+                }).build(),
+            try b.fluent().adopt(canvas)
+                .id(.{ .string = "image-canvas" })
+                .listeners(.{ .on_input = b.onInput(onInput) })
+                .build(),
+            try b.fluent().div()
+                .h(.{ .px = 22 })
+                .shrink_0()
+                .padding(.{ .left = 13 })
+                .items_center()
+                .flex()
+                .children(.{
+                    v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0} × {d:.0} px · {s}", .{ size.width, size.height, std.fs.path.extension(asset.path) }), c.muted, 11),
+                }).build(),
+        }).build();
 }
+
 fn onInput(self: *shell.Shell, event: *ui.Event(ui.Input), cx: *ui.Context(shell.Shell)) void {
     if (event.data != .scroll or self.image == null) return;
     const size = self.image.?.image.size();

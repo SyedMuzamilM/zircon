@@ -48,6 +48,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     _ = try cx.spawn(Job, .{ .root = root, .io = self.workspace.io }, complete);
     self.indexing = true;
 }
+
 fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!Result) !void {
     self.indexing = false;
     const found = result catch |err| {
@@ -79,6 +80,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!Result) !void
     if (found.truncated) try self.setStatus(try self.allocator.dupe(u8, "File search indexes the first 20,000 files, up to 32 folders deep."));
     cx.notify();
 }
+
 fn scan(a: std.mem.Allocator, io: std.Io, root: []const u8, relative: []const u8, depth: usize, cancel: *ui.tasks.Cancellation, entries: *std.ArrayList(model.IndexedFile), truncated: *bool) anyerror!void {
     try cancel.check();
     if (depth > 32 or entries.items.len >= 20_000) {
@@ -111,6 +113,7 @@ fn scan(a: std.mem.Allocator, io: std.Io, root: []const u8, relative: []const u8
         }
     }
 }
+
 fn ignored(name: []const u8) bool {
     for ([_][]const u8{ ".git", ".zig-cache", ".tools", "zig-out", "node_modules", ".DS_Store" }) |excluded| if (std.mem.eql(u8, name, excluded)) return true;
     return false;

@@ -9,11 +9,13 @@ const language_lifecycle_tests = @import("language_lifecycle_tests.zig");
 const recovery_tests = @import("recovery_tests.zig");
 const settings_tests = @import("settings_tests.zig");
 const sidebar_tests = @import("sidebar_tests.zig");
+const ui_ownership_tests = @import("ui_ownership_tests.zig");
 const workspace_polish_tests = @import("workspace_polish_tests.zig");
 test {
     _ = recovery_tests;
     _ = agent_tests;
     _ = workspace_polish_tests;
+    _ = ui_ownership_tests;
     _ = experience_tests;
     _ = buffer_controls_tests;
     _ = settings_tests;

@@ -22,9 +22,11 @@ pub fn refresh(self: *Shell, cx: *ui.Context(Shell)) !void {
     }
     cx.notify();
 }
+
 pub fn color(value: ext.Color) ui.Color {
     return .{ .r = @as(f32, @floatFromInt((value.rgba >> 24) & 255)) / 255, .g = @as(f32, @floatFromInt((value.rgba >> 16) & 255)) / 255, .b = @as(f32, @floatFromInt((value.rgba >> 8) & 255)) / 255, .a = @as(f32, @floatFromInt(value.rgba & 255)) / 255 };
 }
+
 pub fn applyTheme(self: *Shell, id: []const u8) void {
     const snapshot = self.extension_snapshot orelse return;
     const contribution = snapshot.resolveTheme(id) orelse return;
@@ -40,6 +42,7 @@ pub fn applyTheme(self: *Shell, id: []const u8) void {
     for (self.tabs.items) |*tab| tab.editor.theme = palette;
     if (self.secondary) |*pane| pane.editor.theme = palette;
 }
+
 pub fn applyLanguage(self: *Shell, state: *editor.Editor, path: []const u8) void {
     const next = if (self.extension_snapshot) |snapshot| snapshot.languageForPath(path) else null;
     const id = if (next) |language| language.id else null;
@@ -54,6 +57,7 @@ pub fn applyLanguage(self: *Shell, state: *editor.Editor, path: []const u8) void
         state.language_profile = .{ .keywords = language.keywords, .line_comment = language.line_comment, .block_comment = if (language.block_comment) |block| .{ .start = block.start, .end = block.end, .nested = block.nested } else null, .string_delimiters = language.string_delimiters };
     }
 }
+
 pub fn install(self: *Shell, cx: *ui.Context(Shell), path: []const u8) !void {
     const registry = if (self.extensions) |*value| value else return error.ExtensionsNotConfigured;
     const manifest = try std.fs.path.join(self.allocator, &.{ path, "extension.json" });
@@ -67,6 +71,7 @@ pub fn install(self: *Shell, cx: *ui.Context(Shell), path: []const u8) !void {
     try refresh(self, cx);
     self.showTool(.extensions);
 }
+
 pub fn installBundled(self: *Shell, cx: *ui.Context(Shell)) !void {
     const registry = if (self.extensions) |*value| value else return error.ExtensionsNotConfigured;
     const directory = try std.fs.path.join(self.allocator, &.{ registry.home, ".bundled-oxide" });

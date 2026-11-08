@@ -48,6 +48,7 @@ pub const Session = struct {
 };
 pub const Picker = enum { none, providers, models, modes, efforts };
 pub const Model = struct {
+    query: ?ui.Entity(ui.controls.TextInput) = null,
     config: ?std.json.Parsed(Config) = null,
     home: ?[]u8 = null,
     config_path: ?[]u8 = null,
@@ -83,6 +84,7 @@ pub fn configure(self: *Shell, _: *ui.Context(Shell), home: []const u8, environm
     self.agents.config_path = path;
     self.agents.environment = environment;
 }
+
 pub fn ensure(self: *Shell) !void {
     if (self.agents.config == null) try reload(self);
     if (self.agents.composer == null) {
@@ -98,6 +100,7 @@ pub fn ensure(self: *Shell) !void {
         try loadHistory(self);
     }
 }
+
 pub fn reload(self: *Shell) !void {
     const bytes = if (self.agents.config_path) |path| std.Io.Dir.cwd().readFileAlloc(self.workspace.io, path, self.allocator, .limited(1024 * 1024)) catch |err| switch (err) {
         error.FileNotFound => null,
@@ -115,10 +118,12 @@ pub fn reload(self: *Shell) !void {
     self.agents.config = next;
     self.agents.provider = @min(self.agents.provider, next.value.providers.len - 1);
 }
+
 pub fn newSession(self: *Shell) !void {
     try ensure(self);
     try createSession(self);
 }
+
 fn createSession(self: *Shell) !void {
     try storeDraft(self);
     if (self.agents.sessions.items.len >= 100) return error.TooManyAgentSessions;
@@ -143,9 +148,11 @@ fn createSession(self: *Shell) !void {
     try resetComposer(self, "");
     self.agents.focus +%= 1;
 }
+
 fn wake(_: ?*anyopaque) void {
     ui.App.wake();
 }
+
 pub fn connect(self: *Shell) !void {
     try ensure(self);
     if (self.agents.current() == null) try newSession(self);
@@ -194,6 +201,7 @@ pub fn connect(self: *Shell) !void {
     };
     return error.AgentProviderRemoved;
 }
+
 pub fn send(self: *Shell, cx: *ui.Context(Shell)) !void {
     try ensure(self);
     const session = self.agents.current() orelse return error.ConnectAgentFirst;
@@ -221,6 +229,7 @@ pub fn send(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.agents.focus +%= 1;
     cx.notify();
 }
+
 pub fn refresh(self: *Shell, session: *Session, force: bool) !void {
     session.preview.colors = self.previewColors();
     if (session.rendered == session.conversation.revision) return;
@@ -265,6 +274,7 @@ pub fn refresh(self: *Shell, session: *Session, force: bool) !void {
     session.rendered = session.conversation.revision;
     session.last_render = now;
 }
+
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     for (self.agents.sessions.items) |session| {
         const old = session.conversation.state;
@@ -288,6 +298,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         }
     }
 }
+
 fn persist(self: *Shell, session: *Session) !void {
     if (session.saved == session.conversation.revision) return;
     const home = self.agents.home orelse return;
@@ -307,6 +318,7 @@ fn persist(self: *Shell, session: *Session) !void {
     try std.Io.Dir.cwd().rename(temp, std.Io.Dir.cwd(), session.path.?, self.workspace.io);
     session.saved = session.conversation.revision;
 }
+
 pub fn editConfig(self: *Shell) !void {
     const path = self.agents.config_path orelse return error.AgentConfigPathUnavailable;
     if (std.Io.Dir.cwd().statFile(self.workspace.io, path, .{})) |_| {} else |err| switch (err) {
@@ -330,6 +342,7 @@ fn resetComposer(self: *Shell, bytes: []const u8) !void {
     if (self.agents.composer) |*old| old.deinit();
     self.agents.composer = .{ .document = document, .editor = state };
 }
+
 fn storeDraft(self: *Shell) !void {
     const session = self.agents.current() orelse return;
     const compose = &(self.agents.composer orelse return);
@@ -339,6 +352,7 @@ fn storeDraft(self: *Shell) !void {
     self.allocator.free(session.draft);
     session.draft = bytes;
 }
+
 pub fn selectSession(self: *Shell, index: usize) !void {
     if (index >= self.agents.sessions.items.len) return;
     try storeDraft(self);
@@ -347,6 +361,7 @@ pub fn selectSession(self: *Shell, index: usize) !void {
     self.agents.picker = .none;
     self.agents.focus +%= 1;
 }
+
 fn loadHistory(self: *Shell) !void {
     const home = self.agents.home orelse return;
     const a = self.allocator;

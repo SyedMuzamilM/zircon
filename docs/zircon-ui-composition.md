@@ -2,6 +2,11 @@
 
 Use `b.fluent()` for application and reusable-control composition. Factories create frame-owned nodes immediately; chains add typed styles, children, entity views and handlers. Finish the root or a dynamic-list item with `.build()`.
 
+For application changes, start with the [UI ownership map](../apps/zircon/src/views/README.md).
+Each feature owns its input definitions and rendering. Shell input initialization
+only assembles feature-owned entity handles; placeholders and feature styling
+belong beside the control's layout.
+
 The application, settings, popovers, terminal chrome, text-input control and examples use this API. Low-level constructors remain inside the framework, custom-element ownership boundaries and API-contract tests.
 
 This render function comes from the [compiled headless counter](../examples/counter/main.zig).

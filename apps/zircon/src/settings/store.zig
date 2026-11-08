@@ -143,6 +143,7 @@ fn read(value: std.json.Value) Values {
     if (value.object.get("vim_bindings")) |bindings| result.vim_bindings = parseVimBindings(bindings) catch .{};
     return result;
 }
+
 fn number(value: std.json.Value) ?f32 {
     return switch (value) {
         .float => |n| if (std.math.isFinite(n) and @abs(n) < std.math.floatMax(f32)) @floatCast(n) else null,
@@ -150,6 +151,7 @@ fn number(value: std.json.Value) ?f32 {
         else => null,
     };
 }
+
 fn parseVimBindings(value: std.json.Value) !zircon_editor.vim.Bindings {
     if (value != .object or value.object.count() > 64) return error.InvalidKeyBindings;
     var result: zircon_editor.vim.Bindings = .{};
@@ -161,6 +163,7 @@ fn parseVimBindings(value: std.json.Value) !zircon_editor.vim.Bindings {
     }
     return result;
 }
+
 fn validate(value: std.json.Value) !void {
     if (value == .object) {
         if (value.object.get("terminal_dock")) |v| if (parseEnum(TerminalDock, v) == null) return error.InvalidSettings;
@@ -201,6 +204,7 @@ fn validate(value: std.json.Value) !void {
         if (v != .string or v.string.len == 0 or v.string.len > 256 or !std.unicode.utf8ValidateSlice(v.string)) return error.InvalidSettings;
     };
 }
+
 fn persist(io: std.Io, path: []const u8, bytes: []const u8) !void {
     const parent = std.fs.path.dirname(path) orelse ".";
     try std.Io.Dir.cwd().createDirPath(io, parent);

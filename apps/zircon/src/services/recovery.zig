@@ -192,10 +192,12 @@ fn restoreView(editor: *editing.Editor, value: text.Snapshot, saved: storage.Vie
     editor.scroll.offset = saved.scroll;
     editor.horizontal = saved.horizontal;
 }
+
 fn view(editor: *const editing.Editor) storage.View {
     const selection = editor.primary();
     return .{ .anchor = selection.anchor, .head = selection.head, .scroll = editor.scroll.offset, .horizontal = editor.horizontal };
 }
+
 fn hashString(hash: *std.hash.Wyhash, value: ?[]const u8) void {
     std.hash.autoHash(hash, value != null);
     if (value) |bytes| {
@@ -203,12 +205,14 @@ fn hashString(hash: *std.hash.Wyhash, value: ?[]const u8) void {
         hash.update(bytes);
     }
 }
+
 fn hashView(hash: *std.hash.Wyhash, value: storage.View) void {
     std.hash.autoHash(hash, value.anchor);
     std.hash.autoHash(hash, value.head);
     std.hash.autoHash(hash, @as(u32, @bitCast(value.scroll)));
     std.hash.autoHash(hash, @as(u32, @bitCast(value.horizontal)));
 }
+
 pub fn fingerprint(self: *const Shell) !u64 {
     var hash = std.hash.Wyhash.init(0);
     inline for (.{ self.active, self.active_pane, self.split_vertical, self.split_reverse, @as(u32, @bitCast(self.split_ratio)), self.tabs.items.len }) |value| std.hash.autoHash(&hash, value);

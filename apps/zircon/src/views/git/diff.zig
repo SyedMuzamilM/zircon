@@ -3,12 +3,12 @@
 const std = @import("std");
 const zircon_git_ui = @import("zircon_git_ui");
 const ui = @import("zircon_ui");
-const commands = @import("../commands.zig");
-const git_editing = @import("../git_editing.zig");
-const shell = @import("../shell.zig");
+const commands = @import("../../commands.zig");
+const git_editing = @import("../../git_editing.zig");
+const shell = @import("../../shell.zig");
+const v = @import("../components.zig");
 const commit_details = @import("commit_details.zig");
-const v = @import("components.zig");
-const controls = @import("git_diff_controls.zig");
+const controls = @import("diff_controls.zig");
 const Shell = shell.Shell;
 const Command = commands.Command;
 
@@ -31,7 +31,13 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         try tools.appendSlice(b.allocator(), &.{ try v.icon(b, .commit, c.muted, 16), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (self.git.stash_view) "Stash" else "Commit", self.git.selected_commit[0..@min(7, self.git.selected_commit.len)] }), c.text, 12) });
     } else if (self.git.selected_path.len > 0 and !self.git.combined) {
         try tools.appendSlice(b.allocator(), &.{ try comparison(b, c, .git_working_diff, "Worktree", !self.git.staged_diff), try comparison(b, c, .git_staged_diff, "Staged", self.git.staged_diff) });
-    } else try tools.append(b.allocator(), try b.fluent().adopt(try v.text(b, if (self.git.combined) "All uncommitted changes · HEAD → worktree" else "Uncommitted changes", c.muted, 12)).style(.{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .overflow = .hidden, .text = .{ .size = 12, .color = c.muted } }).build());
+    } else try tools.append(b.allocator(), try b.fluent().adopt(try v.text(b, if (self.git.combined) "All uncommitted changes · HEAD → worktree" else "Uncommitted changes", c.muted, 12))
+        .style(.{
+            .flex_shrink = 1,
+            .min_width = .{ .px = 0 },
+            .overflow = .hidden,
+            .text = .{ .size = 12, .color = c.muted },
+        }).build());
     try tools.append(b.allocator(), try b.fluent().div().grow().min_w(.{ .px = 0 }).children(.{}).build());
     if (self.git.diff) |diff| {
         var added: usize = 0;
@@ -47,7 +53,16 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         if (self.git.selected_path.len > 0) try tools.appendSlice(b.allocator(), &.{ try action(b, c, .git_stage, "Stage file", "Stage", .plus, labels), try action(b, c, .git_unstage, "Unstage file", "Unstage", .minus, labels), try action(b, c, .git_open_file, "Open file", "Open file", .file, labels) }) else try tools.append(b.allocator(), try action(b, c, .git_stage_all, "Stage all", "Stage all", .plus, true));
     }
     try tools.append(b.allocator(), try v.iconButton(b, c, .back_to_editor, "Editor", .close, false));
-    try rows.append(b.allocator(), try b.fluent().div().h(.{ .px = 38 }).shrink_0().items_center().gap_px(4).padding(.{ .left = 10, .right = 8 }).overflow_hidden().flex().children(tools.items).build());
+    try rows.append(b.allocator(), try b.fluent().div()
+        .h(.{ .px = 38 })
+        .shrink_0()
+        .items_center()
+        .gap_px(4)
+        .padding(.{ .left = 10, .right = 8 })
+        .overflow_hidden()
+        .flex()
+        .children(tools.items)
+        .build());
     if (self.git.selected_commit.len > 0 and !self.git.stash_view) try rows.append(b.allocator(), try commit_details.render(self, b));
     try rows.append(b.allocator(), try v.rule(b, c));
     const Hooks = struct {
@@ -66,25 +81,46 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .theme = self.editor_options.theme,
         .colors = c,
     }).render(b, self, Hooks) else try message(b, c, "Select a changed file or choose View diff.");
-    diff_lines = try b.fluent().adopt(diff_lines).listeners(.{ .on_input = b.onInput(Shell.onGitScroll), .on_capture = b.onInput(capture) }).build();
+    diff_lines = try b.fluent().adopt(diff_lines).listeners(.{
+        .on_input = b.onInput(Shell.onGitScroll),
+        .on_capture = b.onInput(capture),
+    }).build();
     try rows.append(b.allocator(), diff_lines);
-    return b.fluent().div().grow().min_w(.{ .px = 0 }).background(c.document).overflow_hidden().flex_col().children(rows.items).id(.{ .string = "git-diff" }).build();
+    return b.fluent().div()
+        .grow()
+        .min_w(.{ .px = 0 })
+        .background(c.document)
+        .overflow_hidden()
+        .flex_col()
+        .children(rows.items)
+        .id(.{ .string = "git-diff" })
+        .build();
 }
+
 fn action(b: *ui.Ui, c: v.Palette, command: Command, name: []const u8, title: []const u8, icon: v.Icon, label: bool) !ui.Element {
     var children: std.ArrayList(ui.Element) = .empty;
     try children.append(b.allocator(), try v.icon(b, icon, c.muted, 14));
     if (label) try children.append(b.allocator(), try v.text(b, title, c.text, 12));
     var style = v.buttonStyle(c, false);
     style.background = null;
-    return b.fluent().button(.{ .label = name, .children = children.items, .on_click = b.onClickWith(Shell.onCommand, command), .style = style }).build();
+    return b.fluent().button(.{
+        .label = name,
+    }).style(style).on_click(b.onClickWith(Shell.onCommand, command)).children(children.items).build();
 }
+
 fn comparison(b: *ui.Ui, c: v.Palette, command: Command, name: []const u8, selected: bool) !ui.Element {
     var style = v.buttonStyle(c, false);
     style.background = if (selected) c.element else null;
-    return b.fluent().button(.{ .label = name, .on_click = b.onClickWith(Shell.onCommand, command), .style = style }).build();
+    return b.fluent().button(.{
+        .label = name,
+    }).style(style).on_click(b.onClickWith(Shell.onCommand, command)).build();
 }
+
 fn message(b: *ui.Ui, c: v.Palette, bytes: []const u8) !ui.Element {
-    return b.fluent().adopt(try v.text(b, bytes, c.muted, 13)).style(.{ .padding = ui.Insets.all(16), .text = .{ .size = 13, .color = c.muted } }).build();
+    return b.fluent().adopt(try v.text(b, bytes, c.muted, 13)).style(.{
+        .padding = ui.Insets.all(16),
+        .text = .{ .size = 13, .color = c.muted },
+    }).build();
 }
 
 fn capture(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {

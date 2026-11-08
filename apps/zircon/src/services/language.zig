@@ -89,6 +89,7 @@ fn syntaxDocument(self: *Shell, id: ws.DocumentId) !usize {
     try self.language.syntax_documents.append(self.allocator, .{ .id = id });
     return self.language.syntax_documents.items.len - 1;
 }
+
 fn retireUnused(self: *Shell, index: usize) void {
     for (self.language.documents.items) |doc| if (doc.session == index) return;
     const session = &self.language.sessions.items[index];
@@ -97,12 +98,14 @@ fn retireUnused(self: *Shell, index: usize) void {
     session.resolving = false;
     session.retired = true;
 }
+
 fn cancelCompletion(self: *Shell, id: ws.DocumentId) void {
     if (self.language.pending) |pending| if (std.meta.eql(pending.document, id)) {
         if (pending.session < self.language.sessions.items.len) if (self.language.sessions.items[pending.session].client) |client| client.cancel(pending.request) catch {};
         self.language.clearCompletion();
     };
 }
+
 fn closeDocument(self: *Shell, index: usize) !void {
     const doc = &self.language.documents.items[index];
     cancelCompletion(self, doc.id);
@@ -136,9 +139,11 @@ pub fn invalidateDocument(self: *Shell, id: ws.DocumentId) !void {
         if (std.meta.eql(self.language.documents.items[index].id, id)) try closeDocument(self, index) else index += 1;
     }
 }
+
 fn wake(_: ?*anyopaque) void {
     ui.App.wake();
 }
+
 fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const zircon_extensions.Server, scope: ?ws.DocumentId) !usize {
     for (self.language.sessions.items, 0..) |session, index| if (!session.retired and std.meta.eql(session.scope, scope) and std.mem.eql(u8, session.id, server.id)) return index;
     const id = try self.allocator.dupe(u8, server.id);
@@ -287,6 +292,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     };
     if (changed) cx.notify();
 }
+
 pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
     try poll(self, cx);
     const current = try actions.active(self);
@@ -304,6 +310,7 @@ pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
     };
     return error.NoLanguageServer;
 }
+
 pub fn selectDiagnostic(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
     const current = try actions.active(self);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
@@ -320,6 +327,7 @@ pub fn selectDiagnostic(self: *Shell, cx: *ui.Context(Shell), index: usize) !voi
         return;
     };
 }
+
 pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
     const pending = self.language.pending orelse return error.NoCompletion;
     const message = self.language.completions orelse return error.NoCompletion;
@@ -382,6 +390,7 @@ fn resolved(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void
     };
     cx.notify();
 }
+
 fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
     const was_waiting = self.language.syntax_waiting;
     defer if (was_waiting != self.language.syntax_waiting) cx.notify();
@@ -423,6 +432,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         tracked.attempts += 1;
     }
 }
+
 fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
     const box = raw catch |err| {
         try self.reportError(err);
@@ -477,6 +487,7 @@ fn syntaxFailed(self: *Shell, cx: *ui.Context(Shell), tracked: *SyntaxDocument, 
     try pollSyntax(self, cx);
     cx.notify();
 }
+
 fn syntaxTransportFailed(self: *Shell, cx: *ui.Context(Shell), err: anyerror) void {
     const now = if (self.window) |handle| blk: {
         const window = cx.app.window(handle) catch break :blk 0;
@@ -488,6 +499,7 @@ fn syntaxTransportFailed(self: *Shell, cx: *ui.Context(Shell), err: anyerror) vo
     };
     if (!(self.status_is_error and self.status_origin == .general)) self.reportError(err) catch {};
 }
+
 fn clearSyntaxError(self: *Shell, document: ws.DocumentId) void {
     switch (self.status_origin) {
         .general => {},

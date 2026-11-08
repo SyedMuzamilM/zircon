@@ -73,6 +73,7 @@ pub fn clone(self: *Shell, cx: *ui.Context(Shell), source: []const u8, destinati
     try self.setStatus(try self.allocator.dupe(u8, "Cloning repository…"));
     cx.notify();
 }
+
 fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     self.cloning = false;
     const box = result catch |err| {

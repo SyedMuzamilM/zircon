@@ -29,7 +29,7 @@ const Ops = struct {
                 return input.appearance.background.r > 0.8;
             }
         };
-        return cx.read(self.fields.?.project_query, Read.light, .{});
+        return cx.read(self.fields.?.project_search.query, Read.light, .{});
     }
 };
 fn bounds(app: *ui.App, h: ui.WindowHandle, key: []const u8) !ui.Rect {

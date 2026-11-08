@@ -29,7 +29,7 @@ const Ops = struct {
     }
     fn query(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), expected: []const u8) !void {
         var value: []u8 = &.{};
-        try cx.read(self.fields.?.path, ui.controls.TextInput.copy, .{ t.allocator, &value });
+        try cx.read(self.fields.?.git_picker.query, ui.controls.TextInput.copy, .{ t.allocator, &value });
         defer t.allocator.free(value);
         try t.expectEqualStrings(expected, value);
     }

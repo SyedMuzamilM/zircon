@@ -216,9 +216,9 @@ pub const Chain = struct {
         _ = ui.key(key, record.element) catch |err| return self.fail(err);
         return self;
     }
-    pub fn on_click(self: Chain, handler: anyerror!adapter.ClickHandler) Chain {
+    pub fn on_click(self: Chain, handler: ?anyerror!adapter.ClickHandler) Chain {
         const record = self.draft(true) catch |err| return self.fail(err);
-        const callback = handler catch |err| return self.fail(err);
+        const callback = if (handler) |actual| actual catch |err| return self.fail(err) else null;
         const node = &self.factory.ui.frame.nodes.items[record.element.index];
         if (node.kind != .button) return self.fail(error.ClickRequiresButton);
         node.kind.button.on_click = callback;

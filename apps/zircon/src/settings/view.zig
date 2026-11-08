@@ -8,14 +8,99 @@ const errors = @import("../errors.zig");
 const services_extensions = @import("../services/extensions.zig");
 const shell_module = @import("../shell.zig");
 const theme_module = @import("../theme.zig");
-const view_module = @import("../view.zig");
 const v = @import("../views/components.zig");
+const field_input = @import("../views/input.zig");
+const overlays = @import("../views/overlays.zig");
 const model = @import("model.zig");
 const Shell = shell_module.Shell;
-const Category = enum { general, appearance, typography, editor, gutter, keymap, search, panels, project_panel, version_control, languages, accessibility };
-const Change = enum { indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, width_down, width_up, spacing_down, spacing_up, tooltips, delay_down, delay_up, search_case_sensitive, search_whole_word, keymap_json, languages_manager, wrap, vim, lilex, menlo, monaco, plex, system, ui_down, ui_up, height_down, height_up, ligatures, font_down, font_up, tab_two, tab_four, tab_eight, dark, light, automatic, default_icons, motion, numbers, gutters, blame };
+const Category = enum {
+    general,
+    appearance,
+    typography,
+    editor,
+    gutter,
+    keymap,
+    search,
+    panels,
+    project_panel,
+    version_control,
+    languages,
+    accessibility,
+};
+const Change = enum {
+    indent_guides,
+    active_line,
+    fold_controls,
+    project_file_icons,
+    project_folder_icons,
+    width_down,
+    width_up,
+    spacing_down,
+    spacing_up,
+    tooltips,
+    delay_down,
+    delay_up,
+    search_case_sensitive,
+    search_whole_word,
+    keymap_json,
+    languages_manager,
+    wrap,
+    vim,
+    lilex,
+    menlo,
+    monaco,
+    plex,
+    system,
+    ui_down,
+    ui_up,
+    height_down,
+    height_up,
+    ligatures,
+    font_down,
+    font_up,
+    tab_two,
+    tab_four,
+    tab_eight,
+    dark,
+    light,
+    automatic,
+    default_icons,
+    motion,
+    numbers,
+    gutters,
+    blame,
+};
 const Picker = enum { none, theme, icons, code_font, ui_font };
-const Row = enum { wrap, vim, theme, icons, font_family, font, ui_font_family, ui_font_size, line_height, ligatures, tabs, numbers, gutters, blame, motion, indent_guides, active_line, fold_controls, project_file_icons, project_folder_icons, project_panel_width, project_entry_spacing, tooltips, tooltip_delay, search_case_sensitive, search_whole_word, keymap_json, languages_manager };
+const Row = enum {
+    wrap,
+    vim,
+    theme,
+    icons,
+    font_family,
+    font,
+    ui_font_family,
+    ui_font_size,
+    line_height,
+    ligatures,
+    tabs,
+    numbers,
+    gutters,
+    blame,
+    motion,
+    indent_guides,
+    active_line,
+    fold_controls,
+    project_file_icons,
+    project_folder_icons,
+    project_panel_width,
+    project_entry_spacing,
+    tooltips,
+    tooltip_delay,
+    search_case_sensitive,
+    search_whole_word,
+    keymap_json,
+    languages_manager,
+};
 const row_height: f32 = 88;
 pub const View = struct {
     allocator: std.mem.Allocator,
@@ -118,9 +203,18 @@ pub const View = struct {
         var path: ?[]u8 = null;
         try b.watch(self.settings, model.Settings.copyPath, .{ b.allocator(), &path });
         var nav: std.ArrayList(ui.Element) = .empty;
-        try nav.append(b.allocator(), try b.fluent().div().h(.{ .px = 36 }).shrink_0().children(.{}).drag_region().build());
+        try nav.append(b.allocator(), try b.fluent().div()
+            .h(.{ .px = 36 })
+            .shrink_0()
+            .children(.{})
+            .drag_region()
+            .build());
         if (self.query) |handle| {
-            const search = try b.fluent().view(handle).id(.{ .string = "settings-search" }).style(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .min_width = .{ .px = 0 } }).build();
+            const search = try b.fluent().view(handle).id(.{ .string = "settings-search" }).style(.{
+                .height = .{ .px = 30 },
+                .flex_shrink = 0,
+                .min_width = .{ .px = 0 },
+            }).build();
             try nav.append(b.allocator(), try b.fluent().adopt(search).autofocus().build());
         }
         try nav.append(b.allocator(), try b.fluent().div().h(.{ .px = 7 }).shrink_0().children(.{}).build());
@@ -129,24 +223,89 @@ pub const View = struct {
             const parent = parentCategory(category);
             if (parent == null or self.expanded[@backingInt(parent.?)]) {
                 const has_children = category == .appearance or category == .editor or category == .panels;
-                try sections.append(b.allocator(), try b.fluent().button(.{ .label = categoryName(category), .children = &.{ if (has_children) try v.icon(b, if (self.expanded[@backingInt(category)]) .chevron_down else .chevron_right, c.muted, 14) else try b.fluent().div().w(.{ .px = 14 }).shrink_0().children(.{}).build(), try v.text(b, categoryName(category), c.text, 13) }, .on_click = b.onClickWith(select, category), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .gap = 6, .padding = .{ .left = if (parent != null) 22 else 6, .right = 6 }, .align_items = .center, .radius = v.metrics.control_radius, .background = if (self.category == category) c.selected else null, .hover_background = c.hover } }).build());
+                try sections.append(b.allocator(), try b.fluent().button(.{
+                    .label = categoryName(category),
+                })
+                    .flex()
+                    .h(.{ .px = 30 })
+                    .shrink_0()
+                    .gap_px(6)
+                    .padding(.{ .left = if (parent != null) 22 else 6, .right = 6 })
+                    .items_center()
+                    .rounded_px(v.metrics.control_radius)
+                    .background(if (self.category == category) c.selected else null)
+                    .hover_background(c.hover)
+                    .on_click(b.onClickWith(select, category))
+                    .children(&.{
+                        if (has_children) try v.icon(b, if (self.expanded[@backingInt(category)]) .chevron_down else .chevron_right, c.muted, 14) else try b.fluent().div()
+                            .w(.{ .px = 14 })
+                            .shrink_0()
+                            .children(.{})
+                            .build(),
+                        try v.text(b, categoryName(category), c.text, 13),
+                    }).build());
             }
         }
         const nav_height = @as(f32, @floatFromInt(sections.items.len)) * 33;
-        try nav.append(b.allocator(), try b.fluent().div().grow().min_h(.{ .px = 0 }).gap_px(3).scroll_y_px(@min(self.nav_scroll.offset, @max(0, nav_height - @max(0, b.viewport().height - 140)))).overflow_hidden().flex_col().children(sections.items).listeners(.{ .on_input = b.onInputWith(scrollNav, nav_height) }).build());
+        try nav.append(b.allocator(), try b.fluent().div()
+            .grow()
+            .min_h(.{ .px = 0 })
+            .gap_px(3)
+            .scroll_y_px(@min(self.nav_scroll.offset, @max(0, nav_height - @max(0, b.viewport().height - 140))))
+            .overflow_hidden()
+            .flex_col()
+            .children(sections.items)
+            .listeners(.{ .on_input = b.onInputWith(scrollNav, nav_height) })
+            .build());
         try nav.append(b.allocator(), try v.rule(b, c));
         try nav.append(b.allocator(), try v.text(b, "Zircon settings", c.muted, 11));
-        const sidebar = try b.fluent().div().w(.{ .px = 238 }).shrink_0().padding(.{ .left = 12, .right = 12, .bottom = 14 }).gap_px(5).background(c.sidebar).flex_col().children(nav.items).build();
+        const sidebar = try b.fluent().div()
+            .w(.{ .px = 238 })
+            .shrink_0()
+            .padding(.{ .left = 12, .right = 12, .bottom = 14 })
+            .gap_px(5)
+            .background(c.sidebar)
+            .flex_col()
+            .children(nav.items)
+            .build();
         var header_items: std.ArrayList(ui.Element) = .empty;
-        try header_items.appendSlice(b.allocator(), &.{ try b.fluent().adopt(try v.text(b, "User", c.accent, 13)).style(.{ .padding = .{ .left = 7, .right = 7, .top = 4, .bottom = 4 }, .radius = v.metrics.control_radius, .background = c.hover, .text = .{ .size = 13, .color = c.accent } }).build(), try v.text(b, "Settings", c.text, 13), try b.fluent().div().grow().children(.{}).build() });
-        if (path != null and self.workspace != null) try header_items.append(b.allocator(), try b.fluent().button(.{ .label = "Edit in settings.json", .on_click = b.onClick(editJson), .style = choiceStyle(c) }).build());
-        const header = try b.fluent().div().h(.{ .px = 60 }).shrink_0().padding(.{ .left = 32, .right = 30, .top = 13 }).gap_px(8).items_center().background(c.document).flex().children(header_items.items).drag_region().build();
+        try header_items.appendSlice(b.allocator(), &.{ try b.fluent().adopt(try v.text(b, "User", c.accent, 13))
+            .style(.{
+                .padding = .{ .left = 7, .right = 7, .top = 4, .bottom = 4 },
+                .radius = v.metrics.control_radius,
+                .background = c.hover,
+                .text = .{ .size = 13, .color = c.accent },
+            })
+            .build(), try v.text(b, "Settings", c.text, 13), try b.fluent().div()
+            .grow()
+            .children(.{})
+            .build() });
+        if (path != null and self.workspace != null) try header_items.append(b.allocator(), try b.fluent().button(.{
+            .label = "Edit in settings.json",
+        }).style(choiceStyle(c)).on_click(b.onClick(editJson)).build());
+        const header = try b.fluent().div()
+            .h(.{ .px = 60 })
+            .shrink_0()
+            .padding(.{ .left = 32, .right = 30, .top = 13 })
+            .gap_px(8)
+            .items_center()
+            .background(c.document)
+            .flex()
+            .children(header_items.items)
+            .drag_region()
+            .build();
         var rows: std.ArrayList(ui.Element) = .empty;
         const searching = std.mem.trim(u8, query, " \t").len > 0;
-        try rows.append(b.allocator(), try b.fluent().adopt(try v.text(b, if (searching) "Search results" else categoryName(self.category), c.text, 17)).style(.{ .height = .{ .px = 55 }, .padding = .{ .top = 20 }, .flex_shrink = 0, .text = .{ .size = 17, .color = c.text } }).build());
+        try rows.append(b.allocator(), try b.fluent().adopt(try v.text(b, if (searching) "Search results" else categoryName(self.category), c.text, 17))
+            .style(.{
+                .height = .{ .px = 55 },
+                .padding = .{ .top = 20 },
+                .flex_shrink = 0,
+                .text = .{ .size = 17, .color = c.text },
+            }).build());
         var row_count: usize = 0;
         inline for (std.meta.tags(Row)) |entry| {
-            if ((searching or contains(self.category, entry)) and view_module.matches(query, rowSearch(entry))) {
+            if ((searching or contains(self.category, entry)) and overlays.matches(query, rowSearch(entry))) {
                 try rows.append(b.allocator(), try settingRow(self, b, c, values, generation, entry));
                 row_count += 1;
             }
@@ -154,13 +313,39 @@ pub const View = struct {
         if (row_count == 0) try rows.append(b.allocator(), try v.text(b, "No settings match your search.", c.muted, 13));
         if (self.error_value) |err| try rows.append(b.allocator(), try v.text(b, errors.message(err), c.warning, 12));
         const content_height = 55 + @as(f32, @floatFromInt(row_count)) * row_height + 40;
-        const list = try b.fluent().div().grow().min_h(.{ .px = 0 }).padding(.{ .left = 32, .right = 30, .bottom = 24 }).scroll_y_px(@min(self.scroll.offset, @max(0, content_height - @max(1, b.viewport().height - 60)))).overflow_hidden().flex_col().children(rows.items).id(.{ .string = "settings-content" }).listeners(.{ .on_input = b.onInputWith(onScroll, content_height) }).build();
-        const main = try b.fluent().div().grow().min_w(.{ .px = 0 }).background(c.document).overflow_hidden().flex_col().children(.{ header, list }).build();
-        const base = try b.fluent().div().background(c.document).flex().children(&.{ sidebar, try b.fluent().div().w(.{ .px = 1 }).shrink_0().background(c.line).children(.{}).build(), main }).build();
+        const list = try b.fluent().div()
+            .grow()
+            .min_h(.{ .px = 0 })
+            .padding(.{ .left = 32, .right = 30, .bottom = 24 })
+            .scroll_y_px(@min(self.scroll.offset, @max(0, content_height - @max(1, b.viewport().height - 60))))
+            .overflow_hidden()
+            .flex_col()
+            .children(rows.items)
+            .id(.{ .string = "settings-content" })
+            .listeners(.{ .on_input = b.onInputWith(onScroll, content_height) })
+            .build();
+        const main = try b.fluent().div()
+            .grow()
+            .min_w(.{ .px = 0 })
+            .background(c.document)
+            .overflow_hidden()
+            .flex_col()
+            .children(.{ header, list })
+            .build();
+        const base = try b.fluent().div().background(c.document).flex().children(&.{
+            sidebar,
+            try b.fluent().div().w(.{ .px = 1 }).shrink_0().background(c.line).children(.{}).build(),
+            main,
+        }).build();
         var layers: std.ArrayList(ui.Element) = .empty;
         try layers.append(b.allocator(), base);
         if (self.picker != .none) try layers.append(b.allocator(), try pickerView(self, b, c, values, generation));
-        return b.fluent().div().background(c.document).stack().children(layers.items).listeners(.{ .on_capture = b.onInput(onGlobal) }).build();
+        return b.fluent().div()
+            .background(c.document)
+            .stack()
+            .children(layers.items)
+            .listeners(.{ .on_capture = b.onInput(onGlobal) })
+            .build();
     }
     fn select(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), category: Category) void {
         if (category == .appearance or category == .editor or category == .panels) self.expanded[@backingInt(category)] = !self.expanded[@backingInt(category)];
@@ -355,6 +540,7 @@ fn categoryName(category: Category) []const u8 {
         .accessibility => "Accessibility",
     };
 }
+
 fn parentCategory(category: Category) ?Category {
     return switch (category) {
         .typography => .appearance,
@@ -363,6 +549,7 @@ fn parentCategory(category: Category) ?Category {
         else => null,
     };
 }
+
 fn contains(category: Category, row: Row) bool {
     if (category == .general) return true;
     return switch (row) {
@@ -378,6 +565,7 @@ fn contains(category: Category, row: Row) bool {
         .languages_manager => category == .languages,
     };
 }
+
 fn rowSearch(row: Row) []const u8 {
     return switch (row) {
         .theme => "Color theme appearance colors",
@@ -410,14 +598,21 @@ fn rowSearch(row: Row) []const u8 {
         .languages_manager => "Language servers extensions tools",
     };
 }
+
 fn choiceStyle(c: v.Palette) ui.Style {
     var style = v.buttonStyle(c, false);
     style.min_width = .{ .px = 32 };
     return style;
 }
+
 fn changeButton(b: *ui.Ui, c: v.Palette, change: Change, label: []const u8) !ui.Element {
-    return b.fluent().button(.{ .label = label, .children = &.{try v.text(b, if (change == .ui_down or change == .height_down) "−" else if (change == .ui_up or change == .height_up) "+" else label, c.text, 13)}, .on_click = b.onClickWith(View.change, change), .style = choiceStyle(c) }).build();
+    return b.fluent().button(.{
+        .label = label,
+    }).style(choiceStyle(c)).on_click(b.onClickWith(View.change, change)).children(&.{
+        try v.text(b, if (change == .ui_down or change == .height_down) "−" else if (change == .ui_up or change == .height_up) "+" else label, c.text, 13),
+    }).build();
 }
+
 fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snapshot, row: Row) !ui.Element {
     _ = self;
     const title: []const u8 = switch (row) {
@@ -518,7 +713,24 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                     if (generation.resolveIconTheme(values.icon_theme)) |icons| name = icons.name;
                 }
             }
-            try controls.append(b.allocator(), try b.fluent().button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = b.onClickWith(View.openPicker, if (row == .theme) Picker.theme else Picker.icons), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 10, .right = 8 }, .align_items = .center, .justify_content = .space_between, .radius = v.metrics.control_radius, .background = c.sidebar, .hover_background = c.hover } }).build());
+            try controls.append(b.allocator(), try b.fluent().button(.{
+                .label = name,
+            })
+                .flex()
+                .h(.{ .px = 28 })
+                .min_w(.{ .px = 150 })
+                .gap_px(12)
+                .padding(.{ .left = 10, .right = 8 })
+                .items_center()
+                .justify_between()
+                .rounded_px(v.metrics.control_radius)
+                .background(c.sidebar)
+                .hover_background(c.hover)
+                .on_click(b.onClickWith(View.openPicker, if (row == .theme) Picker.theme else Picker.icons))
+                .children(&.{
+                    try v.text(b, name, c.text, 13),
+                    try v.icon(b, .chevron_down, c.muted, 12),
+                }).build());
         },
         .font_family, .ui_font_family => {
             const name: []const u8 = if (row == .font_family and values.editor_font_name.len > 0) values.editor_font_name.slice() else if (row == .ui_font_family and values.interface_font_name.len > 0) values.interface_font_name.slice() else if (row == .font_family) switch (values.font_family) {
@@ -529,19 +741,42 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .plex => "IBM Plex Sans",
                 .system => "System",
             };
-            try controls.append(b.allocator(), try b.fluent().button(.{ .label = name, .children = &.{ try v.text(b, name, c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = b.onClickWith(View.openPicker, if (row == .font_family) Picker.code_font else Picker.ui_font), .style = .{ .direction = .row, .height = .{ .px = 28 }, .min_width = .{ .px = 150 }, .gap = 12, .padding = .{ .left = 8, .right = 8 }, .align_items = .center, .justify_content = .space_between, .background = c.element, .hover_background = c.hover, .radius = v.metrics.control_radius } }).build());
+            try controls.append(b.allocator(), try b.fluent().button(.{
+                .label = name,
+            })
+                .flex()
+                .h(.{ .px = 28 })
+                .min_w(.{ .px = 150 })
+                .gap_px(12)
+                .padding(.{ .left = 8, .right = 8 })
+                .items_center()
+                .justify_between()
+                .background(c.element)
+                .hover_background(c.hover)
+                .rounded_px(v.metrics.control_radius)
+                .on_click(b.onClickWith(View.openPicker, if (row == .font_family) Picker.code_font else Picker.ui_font))
+                .children(&.{
+                    try v.text(b, name, c.text, 13),
+                    try v.icon(b, .chevron_down, c.muted, 12),
+                }).build());
         },
         .ui_font_size, .line_height => {
             const is_ui = row == .ui_font_size;
             const number = if (is_ui) try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{values.ui_font_size}) else try std.fmt.allocPrint(b.allocator(), "{d:.1}", .{values.line_height});
             try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, if (is_ui) .ui_down else .height_down, if (is_ui) "Decrease interface font size" else "Decrease line height"), try v.text(b, number, c.text, 13), try changeButton(b, c, if (is_ui) .ui_up else .height_up, if (is_ui) "Increase interface font size" else "Increase line height") });
         },
-        .font => try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, .font_down, "−"), try b.fluent().adopt(try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{values.font_size}), c.text, 13)).style(.{ .min_width = .{ .px = 32 }, .text = .{ .size = 13, .color = c.text } }).build(), try changeButton(b, c, .font_up, "+") }),
+        .font => try controls.appendSlice(b.allocator(), &.{ try changeButton(b, c, .font_down, "−"), try b.fluent().adopt(try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{values.font_size}), c.text, 13))
+            .style(.{
+                .min_width = .{ .px = 32 },
+                .text = .{ .size = 13, .color = c.text },
+            }).build(), try changeButton(b, c, .font_up, "+") }),
         .tabs => {
             inline for (.{ .{ Change.tab_two, "2", 2 }, .{ Change.tab_four, "4", 4 }, .{ Change.tab_eight, "8", 8 } }) |choice| {
                 var style = choiceStyle(c);
                 if (values.tab_width == choice[2]) style.background = c.selected;
-                try controls.append(b.allocator(), try b.fluent().button(.{ .label = choice[1], .on_click = b.onClickWith(View.change, choice[0]), .style = style }).build());
+                try controls.append(b.allocator(), try b.fluent().button(.{
+                    .label = choice[1],
+                }).style(style).on_click(b.onClickWith(View.change, choice[0])).build());
             }
         },
         .wrap, .vim, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word => {
@@ -579,11 +814,38 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 .blame => .blame,
                 else => .motion,
             };
-            try controls.append(b.allocator(), try b.fluent().button(.{ .label = title, .children = &.{try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 })}, .on_click = b.onClickWith(View.change, change), .style = .{ .width = .{ .px = 38 }, .height = .{ .px = 28 }, .align_items = .center, .justify_content = .center, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 0 } }).build());
+            try controls.append(b.allocator(), try b.fluent().button(.{
+                .label = title,
+            })
+                .w(.{ .px = 38 })
+                .h(.{ .px = 28 })
+                .items_center()
+                .justify_center()
+                .rounded_px(v.metrics.control_radius)
+                .hover_background(c.hover)
+                .shrink_0()
+                .on_click(b.onClickWith(View.change, change))
+                .children(&.{
+                    try b.custom(Switch, .{ .enabled = enabled, .colors = c }, .{ .width = .{ .px = 30 }, .height = .{ .px = 18 }, .flex_shrink = 0 }),
+                }).build());
         },
     }
-    return b.fluent().div().h(.{ .px = row_height }).shrink_0().flex_col().children(&.{ try b.fluent().div().grow().gap_px(18).items_center().flex().children(&.{ try b.fluent().div().grow().min_w(.{ .px = 0 }).gap_px(7).overflow_hidden().flex_col().children(.{ v.text(b, title, c.text, 14), v.text(b, help, c.muted, 12) }).build(), try b.fluent().div().gap_px(4).items_center().shrink_0().flex().children(controls.items).build() }).build(), try v.rule(b, c) }).id(.{ .string = @tagName(row) }).build();
+    return b.fluent().div().h(.{ .px = row_height }).shrink_0().flex_col().children(&.{
+        try b.fluent().div().grow().gap_px(18).items_center().flex().children(&.{
+            try b.fluent().div()
+                .grow()
+                .min_w(.{ .px = 0 })
+                .gap_px(7)
+                .overflow_hidden()
+                .flex_col()
+                .children(.{ v.text(b, title, c.text, 14), v.text(b, help, c.muted, 12) })
+                .build(),
+            try b.fluent().div().gap_px(4).items_center().shrink_0().flex().children(controls.items).build(),
+        }).build(),
+        try v.rule(b, c),
+    }).id(.{ .string = @tagName(row) }).build();
 }
+
 fn resetChoice(input: *ui.controls.TextInput, cx: *ui.Context(ui.controls.TextInput)) void {
     input.bytes.clearRetainingCapacity();
     input.cursor = 0;
@@ -602,7 +864,7 @@ fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, q
         .ui_font => &.{ .{ .name = "IBM Plex Sans", .patch = .{ .ui_font_family = .plex } }, .{ .name = "System", .patch = .{ .ui_font_family = .system } } },
         .none => &.{},
     };
-    for (fixed) |choice| if (view_module.matches(query, choice.name)) try choices.append(a, choice);
+    for (fixed) |choice| if (overlays.matches(query, choice.name)) try choices.append(a, choice);
     if (picker == .code_font or picker == .ui_font) for (families) |family| {
         const name = family.slice();
         var duplicate = false;
@@ -610,22 +872,23 @@ fn choiceList(a: std.mem.Allocator, picker: Picker, generation: ?ext.Snapshot, q
             duplicate = true;
             break;
         };
-        if (!duplicate and view_module.matches(query, name)) try choices.append(a, .{ .name = try a.dupe(u8, name), .patch = if (picker == .code_font) .{ .editor_font_name = family } else .{ .interface_font_name = family } });
+        if (!duplicate and overlays.matches(query, name)) try choices.append(a, .{ .name = try a.dupe(u8, name), .patch = if (picker == .code_font) .{ .editor_font_name = family } else .{ .interface_font_name = family } });
     };
     if (generation) |snapshot| for (snapshot.installed()) |entry| {
         if (!entry.enabled) continue;
         if (picker == .theme) {
             for (entry.themes) |theme| {
-                if (view_module.matches(query, theme.name)) try choices.append(a, .{ .name = theme.name, .patch = .{ .theme = theme.id } });
+                if (overlays.matches(query, theme.name)) try choices.append(a, .{ .name = theme.name, .patch = .{ .theme = theme.id } });
             }
         } else if (picker == .icons) {
             for (entry.icon_themes) |icons| {
-                if (view_module.matches(query, icons.name)) try choices.append(a, .{ .name = icons.name, .patch = .{ .icon_theme = icons.id } });
+                if (overlays.matches(query, icons.name)) try choices.append(a, .{ .name = icons.name, .patch = .{ .icon_theme = icons.id } });
             }
         }
     };
     return choices.toOwnedSlice(a);
 }
+
 fn selectedChoice(values: model.Values, patch: model.Patch) bool {
     return switch (patch) {
         .theme => |id| std.mem.eql(u8, id, values.theme),
@@ -650,32 +913,74 @@ fn choose(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), target: Ch
     const choices = try choiceList(arena.allocator(), self.picker, generation, query, self.font_families);
     if (target.index < choices.len) try self.apply(cx, choices[target.index].patch);
 }
+
 fn pickerView(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, generation: ?ext.Snapshot) !ui.Element {
-    const query = if (self.choice_query) |handle| try view_module.fieldText(b, handle) else "";
+    const query = if (self.choice_query) |handle| try field_input.text(b, handle) else "";
     const choices = try choiceList(b.allocator(), self.picker, generation, query, self.font_families);
     const total = @as(f32, @floatFromInt(@max(1, choices.len))) * 32;
     const height = @min(total, @max(32, @min(224, b.viewport().height - 78)));
     const offset = @min(self.picker_scroll.offset, @max(0, total - height));
     const visible = try ui.controls.visibleRows(choices.len, 32, offset, height, 1);
     var rows: std.ArrayList(ui.Element) = .empty;
-    if (visible.start > 0) try rows.append(b.allocator(), try b.fluent().div().h(.{ .px = @as(f32, @floatFromInt(visible.start)) * 32 }).shrink_0().children(.{}).build());
+    if (visible.start > 0) try rows.append(b.allocator(), try b.fluent().div()
+        .h(.{ .px = @as(f32, @floatFromInt(visible.start)) * 32 })
+        .shrink_0()
+        .children(.{})
+        .build());
     for (choices[visible.start..visible.end], visible.start..) |choice, i| {
         const current = selectedChoice(values, choice.patch);
         var style = v.buttonStyle(c, false);
         style.height = .{ .px = 32 };
         style.justify_content = .start;
         style.background = if (i == self.choice_index) c.selected else null;
-        try rows.append(b.allocator(), try b.fluent().button(.{ .label = choice.name, .children = &.{ try b.fluent().div().w(.{ .px = 16 }).shrink_0().justify_center().children(if (current) &.{try v.icon(b, .check, c.accent, 14)} else &.{}).build(), try v.text(b, choice.name, c.text, 13) }, .on_click = b.onClickWith(choose, ChoiceTarget{ .index = @intCast(i), .picker = self.picker }), .style = style }).build());
+        try rows.append(b.allocator(), try b.fluent().button(.{
+            .label = choice.name,
+        })
+            .style(style)
+            .on_click(b.onClickWith(choose, ChoiceTarget{ .index = @intCast(i), .picker = self.picker }))
+            .children(&.{
+                try b.fluent().div()
+                    .w(.{ .px = 16 })
+                    .shrink_0()
+                    .justify_center()
+                    .children(if (current) &.{try v.icon(b, .check, c.accent, 14)} else &.{})
+                    .build(),
+                try v.text(b, choice.name, c.text, 13),
+            }).build());
     }
-    if (visible.end < choices.len) try rows.append(b.allocator(), try b.fluent().div().h(.{ .px = @as(f32, @floatFromInt(choices.len - visible.end)) * 32 }).shrink_0().children(.{}).build());
+    if (visible.end < choices.len) try rows.append(b.allocator(), try b.fluent().div()
+        .h(.{ .px = @as(f32, @floatFromInt(choices.len - visible.end)) * 32 })
+        .shrink_0()
+        .children(.{})
+        .build());
     if (choices.len == 0) try rows.append(b.allocator(), try v.text(b, "No matching choices", c.muted, 12));
-    const list = try b.fluent().div().h(.{ .px = height }).min_h(.{ .px = 0 }).scroll_y_px(offset).overflow_hidden().flex_col().children(rows.items).listeners(.{ .on_input = b.onInputWith(View.scrollPicker, total) }).build();
+    const list = try b.fluent().div()
+        .h(.{ .px = height })
+        .min_h(.{ .px = 0 })
+        .scroll_y_px(offset)
+        .overflow_hidden()
+        .flex_col()
+        .children(rows.items)
+        .listeners(.{ .on_input = b.onInputWith(View.scrollPicker, total) })
+        .build();
     var children: std.ArrayList(ui.Element) = .empty;
-    if (self.choice_query) |handle| try children.append(b.allocator(), try b.fluent().view(handle).id(.{ .string = "settings-choice-query" }).autofocus().build());
+    if (self.choice_query) |handle| try children.append(b.allocator(), try b.fluent().view(handle)
+        .id(.{ .string = "settings-choice-query" })
+        .autofocus()
+        .build());
     try children.appendSlice(b.allocator(), &.{ try v.rule(b, c), list });
     const placement = v.popoverBounds(b.viewport(), self.picker_anchor, .{ .width = 264, .height = height + 54 });
-    const popup = try b.fluent().adopt(try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(6), 6, children.items)).id(.{ .string = "settings-choices" }).build();
-    return b.fluent().div().items(.start).padding(.{ .top = placement.y, .left = placement.x }).stack().children(.{popup}).listeners(.{ .on_input = b.onInput(View.closePicker) }).modal().build();
+    const popup = try b.fluent().adopt(try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(6), 6, children.items))
+        .id(.{ .string = "settings-choices" })
+        .build();
+    return b.fluent().div()
+        .items(.start)
+        .padding(.{ .top = placement.y, .left = placement.x })
+        .stack()
+        .children(.{popup})
+        .listeners(.{ .on_input = b.onInput(View.closePicker) })
+        .modal()
+        .build();
 }
 const Switch = struct {
     enabled: bool,

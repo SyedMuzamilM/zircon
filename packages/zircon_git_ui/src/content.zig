@@ -69,11 +69,16 @@ pub const Content = struct {
                             } else {
                                 const left = if (code.old) |at| try self.line(b, host, Hooks, lines[at], file.path, if (code.new) |n| lines[n].text else null, false) else try self.blank(b);
                                 const right = if (code.new) |at| try self.line(b, host, Hooks, lines[at], file.path, if (code.old) |n| lines[n].text else null, true) else try self.blank(b);
-                                try elements.append(b.allocator(), try b.fluent().row().h_px(self.line_height).shrink_0().children(.{
-                                    b.fluent().adopt(left).w(.{ .percent = 50 }).min_w_px(0).shrink_0(),
-                                    b.fluent().div().w_px(1).shrink_0().background(self.colors.line),
-                                    b.fluent().adopt(right).grow().min_w_px(0).shrink_by(1),
-                                }).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-split:{s}:{d}:{d}", .{ file.path, code.hunk, row.code_before }) }).build());
+                                try elements.append(b.allocator(), try b.fluent().row()
+                                    .h_px(self.line_height)
+                                    .shrink_0()
+                                    .children(.{
+                                        b.fluent().adopt(left).w(.{ .percent = 50 }).min_w_px(0).shrink_0(),
+                                        b.fluent().div().w_px(1).shrink_0().background(self.colors.line),
+                                        b.fluent().adopt(right).grow().min_w_px(0).shrink_by(1),
+                                    })
+                                    .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-split:{s}:{d}:{d}", .{ file.path, code.hunk, row.code_before }) })
+                                    .build());
                             }
                         },
                     }
@@ -91,11 +96,27 @@ pub const Content = struct {
                 try elements.append(b.allocator(), try self.line(b, host, Hooks, .{ .kind = .metadata, .text = bytes }, "", null, false));
             }
         }
-        if (self.diff.text.len == 0) try elements.append(b.allocator(), try b.fluent().adopt(try widgets.text(b, "No uncommitted changes", self.colors.muted, 13)).padding(ui.Insets.all(16)).build());
-        return b.fluent().column().grow().min_h_px(0).scroll_y_px(if (first) |origin| @max(0, self.scroll - origin) else 0).overflow_hidden().children(elements.items).id(.{ .string = "git-diff-lines" }).build();
+        if (self.diff.text.len == 0) try elements.append(b.allocator(), try b.fluent().adopt(try widgets.text(b, "No uncommitted changes", self.colors.muted, 13))
+            .padding(ui.Insets.all(16))
+            .build());
+        return b.fluent().column()
+            .grow()
+            .min_h_px(0)
+            .scroll_y_px(if (first) |origin| @max(0, self.scroll - origin) else 0)
+            .overflow_hidden()
+            .children(elements.items)
+            .id(.{ .string = "git-diff-lines" })
+            .build();
     }
     fn hunkHeader(self: Content, b: *ui.Ui, label: []const u8) !ui.Element {
-        return b.fluent().row().h_px(layout.context_height).shrink_0().items_center().padding(.{ .left = 76 }).background(self.colors.sidebar).children(.{widgets.text(b, label, self.colors.muted, 11)}).build();
+        return b.fluent().row()
+            .h_px(layout.context_height)
+            .shrink_0()
+            .items_center()
+            .padding(.{ .left = 76 })
+            .background(self.colors.sidebar)
+            .children(.{widgets.text(b, label, self.colors.muted, 11)})
+            .build();
     }
     fn blank(self: Content, b: *ui.Ui) !ui.Element {
         return b.fluent().div().h_px(self.line_height).shrink_0().background(self.colors.sidebar).build();
@@ -117,17 +138,32 @@ pub const Content = struct {
             ranges = &highlights;
         }
         const code = try editor.code_line.element(b, original.text, path, self.font, self.line_height, self.theme, ranges);
-        const row = try b.fluent().row().h_px(self.line_height).shrink_0().items(.stretch).background(if (changed) fill else null).overflow_hidden().children(.{
-            b.fluent().div().w_px(5).background(if (changed) tint else null).shrink_0(),
-            b.fluent().column().w_px(35).shrink_0().justify_center().items(.end).child(b.fluent().text(number).text_size(12).style(.{ .text = .{ .size = 12, .color = tint, .mono = true } })),
-            b.fluent().div().w_px(1).shrink_0().background(c.border_subtle),
-            b.fluent().div().w_px(35).shrink_0(),
-            code,
-        }).build();
+        const row = try b.fluent().row()
+            .h_px(self.line_height)
+            .shrink_0()
+            .items(.stretch)
+            .background(if (changed) fill else null)
+            .overflow_hidden()
+            .children(.{
+                b.fluent().div().w_px(5).background(if (changed) tint else null).shrink_0(),
+                b.fluent().column()
+                    .w_px(35)
+                    .shrink_0()
+                    .justify_center()
+                    .items(.end)
+                    .child(b.fluent().text(number)
+                    .text_size(12)
+                    .style(.{ .text = .{ .size = 12, .color = tint, .mono = true } })),
+                b.fluent().div().w_px(1).shrink_0().background(c.border_subtle),
+                b.fluent().div().w_px(35).shrink_0(),
+                code,
+            }).build();
         var value = original;
         if (!live) value.new_line = null;
         const result = try Hooks.liveRow(host, b, value, path, row);
-        if (value.new_line) |n| return b.fluent().adopt(result).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-live:{s}:{d}", .{ path, n }) }).build();
+        if (value.new_line) |n| return b.fluent().adopt(result)
+            .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-live:{s}:{d}", .{ path, n }) })
+            .build();
         return result;
     }
 };

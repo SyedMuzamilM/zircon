@@ -2,9 +2,21 @@
 import unittest
 from migrate_fluent import migrate
 from hoist_zig_imports import hoist
+from fluent_layout import migrate as layout
 
 
 class MigrationTests(unittest.TestCase):
+    def test_button_layout_preserves_optional_handlers_and_literals(self):
+        source = '''// .button(.{ .children = "ignore" })
+const value = b.fluent().button(.{ .label = "Run", .style = .{ .height = .{ .px = 30 } }, .children = &.{item}, .on_click = if (busy) null else try b.onClick(run) }).build();
+'''
+        result = layout(source)
+        self.assertIn('// .button(.{ .children = "ignore" })', result)
+        self.assertIn('.on_click = if (busy) null else try b.onClick(run)', result)
+        self.assertIn('.children(&.{item})', result)
+        self.assertIn('.h(', result)
+        self.assertEqual(result, layout(result))
+
     def test_fluent_nested_calls_skip_comments_and_strings(self):
         source = '''// b.text("leave this alone")
 const literal = "b.row(.{}, .{})";

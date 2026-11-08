@@ -2,7 +2,6 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const shell = @import("../../shell.zig");
-const view = @import("../../view.zig");
 const v = @import("../components.zig");
 const panel = @import("panel.zig");
 const Shell = shell.Shell;

@@ -97,6 +97,7 @@ fn runInput(io: std.Io, argv: []const []const u8, input: []const u8) !Result {
     errdefer a.free(stdout);
     return .{ .stamp = .{}, .success = term.success(), .stdout = stdout, .stderr = try reader.toOwnedSlice(1) };
 }
+
 pub fn executable(self: *Shell) ![]u8 {
     if (self.extension_host_path) |path| return a.dupe(u8, path);
     const exe = try std.process.executablePathAlloc(self.workspace.io, a);
@@ -106,6 +107,7 @@ pub fn executable(self: *Shell) ![]u8 {
     if (builtin.is_test) return std.Io.Dir.cwd().realPathFileAlloc(self.workspace.io, "tools/zed-extension-host/target/release/zircon-extension-host", a);
     return error.ExtensionHostUnavailable;
 }
+
 pub fn start(self: *Shell, cx: *ui.Context(Shell), args: []const []const u8, input: ?[]const u8, stamp: Stamp, comptime callback: anytype) !void {
     var job: Job = .{ .io = self.workspace.io, .argv = try a.alloc([]const u8, args.len + 1), .input = null, .stamp = stamp };
     var count: usize = 0;

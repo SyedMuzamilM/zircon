@@ -15,16 +15,68 @@ pub fn titlebar(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     var items: std.ArrayList(ui.Element) = .empty;
     try items.append(b.allocator(), try b.fluent().div().w(.{ .px = 70 }).shrink_0().children(.{}).build());
-    try items.append(b.allocator(), try b.fluent().button(.{ .label = "Open", .children = &.{ try v.text(b, std.fs.path.basename(self.workspace.root_path), c.text, 13), try v.icon(b, .chevron_down, c.muted, 12) }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.recent_projects), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 6, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .viewport_width = 40 }, .overflow = .hidden } }).build());
-    if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.fluent().button(.{ .label = "Branches and stashes", .children = &.{ try v.icon(b, .branch, c.muted, 14), try v.text(b, status.branch, c.muted, 12) }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.git_branches), .style = .{ .direction = .row, .height = .{ .px = 28 }, .gap = 5, .align_items = .center, .padding = .{ .left = 5, .right = 5 }, .radius = v.metrics.control_radius, .hover_background = c.hover, .flex_shrink = 1, .overflow = .hidden } }).build());
+    try items.append(b.allocator(), try b.fluent().button(.{
+        .label = "Open",
+    })
+        .flex()
+        .h(.{ .px = 28 })
+        .gap_px(6)
+        .items_center()
+        .padding(.{ .left = 5, .right = 5 })
+        .rounded_px(v.metrics.control_radius)
+        .hover_background(c.hover)
+        .shrink_by(1)
+        .min_w(.{ .px = 0 })
+        .max_w(.{ .viewport_width = 40 })
+        .overflow_hidden()
+        .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.recent_projects))
+        .children(&.{
+            try v.text(b, std.fs.path.basename(self.workspace.root_path), c.text, 13),
+            try v.icon(b, .chevron_down, c.muted, 12),
+        }).build());
+    if (self.git.status) |status| if (status.branch.len > 0) try items.append(b.allocator(), try b.fluent().button(.{
+        .label = "Branches and stashes",
+    })
+        .flex()
+        .h(.{ .px = 28 })
+        .gap_px(5)
+        .items_center()
+        .padding(.{ .left = 5, .right = 5 })
+        .rounded_px(v.metrics.control_radius)
+        .hover_background(c.hover)
+        .shrink_by(1)
+        .overflow_hidden()
+        .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.git_branches))
+        .children(&.{
+            try v.icon(b, .branch, c.muted, 14),
+            try v.text(b, status.branch, c.muted, 12),
+        }).build());
     try items.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
     try items.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .quick_open, "Go to file", .search, false), try v.iconButton(b, c, .workspace_menu, "Workspace menu", .more, self.menu_open) });
-    const row = try b.fluent().div().h(.{ .px = v.metrics.titlebar - 1 }).shrink_0().items_center().gap_px(6).padding(.{ .left = 8, .right = 8 }).background(c.chrome).flex().children(items.items).id(.{ .string = "toolbar" }).drag_region().build();
-    return b.fluent().div().h(.{ .px = v.metrics.titlebar }).shrink_0().flex_col().children(.{ row, v.rule(b, c) }).build();
+    const row = try b.fluent().div()
+        .h(.{ .px = v.metrics.titlebar - 1 })
+        .shrink_0()
+        .items_center()
+        .gap_px(6)
+        .padding(.{ .left = 8, .right = 8 })
+        .background(c.chrome)
+        .flex()
+        .children(items.items)
+        .id(.{ .string = "toolbar" })
+        .drag_region()
+        .build();
+    return b.fluent().div()
+        .h(.{ .px = v.metrics.titlebar })
+        .shrink_0()
+        .flex_col()
+        .children(.{ row, v.rule(b, c) })
+        .build();
 }
+
 pub fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     return tabsForPane(self, b, width, 0);
 }
+
 pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Element {
     const c = self.colors;
     var indices: std.ArrayList(usize) = .empty;
@@ -53,10 +105,66 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
         const selected = (if (pane == 0) index == self.active else self.secondary != null and std.meta.eql(self.secondary.?.document, tab.document)) and active_tool == null and (pane == 1 or self.panel == .editor or self.panel == .markdown);
         const background = if (selected) c.document else c.tab_bar;
         const accessible = try std.fmt.allocPrint(b.allocator(), "{s}{s}", .{ record.title(), if (record.dirty()) " •" else "" });
-        const title = try b.fluent().button(.{ .label = accessible, .tooltip = record.path orelse record.title(), .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{ try v.fileGlyph(self, b, record.path orelse record.title(), false, false, 14), try v.text(b, record.title(), if (selected) c.text else c.muted, 13) }, .on_click = b.onClickWith(Shell.onTab, @as(u32, @intCast(index)) | mask), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .gap = 7, .align_items = .center, .padding = .{ .left = 11, .right = 6 }, .hover_background = null, .overflow = .hidden } }).listeners(.{ .on_input = b.onInputWith(Shell.onTabDrag, panes.DragTarget{ .document = tab.document, .pane = pane }) }).build();
-        const close = try b.fluent().button(.{ .label = "Close tab", .tooltip = "Close tab", .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{if (record.dirty()) try b.fluent().div().w(.{ .px = 5 }).h(.{ .px = 5 }).rounded_px(v.metrics.control_radius).background(c.muted).children(.{}).build() else try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(Shell.onCloseTab, @as(u32, @intCast(index)) | mask), .style = .{ .width = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }).id(.{ .string = "close" }).build();
+        const title = try b.fluent().button(.{
+            .label = accessible,
+            .tooltip = record.path orelse record.title(),
+            .tooltip_colors = .{ c.panel, c.text, c.line },
+        })
+            .flex()
+            .grow()
+            .min_w(.{ .px = 0 })
+            .gap_px(7)
+            .items_center()
+            .padding(.{ .left = 11, .right = 6 })
+            .hover_background(null)
+            .overflow_hidden()
+            .on_click(b.onClickWith(Shell.onTab, @as(u32, @intCast(index)) | mask))
+            .children(&.{
+                try v.fileGlyph(self, b, record.path orelse record.title(), false, false, 14),
+                try v.text(b, record.title(), if (selected) c.text else c.muted, 13),
+            }).listeners(.{
+                .on_input = b.onInputWith(Shell.onTabDrag, panes.DragTarget{ .document = tab.document, .pane = pane }),
+            }).build();
+        const close = try b.fluent().button(.{
+            .label = "Close tab",
+            .tooltip = "Close tab",
+            .tooltip_colors = .{ c.panel, c.text, c.line },
+        })
+            .w(.{ .px = 24 })
+            .shrink_0()
+            .items_center()
+            .justify_center()
+            .hover_background(c.hover)
+            .on_click(b.onClickWith(Shell.onCloseTab, @as(u32, @intCast(index)) | mask))
+            .children(&.{
+                if (record.dirty()) try b.fluent().div()
+                    .w(.{ .px = 5 })
+                    .h(.{ .px = 5 })
+                    .rounded_px(v.metrics.control_radius)
+                    .background(c.muted)
+                    .children(.{})
+                    .build() else try v.icon(b, .close, c.muted, 12),
+            }).id(.{ .string = "close" }).build();
         const measured = @min(@as(f32, 174), @max(@as(f32, 110), @as(f32, @floatFromInt(record.title().len)) * 7.2 + 57));
-        try items.append(b.allocator(), try b.fluent().div().w(.{ .px = measured }).min_w(.{ .px = 90 }).shrink_by(1).background(background).flex_col().children(&.{ try b.fluent().div().grow().flex().children(&.{ title, close, try b.fluent().div().w(.{ .px = 1 }).shrink_0().background(c.line).children(.{}).build() }).build(), try b.fluent().div().h(.{ .px = 1 }).background(if (selected) c.document else c.line).shrink_0().children(.{}).build() }).id(.{ .number = panes.key(tab.document) }).build());
+        try items.append(b.allocator(), try b.fluent().div()
+            .w(.{ .px = measured })
+            .min_w(.{ .px = 90 })
+            .shrink_by(1)
+            .background(background)
+            .flex_col()
+            .children(&.{
+                try b.fluent().div().grow().flex().children(&.{
+                    title,
+                    close,
+                    try b.fluent().div().w(.{ .px = 1 }).shrink_0().background(c.line).children(.{}).build(),
+                }).build(),
+                try b.fluent().div()
+                    .h(.{ .px = 1 })
+                    .background(if (selected) c.document else c.line)
+                    .shrink_0()
+                    .children(.{})
+                    .build(),
+            }).id(.{ .number = panes.key(tab.document) }).build());
     }
     var shown_tools: usize = 0;
     inline for (.{ Shell.Tool.search, Shell.Tool.git_diff, Shell.Tool.extensions }) |tool| {
@@ -78,34 +186,160 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
                 .git_diff => .branch,
                 .extensions => .extension,
             };
-            const title = try b.fluent().button(.{ .label = name, .children = &.{ try v.icon(b, glyph, if (selected) c.accent else c.muted, 14), try b.fluent().adopt(try v.text(b, name, if (selected) c.text else c.muted, 13)).style(.{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 13, .color = if (selected) c.text else c.muted }, .overflow = .hidden }).build() }, .on_click = b.onClickWith(Shell.onToolTab, Shell.ToolTab{ .tool = tool, .pane = pane }), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .gap = 7, .padding = .{ .left = 10 }, .hover_background = null, .overflow = .hidden } }).build();
+            const title = try b.fluent().button(.{
+                .label = name,
+            })
+                .flex()
+                .grow()
+                .min_w(.{ .px = 0 })
+                .items_center()
+                .gap_px(7)
+                .padding(.{ .left = 10 })
+                .hover_background(null)
+                .overflow_hidden()
+                .on_click(b.onClickWith(Shell.onToolTab, Shell.ToolTab{ .tool = tool, .pane = pane }))
+                .children(&.{
+                    try v.icon(b, glyph, if (selected) c.accent else c.muted, 14),
+                    try b.fluent().adopt(try v.text(b, name, if (selected) c.text else c.muted, 13)).style(.{
+                        .flex_shrink = 1,
+                        .min_width = .{ .px = 0 },
+                        .text = .{ .size = 13, .color = if (selected) c.text else c.muted },
+                        .overflow = .hidden,
+                    }).build(),
+                }).build();
             var close_style = v.iconButtonStyle(c, false);
             close_style.width = .{ .px = 22 };
-            const close = try b.fluent().button(.{ .label = "Close view", .tooltip = "Close view", .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(Shell.onCloseTool, Shell.ToolTab{ .tool = tool, .pane = pane }), .style = close_style }).build();
-            try items.append(b.allocator(), try b.fluent().div().h(.{ .px = v.metrics.tabs }).min_w(.{ .px = if (selected) @as(f32, 100) else 60 }).max_w(.{ .px = 210 }).shrink_by(1).grow_by(0).background(if (selected) c.document else c.tab_bar).items_center().flex().children(.{ title, close }).id(.{ .string = @tagName(tool) }).build());
+            const close = try b.fluent().button(.{
+                .label = "Close view",
+                .tooltip = "Close view",
+                .tooltip_colors = .{ c.panel, c.text, c.line },
+            })
+                .style(close_style)
+                .on_click(b.onClickWith(Shell.onCloseTool, Shell.ToolTab{ .tool = tool, .pane = pane }))
+                .children(&.{try v.icon(b, .close, c.muted, 12)})
+                .build();
+            try items.append(b.allocator(), try b.fluent().div()
+                .h(.{ .px = v.metrics.tabs })
+                .min_w(.{ .px = if (selected) @as(f32, 100) else 60 })
+                .max_w(.{ .px = 210 })
+                .shrink_by(1)
+                .grow_by(0)
+                .background(if (selected) c.document else c.tab_bar)
+                .items_center()
+                .flex()
+                .children(.{ title, close })
+                .id(.{ .string = @tagName(tool) })
+                .build());
         }
     }
     for (self.git.history_tabs.items, 0..) |history, index| {
         if (history.pane != pane) continue;
         const selected = active_tool == .git_diff and std.mem.eql(u8, history.oid, self.git.selected_commit);
         const name = try std.fmt.allocPrint(b.allocator(), "{s} — {s}", .{ history.oid[0..@min(7, history.oid.len)], history.subject });
-        const title = try b.fluent().button(.{ .label = name, .tooltip = history.subject, .children = &.{ try v.icon(b, .commit, if (selected) c.accent else c.muted, 14), try v.text(b, name, if (selected) c.text else c.muted, 12) }, .on_click = b.onClickWith(Shell.onGitHistoryTab, @as(u32, @intCast(index))), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .gap = 7, .padding = .{ .left = 10 }, .overflow = .hidden } }).build();
-        const close = try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Close commit {s}", .{history.oid}), .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(Shell.onCloseHistoryTab, @as(u32, @intCast(index))), .style = .{ .width = .{ .px = 22 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }).build();
-        try items.append(b.allocator(), try b.fluent().div().h(.{ .px = v.metrics.tabs }).w(.{ .px = 210 }).min_w(.{ .px = 85 }).shrink_by(1).background(if (selected) c.document else c.tab_bar).overflow_hidden().flex().children(.{ title, close }).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "commit-tab:{s}", .{history.oid}) }).build());
+        const title = try b.fluent().button(.{
+            .label = name,
+            .tooltip = history.subject,
+        })
+            .flex()
+            .grow()
+            .min_w(.{ .px = 0 })
+            .items_center()
+            .gap_px(7)
+            .padding(.{ .left = 10 })
+            .overflow_hidden()
+            .on_click(b.onClickWith(Shell.onGitHistoryTab, @as(u32, @intCast(index))))
+            .children(&.{
+                try v.icon(b, .commit, if (selected) c.accent else c.muted, 14),
+                try v.text(b, name, if (selected) c.text else c.muted, 12),
+            }).build();
+        const close = try b.fluent().button(.{
+            .label = try std.fmt.allocPrint(b.allocator(), "Close commit {s}", .{history.oid}),
+        })
+            .w(.{ .px = 22 })
+            .shrink_0()
+            .items_center()
+            .justify_center()
+            .hover_background(c.hover)
+            .on_click(b.onClickWith(Shell.onCloseHistoryTab, @as(u32, @intCast(index))))
+            .children(&.{try v.icon(b, .close, c.muted, 12)})
+            .build();
+        try items.append(b.allocator(), try b.fluent().div()
+            .h(.{ .px = v.metrics.tabs })
+            .w(.{ .px = 210 })
+            .min_w(.{ .px = 85 })
+            .shrink_by(1)
+            .background(if (selected) c.document else c.tab_bar)
+            .overflow_hidden()
+            .flex()
+            .children(.{ title, close })
+            .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "commit-tab:{s}", .{history.oid}) })
+            .build());
     }
     if (pane == 0) if (self.image) |asset| {
-        try items.append(b.allocator(), try b.fluent().div().h(.{ .px = v.metrics.tabs }).max_w(.{ .px = 220 }).min_w(.{ .px = 90 }).shrink_by(1).background(if (self.panel == .image) c.document else c.tab_bar).flex().children(.{ b.fluent().button(.{ .label = std.fs.path.basename(asset.path), .tooltip = asset.path, .children = &.{ try v.icon(b, .image, c.muted, 14), try v.text(b, std.fs.path.basename(asset.path), c.text, 13) }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.show_image), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .gap = 7, .padding = .{ .left = 11, .right = 6 }, .overflow = .hidden } }), v.iconButton(b, c, .close_image, "Close image", .close, false) }).build());
+        try items.append(b.allocator(), try b.fluent().div()
+            .h(.{ .px = v.metrics.tabs })
+            .max_w(.{ .px = 220 })
+            .min_w(.{ .px = 90 })
+            .shrink_by(1)
+            .background(if (self.panel == .image) c.document else c.tab_bar)
+            .flex()
+            .children(.{
+                b.fluent().button(.{
+                    .label = std.fs.path.basename(asset.path),
+                    .tooltip = asset.path,
+                })
+                    .flex()
+                    .grow()
+                    .min_w(.{ .px = 0 })
+                    .items_center()
+                    .gap_px(7)
+                    .padding(.{ .left = 11, .right = 6 })
+                    .overflow_hidden()
+                    .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.show_image))
+                    .children(&.{
+                    try v.icon(b, .image, c.muted, 14),
+                    try v.text(b, std.fs.path.basename(asset.path), c.text, 13),
+                }),
+                v.iconButton(b, c, .close_image, "Close image", .close, false),
+            }).build());
     };
-    try items.append(b.allocator(), try b.fluent().div().grow().flex_col().children(&.{ try b.fluent().div().grow().children(.{}).build(), try v.rule(b, c) }).build());
+    try items.append(b.allocator(), try b.fluent().div().grow().flex_col().children(&.{
+        try b.fluent().div().grow().children(.{}).build(),
+        try v.rule(b, c),
+    }).build());
     try items.appendSlice(b.allocator(), &.{ try v.iconButton(b, c, .new_file, "New file", .plus, false), try v.iconButton(b, c, .split_menu, "Split editor", .split, self.split_menu_open) });
-    return b.fluent().div().h(.{ .px = v.metrics.tabs }).shrink_0().background(c.tab_bar).overflow_hidden().padding(.{ .right = 4 }).flex().children(items.items).id(.{ .string = if (pane == 0) "tabs" else "secondary-tabs" }).build();
+    return b.fluent().div()
+        .h(.{ .px = v.metrics.tabs })
+        .shrink_0()
+        .background(c.tab_bar)
+        .overflow_hidden()
+        .padding(.{ .right = 4 })
+        .flex()
+        .children(items.items)
+        .id(.{ .string = if (pane == 0) "tabs" else "secondary-tabs" })
+        .build();
 }
+
 fn navigation(self: *const Shell, b: *ui.Ui, index: ?usize, key: []const u8, name: v.Icon) !ui.Element {
     const c = self.colors;
     var color = c.muted;
     if (index == null) color.a = 0.4;
-    return b.fluent().button(.{ .label = key, .tooltip = if (name == .chevron_left) "Previous tab" else "Next tab", .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, name, color, 14)}, .on_click = if (index) |target| try b.onClickWith(Shell.onTab, @as(u32, @intCast(target))) else null, .style = .{ .width = .{ .px = 26 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = if (index != null) c.hover else null } }).id(.{ .string = key }).build();
+    return b.fluent().button(.{
+        .label = key,
+        .tooltip = if (name == .chevron_left) "Previous tab" else "Next tab",
+        .tooltip_colors = .{ c.panel, c.text, c.line },
+        .on_click = if (index) |target| try b.onClickWith(Shell.onTab, @as(u32, @intCast(target))) else null,
+    })
+        .w(.{ .px = 26 })
+        .shrink_0()
+        .items_center()
+        .justify_center()
+        .hover_background(if (index != null) c.hover else null)
+        .children(&.{try v.icon(b, name, color, 14)})
+        .id(.{ .string = key })
+        .build();
 }
+
 pub fn fileHeader(self: *const Shell, b: *ui.Ui, record: *const zircon_workspace.Record, document: zircon_workspace.DocumentId, state: *const zircon_editor.Editor) !ui.Element {
     const c = self.colors;
     var path = record.path orelse record.title();
@@ -118,41 +352,131 @@ pub fn fileHeader(self: *const Shell, b: *ui.Ui, record: *const zircon_workspace
         if (crumbs.items.len > 0) try crumbs.append(b.allocator(), try v.icon(b, .chevron_right, c.muted, 10));
         const end = @intFromPtr(segment.ptr) - @intFromPtr(path.ptr) + segment.len;
         const label = try std.fmt.allocPrint(b.allocator(), "Reveal {s}", .{segment});
-        try crumbs.append(b.allocator(), try b.fluent().button(.{ .label = label, .children = &.{try v.text(b, segment, c.muted, 12)}, .on_click = b.onClickWith(Shell.onBreadcrumb, Shell.Breadcrumb{ .document = document, .pane = pane, .prefix = if (record.path) |full| @intCast(@intFromPtr(path.ptr) - @intFromPtr(full.ptr) + end) else 0 }), .style = .{ .height = .{ .px = 24 }, .min_width = .{ .px = 0 }, .flex_shrink = 1, .align_items = .center, .padding = .{ .left = 2, .right = 2 }, .hover_background = c.hover, .radius = v.metrics.control_radius, .overflow = .hidden } }).build());
+        try crumbs.append(b.allocator(), try b.fluent().button(.{
+            .label = label,
+        })
+            .h(.{ .px = 24 })
+            .min_w(.{ .px = 0 })
+            .shrink_by(1)
+            .items_center()
+            .padding(.{ .left = 2, .right = 2 })
+            .hover_background(c.hover)
+            .rounded_px(v.metrics.control_radius)
+            .overflow_hidden()
+            .on_click(b.onClickWith(Shell.onBreadcrumb, Shell.Breadcrumb{ .document = document, .pane = pane, .prefix = if (record.path) |full| @intCast(@intFromPtr(path.ptr) - @intFromPtr(full.ptr) + end) else 0 }))
+            .children(&.{try v.text(b, segment, c.muted, 12)})
+            .build());
     }
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try b.fluent().div().grow().min_w(.{ .px = 0 }).gap_px(2).items_center().overflow_hidden().flex().children(crumbs.items).build());
+    try children.append(b.allocator(), try b.fluent().div()
+        .grow()
+        .min_w(.{ .px = 0 })
+        .gap_px(2)
+        .items_center()
+        .overflow_hidden()
+        .flex()
+        .children(crumbs.items)
+        .build());
     try children.append(b.allocator(), try v.iconButton(b, c, .find, "Find", .search, false));
     if (zircon_editor.syntax.languageForPath(record.path orelse "") == .markdown) try children.append(b.allocator(), try v.iconButton(b, c, .markdown_preview, "Preview", .markdown, self.panel == .markdown));
     try children.append(b.allocator(), try v.iconButton(b, c, .editor_options, "Editor options", .settings, self.popup == .editor));
-    return b.fluent().div().h(.{ .px = v.metrics.file_header }).shrink_0().padding(.{ .left = 13, .right = 7 }).items_center().gap_px(4).background(c.document).overflow_hidden().flex().children(children.items).id(.{ .string = "file-toolbar" }).build();
+    return b.fluent().div()
+        .h(.{ .px = v.metrics.file_header })
+        .shrink_0()
+        .padding(.{ .left = 13, .right = 7 })
+        .items_center()
+        .gap_px(4)
+        .background(c.document)
+        .overflow_hidden()
+        .flex()
+        .children(children.items)
+        .id(.{ .string = "file-toolbar" })
+        .build();
 }
+
 pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     var items: std.ArrayList(ui.Element) = .empty;
     try items.appendSlice(b.allocator(), &.{ try statusIcon(b, c, .project_files, "Project files", .folder, self.sidebar_visible and self.left_panel == .project), try statusIcon(b, c, .git_changes, "Git changes", .branch, self.sidebar_visible and self.left_panel == .git_changes) });
-    try items.append(b.allocator(), try b.fluent().div().w(.{ .px = 1 }).h(.{ .px = 14 }).shrink_0().background(c.line).children(.{}).build());
+    try items.append(b.allocator(), try b.fluent().div()
+        .w(.{ .px = 1 })
+        .h(.{ .px = 14 })
+        .shrink_0()
+        .background(c.line)
+        .children(.{})
+        .build());
     try items.append(b.allocator(), try statusIcon(b, c, .project_search, "Project search", .search, self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search));
     var unhealthy = false;
     for (self.language.sessions.items) |session| {
         if (session.retired) continue;
         if (session.resolving or session.client == null or !session.client.?.ready()) unhealthy = true;
     }
-    try items.append(b.allocator(), try b.fluent().button(.{ .label = "Language servers", .tooltip = "Language server status", .children = &.{ try v.icon(b, .language_server, c.muted, 14), try b.fluent().div().w(.{ .px = 5 }).h(.{ .px = 5 }).rounded_px(3).background(if (self.language.activeSessions() == 0) c.muted else if (unhealthy) c.warning else c.added).children(.{}).build() }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.language_servers), .style = .{ .direction = .row, .width = .{ .px = 26 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .gap = 1 } }).build());
+    try items.append(b.allocator(), try b.fluent().button(.{
+        .label = "Language servers",
+        .tooltip = "Language server status",
+    })
+        .flex()
+        .w(.{ .px = 26 })
+        .h(.{ .px = 22 })
+        .items_center()
+        .justify_center()
+        .gap_px(1)
+        .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.language_servers))
+        .children(&.{
+            try v.icon(b, .language_server, c.muted, 14),
+            try b.fluent().div()
+                .w(.{ .px = 5 })
+                .h(.{ .px = 5 })
+                .rounded_px(3)
+                .background(if (self.language.activeSessions() == 0) c.muted else if (unhealthy) c.warning else c.added)
+                .children(.{})
+                .build(),
+        }).build());
     var issues: usize = 0;
     for (self.language.documents.items) |doc| if (doc.diagnostics) |message| {
         issues += message.data.diagnostics.items.len;
     };
-    try items.append(b.allocator(), try b.fluent().button(.{ .label = "Diagnostics", .tooltip = "Language server diagnostics", .children = if (issues == 0) &.{try v.icon(b, .check, c.muted, 13)} else &.{ try v.icon(b, .warning, c.warning, 13), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d}", .{issues}), c.warning, 11) }, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.language_servers), .style = .{ .direction = .row, .height = .{ .px = 22 }, .align_items = .center, .gap = 3, .padding = .{ .left = 3, .right = 3 } } }).build());
+    try items.append(b.allocator(), try b.fluent().button(.{
+        .label = "Diagnostics",
+        .tooltip = "Language server diagnostics",
+    })
+        .flex()
+        .h(.{ .px = 22 })
+        .items_center()
+        .gap_px(3)
+        .padding(.{ .left = 3, .right = 3 })
+        .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.language_servers))
+        .children(if (issues == 0) &.{try v.icon(b, .check, c.muted, 13)} else &.{ try v.icon(b, .warning, c.warning, 13), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d}", .{issues}), c.warning, 11) })
+        .build());
     if (self.recovery) |recovery| {
         const previous = if (recovery.last_checkpoint) |at| try std.fmt.allocPrint(b.allocator(), "Last successful recovery checkpoint {d:.1} seconds ago.", .{@max(0, b.frame.time - at)}) else "No recovery checkpoint has completed in this session.";
         const tip = if (recovery.last_error) |err|
             try std.fmt.allocPrint(b.allocator(), "Recovery failed: {s}. {s} {s}", .{ @errorName(err), previous, if (recovery.store == null and !recovery.busy) "Resolve the storage error and restart the editor." else "Click to retry." })
         else
             try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ previous, if (recovery.busy) "Checkpoint in progress." else if (recovery.due != null) "New changes are waiting for a checkpoint." else "Click to checkpoint now." });
-        try items.append(b.allocator(), try b.fluent().button(.{ .label = if (recovery.last_error != null) "Recovery failed" else "Recovery checkpoint", .tooltip = tip, .children = &.{try v.icon(b, if (recovery.last_error != null) .warning else .check, if (recovery.last_error != null) c.warning else c.muted, 13)}, .on_click = b.onClick(services_recovery.checkpoint), .style = .{ .direction = .row, .width = .{ .px = 22 }, .height = .{ .px = 22 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center } }).build());
+        try items.append(b.allocator(), try b.fluent().button(.{
+            .label = if (recovery.last_error != null) "Recovery failed" else "Recovery checkpoint",
+            .tooltip = tip,
+        })
+            .flex()
+            .w(.{ .px = 22 })
+            .h(.{ .px = 22 })
+            .shrink_0()
+            .items_center()
+            .justify_center()
+            .on_click(b.onClick(services_recovery.checkpoint))
+            .children(&.{
+                try v.icon(b, if (recovery.last_error != null) .warning else .check, if (recovery.last_error != null) c.warning else c.muted, 13),
+            }).build());
     }
-    if (self.status.len > 0) try items.append(b.allocator(), try b.fluent().adopt(try v.text(b, self.status, if (self.status_is_error) c.warning else c.muted, 11)).style(.{ .flex_shrink = 1, .min_width = .{ .px = 0 }, .max_width = .{ .percent = 35 }, .text = .{ .size = 11, .color = if (self.status_is_error) c.warning else c.muted }, .overflow = .hidden }).build());
+    if (self.status.len > 0) try items.append(b.allocator(), try b.fluent().adopt(try v.text(b, self.status, if (self.status_is_error) c.warning else c.muted, 11))
+        .style(.{
+            .flex_shrink = 1,
+            .min_width = .{ .px = 0 },
+            .max_width = .{ .percent = 35 },
+            .text = .{ .size = 11, .color = if (self.status_is_error) c.warning else c.muted },
+            .overflow = .hidden,
+        }).build());
     if (self.tab_drag) |drag| if (drag.moved) try items.append(b.allocator(), try v.text(b, "Drop on a tab strip or any editor edge · Esc cancels", c.muted, 11));
     try items.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
     if (self.tabs.items.len > 0 and b.viewport().width >= 650) {
@@ -179,14 +503,53 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
             .markdown => "Markdown",
             .custom => "Extension",
         };
-        try items.append(b.allocator(), try b.fluent().button(.{ .label = "Select language", .tooltip = "Select language", .children = &.{try v.text(b, language, c.muted, 11)}, .on_click = b.onClickWith(Shell.onCommand, commands_module.Command.language_picker), .style = .{ .align_items = .center, .padding = .{ .left = 2, .right = 2 }, .radius = 3, .hover_background = c.hover } }).build());
+        try items.append(b.allocator(), try b.fluent().button(.{
+            .label = "Select language",
+            .tooltip = "Select language",
+        })
+            .items_center()
+            .padding(.{ .left = 2, .right = 2 })
+            .rounded_px(3)
+            .hover_background(c.hover)
+            .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.language_picker))
+            .children(&.{try v.text(b, language, c.muted, 11)})
+            .build());
     }
     try items.append(b.allocator(), try statusIcon(b, c, .toggle_terminal, "Terminal", .terminal, self.terminal.visible));
-    return b.fluent().div().h(.{ .px = v.metrics.status }).shrink_0().background(c.chrome).flex_col().children(.{ v.rule(b, c), b.fluent().div().grow().items_center().gap_px(4).padding(.{ .left = 5, .right = 5 }).overflow_hidden().flex().children(items.items) }).id(.{ .string = "status" }).build();
+    return b.fluent().div()
+        .h(.{ .px = v.metrics.status })
+        .shrink_0()
+        .background(c.chrome)
+        .flex_col()
+        .children(.{
+            v.rule(b, c),
+            b.fluent().div()
+                .grow()
+                .items_center()
+                .gap_px(4)
+                .padding(.{ .left = 5, .right = 5 })
+                .overflow_hidden()
+                .flex()
+                .children(items.items),
+        }).id(.{ .string = "status" }).build();
 }
+
 fn statusIcon(b: *ui.Ui, c: v.Palette, action: commands_module.Command, label: []const u8, name: v.Icon, selected: bool) !ui.Element {
-    return b.fluent().button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, name, if (selected) c.accent else c.muted, 13)}, .on_click = b.onClickWith(Shell.onCommand, action), .style = .{ .width = .{ .px = 22 }, .height = .{ .px = 22 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center } }).build();
+    return b.fluent().button(.{
+        .label = label,
+        .tooltip = label,
+        .tooltip_colors = .{ c.panel, c.text, c.line },
+    })
+        .w(.{ .px = 22 })
+        .h(.{ .px = 22 })
+        .shrink_0()
+        .items_center()
+        .justify_center()
+        .on_click(b.onClickWith(Shell.onCommand, action))
+        .children(&.{try v.icon(b, name, if (selected) c.accent else c.muted, 13)})
+        .build();
 }
+
 pub fn menu(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     var items: std.ArrayList(ui.Element) = .empty;
@@ -194,8 +557,17 @@ pub fn menu(self: *const Shell, b: *ui.Ui) !ui.Element {
         try items.append(b.allocator(), try v.menuRow(b, c, entry[0], entry[1], try self.key_bindings.shortcut(b.allocator(), entry[0]), false));
     }
     const placement = v.popoverBounds(b.viewport(), self.menu_anchor, .{ .width = 260, .height = 196 });
-    const popup = try b.fluent().adopt(try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, items.items)).id(.{ .string = "workspace-menu" }).build();
-    return b.fluent().div().items(.start).padding(.{ .top = placement.y, .left = placement.x }).stack().children(.{popup}).listeners(.{ .on_input = b.onInput(Shell.onMenuInput) }).modal().build();
+    const popup = try b.fluent().adopt(try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, items.items))
+        .id(.{ .string = "workspace-menu" })
+        .build();
+    return b.fluent().div()
+        .items(.start)
+        .padding(.{ .top = placement.y, .left = placement.x })
+        .stack()
+        .children(.{popup})
+        .listeners(.{ .on_input = b.onInput(Shell.onMenuInput) })
+        .modal()
+        .build();
 }
 
 pub fn splitMenu(self: *const Shell, b: *ui.Ui) !ui.Element {
@@ -206,6 +578,15 @@ pub fn splitMenu(self: *const Shell, b: *ui.Ui) !ui.Element {
         try rows.append(b.allocator(), try v.menuRow(b, self.colors, action, item.label, try self.key_bindings.shortcut(b.allocator(), action), false));
     }
     const placement = v.popoverBounds(b.viewport(), self.split_anchor, .{ .width = 260, .height = 160 });
-    const popup = try b.fluent().adopt(try v.floatingPanel(b, self.colors, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, rows.items)).id(.{ .string = "split-menu" }).build();
-    return b.fluent().div().items(.start).padding(.{ .top = placement.y, .left = placement.x }).stack().children(.{popup}).listeners(.{ .on_input = b.onInput(Shell.onMenuInput) }).modal().build();
+    const popup = try b.fluent().adopt(try v.floatingPanel(b, self.colors, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(5), 0, rows.items))
+        .id(.{ .string = "split-menu" })
+        .build();
+    return b.fluent().div()
+        .items(.start)
+        .padding(.{ .top = placement.y, .left = placement.x })
+        .stack()
+        .children(.{popup})
+        .listeners(.{ .on_input = b.onInput(Shell.onMenuInput) })
+        .modal()
+        .build();
 }

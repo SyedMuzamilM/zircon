@@ -21,6 +21,7 @@ pub const Session = struct {
 pub fn key(id: ws.DocumentId) u64 {
     return (@as(u64, id.generation) << 32) | id.slot;
 }
+
 pub fn selectSecondary(self: *Shell, index: usize) !void {
     if (index >= self.tabs.items.len) return;
     const id = self.tabs.items[index].document;
@@ -57,6 +58,7 @@ pub fn selectSecondary(self: *Shell, index: usize) !void {
     self.active_pane = .secondary;
     self.editor_focus_request +%= 1;
 }
+
 pub fn normalizePrimary(self: *Shell) void {
     if (self.tabs.items.len == 0) {
         self.active = 0;
@@ -70,6 +72,7 @@ pub fn normalizePrimary(self: *Shell) void {
     self.active = @min(self.active, self.tabs.items.len - 1);
     self.tabs.items[self.active].primary = true;
 }
+
 pub fn closePrimaryTab(self: *Shell, index: usize) void {
     self.tabs.items[index].primary = false;
     for (self.tabs.items, 0..) |tab, i| if (tab.primary) {
@@ -105,6 +108,7 @@ pub fn closePrimaryTab(self: *Shell, index: usize) void {
     self.editor_focus_request +%= 1;
     normalizePrimary(self);
 }
+
 pub fn closeSplit(self: *Shell) void {
     if (self.secondary_tools.search) self.tool_tabs.search = true;
     if (self.secondary_tools.git_diff) self.tool_tabs.git_diff = true;
@@ -123,6 +127,7 @@ pub fn closeSplit(self: *Shell) void {
     self.editor_focus_request +%= 1;
     normalizePrimary(self);
 }
+
 pub fn closeSecondaryTab(self: *Shell, index: usize) void {
     if (index >= self.tabs.items.len) return;
     const id = self.tabs.items[index].document;
@@ -142,6 +147,7 @@ pub fn closeSecondaryTab(self: *Shell, index: usize) void {
         closeSplit(self);
     };
 }
+
 pub fn tabInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), target: DragTarget) !void {
     if (e.data == .pointer_down and e.data.pointer_down.button == .primary) {
         cancel(self);
@@ -152,6 +158,7 @@ pub fn tabInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), ta
     }
     try advance(self, e, cx);
 }
+
 pub fn treeInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), index: u32) !void {
     if (e.data == .pointer_down and e.data.pointer_down.button == .primary) {
         if (index >= self.tree.items.len or self.tree.items[index].directory) return;
@@ -163,6 +170,7 @@ pub fn treeInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), i
     }
     try advance(self, e, cx);
 }
+
 pub fn cancel(self: *Shell) void {
     if (self.tab_drag) |*drag| drag.deinit(self.allocator);
     self.tab_drag = null;
@@ -190,6 +198,7 @@ pub fn destination(self: *const Shell, frame: anytype, point: ui.Point) ?Drop {
     };
     return result;
 }
+
 fn advance(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     const session = if (self.tab_drag) |*drag| drag else return;
     switch (e.data) {

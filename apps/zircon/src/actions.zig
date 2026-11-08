@@ -10,7 +10,6 @@ const editor_git = @import("editor_git.zig");
 const git_editing = @import("git_editing.zig");
 const panes = @import("panes.zig");
 const project_index = @import("project_index.zig");
-const projects = @import("projects.zig");
 const buffer_find = @import("services/buffer_find.zig");
 const catalog = @import("services/catalog.zig");
 const services_extensions = @import("services/extensions.zig");
@@ -23,11 +22,14 @@ const settings_model = @import("settings/model.zig");
 const settings_view = @import("settings/view.zig");
 const model = @import("shell.zig");
 const terminal_module = @import("terminal.zig");
-const view_module = @import("view.zig");
-const git_controls = @import("views/git_controls.zig");
-const git_diff_controls = @import("views/git_diff_controls.zig");
+const git_commands = @import("views/git/commands.zig");
+const git_diff_controls = @import("views/git/diff_controls.zig");
+const git_controls = @import("views/git/menus.zig");
 const views_image = @import("views/image.zig");
+const field_input = @import("views/input.zig");
 const views_markdown = @import("views/markdown.zig");
+const open_project = @import("views/open_project.zig");
+const overlays = @import("views/overlays.zig");
 const workspace_controls = @import("views/workspace_controls.zig");
 const Shell = model.Shell;
 const Command = commands_module.Command;
@@ -48,49 +50,14 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
     if (self.settings == null) try self.loadSettings(cx, null);
     _ = try cx.observe(self.settings.?, Shell.onSettings);
     try self.onSettings(cx, self.settings.?);
-    if (self.fields == null) {
-        var find_input = try ui.controls.TextInput.init(self.allocator, "");
-        find_input.leading_icon = .search;
-        find_input.placeholder = "Find in buffer…";
-        const find_query = try cx.createChild(ui.controls.TextInput, find_input);
-        var agent_input = try ui.controls.TextInput.init(self.allocator, "");
-        agent_input.leading_icon = .search;
-        agent_input.placeholder = "Search providers or models…";
-        agent_input.show_focus_border = false;
-        const agent_query = try cx.createChild(ui.controls.TextInput, agent_input);
-        const query = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
-        var project_input = try ui.controls.TextInput.init(self.allocator, "");
-        project_input.leading_icon = .search;
-        project_input.placeholder = "Search project files and open buffers…";
-        var extension_input = try ui.controls.TextInput.init(self.allocator, "");
-        extension_input.leading_icon = .search;
-        extension_input.placeholder = "Search Zed extensions…";
-        const extension_query = try cx.createChild(ui.controls.TextInput, extension_input);
-        const project_query = try cx.createChild(ui.controls.TextInput, project_input);
-        var replace_input = try ui.controls.TextInput.init(self.allocator, "");
-        replace_input.placeholder = "Replace with…";
-        const replacement = try cx.createChild(ui.controls.TextInput, replace_input);
-        const destination = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
-        const path = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(self.allocator, ""));
-        var commit_input = try ui.controls.TextInput.init(self.allocator, "");
-        // I don't want the border in the commit_input
-        commit_input.appearance.border = .transparent;
-        commit_input.placeholder = "Commit message…";
-        const commit = cx.createChild(ui.controls.TextInput, commit_input) catch |err| {
-            commit_input.deinit(self.allocator);
-            return err;
-        };
-        self.fields = .{ .find_query = find_query, .agent_query = agent_query, .extension_query = extension_query, .query = query, .project_query = project_query, .replacement = replacement, .path = path, .destination = destination, .commit = commit };
-    }
-    _ = try cx.observe(self.fields.?.find_query, Shell.onFindQuery);
-    _ = try cx.observe(self.fields.?.replacement, Shell.onFindQuery);
-    _ = try cx.observe(self.fields.?.path, Shell.onGitPickerQuery);
+    if (self.fields == null) self.fields = try model.Fields.init(cx, self.allocator);
     try self.styleInputs(cx);
     try project_index.start(self, cx);
     try services_git.start(self, cx, .refresh);
     try cx.app.watchExternal(cx.owner, Shell.pollLanguage);
     cx.notify();
 }
+
 pub fn loadTree(self: *Shell) !void {
     const entries = try self.workspace.children(self.workspace.root_path, self.allocator);
     defer ws.deinitEntries(entries, self.allocator);
@@ -100,6 +67,7 @@ pub fn loadTree(self: *Shell) !void {
         try self.tree.append(self.allocator, row);
     }
 }
+
 pub fn refreshTree(self: *Shell) !void {
     var previous = self.tree;
     self.tree = .empty;
@@ -124,15 +92,18 @@ pub fn refreshTree(self: *Shell) !void {
     for (previous.items) |row| freeRow(self.allocator, row);
     previous.deinit(self.allocator);
 }
+
 fn copyRow(a: std.mem.Allocator, entry: ws.Entry, depth: u16) !model.TreeRow {
     const name = try a.dupe(u8, entry.name);
     errdefer a.free(name);
     return .{ .name = name, .path = try a.dupe(u8, entry.path), .directory = entry.kind == .directory, .depth = depth };
 }
+
 fn freeRow(a: std.mem.Allocator, row: model.TreeRow) void {
     a.free(row.name);
     a.free(row.path);
 }
+
 pub fn activateTree(self: *Shell, index: usize) !void {
     if (index >= self.tree.items.len) return;
     const row = self.tree.items[index];
@@ -144,6 +115,7 @@ pub fn activateTree(self: *Shell, index: usize) !void {
         self.tree.items[index].expanded = false;
     } else try expandDirectory(self, index);
 }
+
 fn expandDirectory(self: *Shell, index: usize) !void {
     const row = self.tree.items[index];
     const entries = try self.workspace.children(row.path, self.allocator);
@@ -167,6 +139,7 @@ fn revealTreePath(self: *Shell, path: []const u8) !void {
         if (row.directory and !row.expanded and path.len > row.path.len and std.mem.startsWith(u8, path, row.path) and path[row.path.len] == std.fs.path.sep) try expandDirectory(self, index);
     }
 }
+
 pub fn openPath(self: *Shell, path: []const u8) !void {
     if (views_image.supported(path)) {
         const absolute = try std.fs.path.resolve(self.allocator, &.{ self.workspace.root_path, path });
@@ -214,6 +187,7 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
     self.editor_focus_request +%= 1;
     self.overlay = .none;
 }
+
 pub fn newFile(self: *Shell) !void {
     if (self.active_pane != .secondary or self.secondary == null) self.panel = .editor;
     const id = try self.workspace.untitled("");
@@ -231,72 +205,21 @@ pub fn newFile(self: *Shell) !void {
     }
     self.editor_focus_request +%= 1;
 }
+
 pub fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
     if (self.active_pane == .secondary) if (self.secondary) |*pane| return .{ .id = pane.document, .editor = &pane.editor };
     if (self.tabs.items.len == 0) return error.NoDocument;
     return .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
 }
-pub fn field(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), a: std.mem.Allocator) ![]u8 {
-    var bytes: []u8 = undefined;
-    try cx.read(handle, ui.controls.TextInput.copy, .{ a, &bytes });
-    return bytes;
-}
-pub fn setField(cx: *ui.Context(Shell), handle: ui.Entity(ui.controls.TextInput), value: []const u8, placeholder: []const u8) !void {
-    const Update = struct {
-        fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), bytes: []const u8, label: []const u8) !void {
-            try input.bytes.ensureTotalCapacity(input.allocator, bytes.len);
-            input.bytes.clearRetainingCapacity();
-            input.bytes.appendSliceAssumeCapacity(bytes);
-            input.cursor = bytes.len;
-            input.anchor = bytes.len;
-            input.marked = null;
-            input.revision +%= 1;
-            input.placeholder = label;
-            context.notify();
-        }
-    };
-    try cx.update(handle, Update.call, .{ value, placeholder });
-}
-fn show(self: *Shell, cx: *ui.Context(Shell), which: model.Overlay) !void {
-    self.overlay = which;
-    self.overlay_index = 0;
-    if (self.fields) |fields| {
-        const SetQuery = struct {
-            fn call(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), picker: bool) void {
-                input.height = if (picker) 38 else 30;
-                input.font_size = if (picker) 14 else 13;
-                input.leading_icon = null;
-                input.show_focus_border = !picker;
-                if (picker) {
-                    input.appearance.background = ui.Color.transparent;
-                    input.appearance.border = ui.Color.transparent;
-                }
-                context.notify();
-            }
-        };
-        try cx.update(fields.query, SetQuery.call, .{which == .palette or which == .quick_open});
-    }
-    if (self.fields) |fields| switch (which) {
-        .palette => try setField(cx, fields.query, "", "Search commands…"),
-        .quick_open => try setField(cx, fields.query, "", "Find a file…"),
-        .open_path => try setField(cx, fields.path, "", "Path relative to the project, or an absolute path"),
-        .extension_path => try setField(cx, fields.path, "", "Directory containing extension.json"),
-        .save_as => {
-            const selected = try saveTarget(self);
-            const record = try self.workspace.getConst(self.tabs.items[selected].document);
-            try setField(cx, fields.path, record.path orelse "untitled.zig", "Save file as…");
-        },
-        .find, .replace => try setField(cx, fields.query, "", "Find in document…"),
-        else => {},
-    };
-}
+
 fn firstDirty(self: *const Shell) ?usize {
     for (self.tabs.items, 0..) |tab, i| {
         if (self.workspace.dirty(tab.document) catch false) return i;
     }
     return null;
 }
-fn saveTarget(self: *const Shell) !usize {
+
+pub fn saveTarget(self: *const Shell) !usize {
     if (self.pending) |pending| switch (pending) {
         .tab => |i| return i,
         .window => return firstDirty(self) orelse self.active,
@@ -307,13 +230,15 @@ fn saveTarget(self: *const Shell) !usize {
     };
     return self.active;
 }
+
 pub fn requestTabClose(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
     if (index >= self.tabs.items.len) return;
     if (try self.workspace.dirty(self.tabs.items[index].document)) {
         self.pending = .{ .tab = index };
-        try show(self, cx, .dirty);
+        try overlays.show(self, cx, .dirty);
     } else try closeTab(self, cx, index, .if_clean);
 }
+
 fn closeTab(self: *Shell, cx: *ui.Context(Shell), index: usize, decision: ws.CloseDecision) !void {
     const id = self.tabs.items[index].document;
     if (decision == .if_clean and try self.workspace.dirty(id)) return error.UnsavedChanges;
@@ -321,6 +246,7 @@ fn closeTab(self: *Shell, cx: *ui.Context(Shell), index: usize, decision: ws.Clo
         try services_recovery.requestClose(self, cx, .{ .document = .{ .id = id, .state = (try self.workspace.getConst(id)).doc.stateId() } });
     } else try finishCloseTab(self, index);
 }
+
 pub fn finishCloseTab(self: *Shell, index: usize) !void {
     const id = self.tabs.items[index].document;
     if (!try self.workspace.close(id, .discard)) return;
@@ -355,12 +281,13 @@ pub fn finishCloseTab(self: *Shell, index: usize) !void {
     self.overlay = .none;
     self.pending = null;
 }
+
 fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.pending) |pending| switch (pending) {
         .tab => |i| try closeTab(self, cx, i, .if_clean),
         .window => {
             if (firstDirty(self) != null) {
-                try show(self, cx, .dirty);
+                try overlays.show(self, cx, .dirty);
             } else {
                 if (services_recovery.enabled(self)) try services_recovery.requestClose(self, cx, .window_save) else {
                     self.allow_close = true;
@@ -370,6 +297,7 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
         },
     } else self.overlay = .none;
 }
+
 pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome, origin: ws.ChangeOrigin) !void {
     defer if (outcome.change) |change| {
         self.publishDocumentChange(id, origin, change);
@@ -402,6 +330,7 @@ pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pan
     };
     if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) try preview.view.refresh(snapshot);
 }
+
 pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !bool {
     if (pane == 1 and self.secondary == null) return false;
     if (pane == 0 and self.tabs.items.len == 0) return false;
@@ -446,7 +375,47 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     if (which != .complete) self.language.clearCompletion();
     if (try git_editing.command(self, cx, which)) return;
+    if (try git_commands.execute(self, cx, which)) return;
+    if (try open_project.command(self, cx, which)) return;
     switch (which) {
+        .open_project,
+        .browse_project,
+        .submit_project,
+        .git_changes,
+        .git_history,
+        .git_network_menu,
+        .git_changes_menu,
+        .git_branches,
+        .git_stashes,
+        .git_fetch_from,
+        .git_push_to,
+        .git_fetch,
+        .git_pull,
+        .git_pull_rebase,
+        .git_push,
+        .git_publish,
+        .git_force_push,
+        .git_stash_all,
+        .git_stash_tracked,
+        .git_stash_pop,
+        .git_stash_apply,
+        .git_stash_show,
+        .git_create_branch,
+        .git_refresh,
+        .git_diff_all,
+        .git_collapse_all,
+        .git_unified_view,
+        .git_split_view,
+        .git_prepare_commit,
+        .git_stage,
+        .git_unstage,
+        .git_stage_all,
+        .git_unstage_all,
+        .git_commit,
+        .git_working_diff,
+        .git_staged_diff,
+        .git_open_file,
+        => unreachable,
         .show_symbol_info => try symbol_hover.show(self, cx),
         .cut, .copy, .paste => {
             // Native menu actions arrive through globalInput with the original
@@ -463,66 +432,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         // Retired actions can still occur in saved key bindings.
         .agent_mode, .agent_transcript, .agent_new, .agent_connect, .agent_send, .agent_cancel, .agent_config, .agent_reload, .agent_context, .agent_toggle_editor, .layout_agentic => {},
-        .open_project => {
-            self.overlay = .open_project;
-            self.open_kind = .local_folder;
-            try setField(cx, self.fields.?.path, "", "Folder path or Git repository URL");
-        },
-        .browse_project => {
-            if (try (try cx.app.window(self.window.?)).surface.?.choosePath(self.allocator, .folder)) |path| {
-                defer self.allocator.free(path);
-                try setField(cx, self.fields.?.path, path, "Folder path");
-            }
-        },
-        .submit_project => {
-            const path = try field(cx, self.fields.?.path, self.allocator);
-            defer self.allocator.free(path);
-            const requested = std.mem.trim(u8, path, " \t");
-            if (requested.len == 0) return error.InvalidPath;
-            if (self.open_kind == .clone) {
-                const destination = try field(cx, self.fields.?.destination, self.allocator);
-                defer self.allocator.free(destination);
-                if (std.mem.trim(u8, destination, " \t").len == 0) return error.InvalidPath;
-                try projects.clone(self, cx, requested, destination);
-            } else _ = try projects.open(self, cx, requested, self.open_kind);
-        },
-        .recent_projects, .language_picker, .language_servers, .editor_options => {
-            if (which == .language_picker and self.tabs.items.len == 0) return;
-            self.popup = switch (which) {
-                .recent_projects => .recent,
-                .language_picker => .language,
-                .language_servers => .servers,
-                else => .editor,
-            };
-            self.overlay_index = 0;
-            if (self.fields) |fields| {
-                const Picker = struct {
-                    fn style(input: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput)) void {
-                        input.height = 38;
-                        input.font_size = 14;
-                        input.leading_icon = null;
-                        input.show_focus_border = false;
-                        context.notify();
-                    }
-                };
-                try cx.update(fields.query, Picker.style, .{});
-                try setField(cx, fields.query, "", if (which == .recent_projects) "Search projects…" else "Select a language…");
-            }
-            if (which == .language_picker) {
-                var arena = std.heap.ArenaAllocator.init(self.allocator);
-                defer arena.deinit();
-                const current = try active(self);
-                const record = try self.workspace.getConst(current.id);
-                const choices = try workspace_controls.choices(self, arena.allocator(), "");
-                for (choices, 0..) |choice, i| {
-                    const matches = if (self.languageName(current.id)) |name| std.mem.eql(u8, name, choice.name) else std.mem.eql(u8, std.fs.path.extension(record.path orelse ""), std.fs.path.extension(choice.path));
-                    if (matches) {
-                        self.overlay_index = i;
-                        break;
-                    }
-                }
-            }
-        },
+        .recent_projects, .language_picker, .language_servers, .editor_options => try workspace_controls.open(self, cx, which),
         .stop_language_servers => {
             self.language_stopped = true;
             self.language.deinit(self.allocator);
@@ -571,115 +481,6 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.panel = .markdown;
         },
         .complete => try services_language.request(self, cx),
-        .git_changes => {
-            self.git.showWorking();
-            if (self.sidebar_visible and self.left_panel == .git_changes) {
-                self.sidebar_visible = false;
-                return;
-            }
-            self.git.stash_view = false;
-            std.heap.page_allocator.free(self.git.selected_commit);
-            self.git.selected_commit = &.{};
-            std.heap.page_allocator.free(self.git.selected_path);
-            self.git.selected_path = &.{};
-            self.git.combined = true;
-            self.showTool(.git_diff);
-            self.left_panel = .git_changes;
-            self.git.sidebar_scroll.offset = 0;
-            self.sidebar_visible = true;
-            try services_git.start(self, cx, .all_diff);
-        },
-        .git_history => {
-            self.left_panel = .git_history;
-            self.git.sidebar_scroll.offset = 0;
-            self.sidebar_visible = true;
-            try services_git.start(self, cx, .refresh);
-        },
-        .git_network_menu => self.git.menu = .network,
-        .git_changes_menu => self.git.menu = .changes,
-        .git_branches => {
-            self.git.needs_metadata = true;
-            self.git.picker_index = 0;
-            self.git.picker_scroll.offset = 0;
-            self.git.menu = .branches;
-            try setField(cx, self.fields.?.path, "", "Switch or type to create a branch…");
-            try services_git.start(self, cx, .refresh);
-        },
-        .git_stashes => {
-            self.git.needs_metadata = true;
-            self.git.picker_index = 0;
-            self.git.picker_scroll.offset = 0;
-            std.heap.page_allocator.free(self.git.stash_oid);
-            self.git.stash_oid = &.{};
-            self.git.menu = .stashes;
-            self.git.stash_selected = null;
-            try setField(cx, self.fields.?.path, "", "Search stashes…");
-            try services_git.start(self, cx, .refresh);
-        },
-        .git_fetch_from, .git_push_to => {
-            self.git.picker_index = 0;
-            self.git.picker_scroll.offset = 0;
-            self.git.menu = if (which == .git_fetch_from) .fetch_remote else .push_remote;
-            try setField(cx, self.fields.?.path, "", "Search remotes…");
-        },
-        .git_fetch => try services_git.start(self, cx, .{ .network = .{ .fetch = "" } }),
-        .git_pull, .git_pull_rebase => try services_git.start(self, cx, .{ .network = .{ .pull = which == .git_pull_rebase } }),
-        .git_push, .git_publish, .git_force_push => {
-            const remote = git_controls.defaultRemote(self);
-            try services_git.start(self, cx, .{ .network = .{ .push = .{ .remote = if (which == .git_publish) remote else "", .publish = which == .git_publish, .force_with_lease = which == .git_force_push } } });
-        },
-        .git_stash_all, .git_stash_tracked => try services_git.start(self, cx, .{ .stash_save = which == .git_stash_all }),
-        .git_stash_pop, .git_stash_apply, .git_stash_show => try git_controls.stashAction(self, cx, which),
-        .git_create_branch => {
-            const name = try field(cx, self.fields.?.path, self.allocator);
-            defer self.allocator.free(name);
-            try services_git.start(self, cx, .{ .switch_branch = .{ .name = std.mem.trim(u8, name, " "), .create = true } });
-            self.git.menu = .none;
-        },
-        .git_refresh => {
-            self.git.needs_metadata = true;
-            try services_git.start(self, cx, .refresh);
-        },
-        .git_diff_all => {
-            self.git.showWorking();
-            self.git.stash_view = false;
-            self.git.combined = true;
-            std.heap.page_allocator.free(self.git.selected_path);
-            std.heap.page_allocator.free(self.git.selected_commit);
-            self.git.selected_path = &.{};
-            self.git.selected_commit = &.{};
-            self.showTool(.git_diff);
-            try services_git.start(self, cx, .all_diff);
-        },
-        .git_collapse_all, .git_unified_view, .git_split_view => try git_diff_controls.command(self, cx, which),
-        .git_prepare_commit => {
-            self.sidebar_visible = true;
-            self.left_panel = .git_changes;
-            self.git.commit_focus +%= 1;
-        },
-        .git_stage => try services_git.start(self, cx, .{ .stage = self.git.selected_path }),
-        .git_unstage => try services_git.start(self, cx, .{ .unstage = self.git.selected_path }),
-        .git_stage_all => try services_git.start(self, cx, .stage_all),
-        .git_unstage_all => try services_git.start(self, cx, .unstage_all),
-        .git_commit => {
-            const message = try field(cx, self.fields.?.commit, self.allocator);
-            defer self.allocator.free(message);
-            if (std.mem.trim(u8, message, " \t\r\n").len == 0) return error.EmptyCommitMessage;
-            try services_git.start(self, cx, .{ .commit = message });
-        },
-        .git_working_diff, .git_staged_diff => {
-            self.git.showWorking();
-            self.git.combined = false;
-            std.heap.page_allocator.free(self.git.selected_commit);
-            self.git.selected_commit = &.{};
-            self.showTool(.git_diff);
-            try services_git.start(self, cx, .{ .diff = .{ .path = self.git.selected_path, .staged = which == .git_staged_diff } });
-        },
-        .git_open_file => {
-            const absolute = try std.fs.path.join(self.allocator, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, self.git.selected_path });
-            defer self.allocator.free(absolute);
-            try self.openPath(absolute);
-        },
         .back_to_editor => {
             if (self.active_pane == .secondary and self.secondary != null) self.secondary_tool = null else self.panel = .editor;
         },
@@ -687,7 +488,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.agent_mode = false;
             self.showTool(.extensions);
         },
-        .install_extension => try show(self, cx, .extension_path),
+        .install_extension => try overlays.show(self, cx, .extension_path),
         .install_bundled_extension => try services_extensions.installBundled(self, cx),
         .project_search => {
             if (self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search) {
@@ -710,9 +511,9 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try cx.app.update(try cx.app.windowEntity(View, handle), View.bootstrap, .{handle});
         },
         .new_file => try newFile(self),
-        .open_path => try show(self, cx, .open_path),
-        .quick_open => try show(self, cx, .quick_open),
-        .palette => try show(self, cx, .palette),
+        .open_path => try overlays.show(self, cx, .open_path),
+        .quick_open => try overlays.show(self, cx, .quick_open),
+        .palette => try overlays.show(self, cx, .palette),
         .find => try buffer_find.open(self, cx, false),
         .replace => try buffer_find.open(self, cx, true),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
@@ -807,13 +608,13 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .save => {
             const index = try saveTarget(self);
             const record = try self.workspace.getConst(self.tabs.items[index].document);
-            if (record.path == null) try show(self, cx, .save_as) else {
+            if (record.path == null) try overlays.show(self, cx, .save_as) else {
                 try self.workspace.save(self.tabs.items[index].document, null);
                 historyBoundary(self, self.tabs.items[index].document);
                 try self.setStatus(try self.allocator.dupe(u8, "Saved"));
             }
         },
-        .save_as => try show(self, cx, .save_as),
+        .save_as => try overlays.show(self, cx, .save_as),
         .close_tab => {
             const pane: u8 = if (self.active_pane == .secondary) 1 else 0;
             if (self.currentTool(pane)) |tool| {
@@ -860,14 +661,14 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             const index = try saveTarget(self);
             const id = self.tabs.items[index].document;
             const record = try self.workspace.getConst(id);
-            if (record.path == null) try show(self, cx, .save_as) else {
+            if (record.path == null) try overlays.show(self, cx, .save_as) else {
                 try self.workspace.save(id, null);
                 historyBoundary(self, id);
                 try finishPending(self, cx);
             }
         },
         .submit_path => {
-            const bytes = try field(cx, self.fields.?.path, self.allocator);
+            const bytes = try field_input.read(cx, self.fields.?.workspace.path, self.allocator);
             defer self.allocator.free(bytes);
             const path = std.mem.trim(u8, bytes, " \t");
             if (path.len == 0) return error.InvalidPath;
@@ -917,11 +718,12 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
     }
     _ = event;
 }
+
 pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (e.data == .close) try services_recovery.validateClose(self, cx);
     if (e.data == .close and !self.allow_close and firstDirty(self) != null) {
         self.pending = .window;
-        try show(self, cx, .dirty);
+        try overlays.show(self, cx, .dirty);
         e.preventDefault();
         cx.notify();
     } else if (e.data == .close and !self.allow_close and services_recovery.enabled(self)) {
@@ -929,6 +731,7 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
         if (self.recovery.?.close == null) try services_recovery.requestClose(self, cx, .window_save);
     }
 }
+
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     symbol_hover.dismissOutside(self, cx, e.data);
     if (e.data == .action) {
@@ -1035,7 +838,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
                 .project_search => .run_project_search,
                 else => .dismiss,
             };
-            if (self.overlay == .palette or self.overlay == .quick_open) try activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
+            if (self.overlay == .palette or self.overlay == .quick_open) try overlays.activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
             if (self.vim_find_pending and self.overlay == .find) {
                 self.vim_find_pending = false;
                 self.overlay = .none;
@@ -1047,7 +850,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
             return;
         }
         if ((key.key == .down or key.key == .up) and (self.overlay == .palette or self.overlay == .quick_open)) {
-            const count = try filteredCount(self, cx);
+            const count = try overlays.filteredCount(self, cx);
             if (count > 0) self.overlay_index = if (key.key == .down) (self.overlay_index + 1) % count else (self.overlay_index + count - 1) % count;
             e.preventDefault();
             e.stopPropagation();
@@ -1063,46 +866,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         cx.notify();
     }
 }
-fn filteredCount(self: *Shell, cx: *ui.Context(Shell)) !usize {
-    const query = try field(cx, self.fields.?.query, self.allocator);
-    defer self.allocator.free(query);
-    var count: usize = 0;
-    if (self.overlay == .palette) {
-        for (commands_module.commands) |entry| {
-            if (view_module.matches(query, entry.label)) count += 1;
-        }
-    } else {
-        for (self.file_index.items) |entry| {
-            if (view_module.matches(query, entry.label)) count += 1;
-        }
-    }
-    return count;
-}
-fn activateSelected(self: *Shell, cx: *ui.Context(Shell)) !void {
-    const query = try field(cx, self.fields.?.query, self.allocator);
-    defer self.allocator.free(query);
-    var n: usize = 0;
-    if (self.overlay == .palette) {
-        for (commands_module.commands) |entry| {
-            if (!view_module.matches(query, entry.label)) continue;
-            if (n == self.overlay_index) {
-                self.overlay = .none;
-                execute(self, cx, entry.command, null) catch |err| try self.reportError(err);
-                return;
-            }
-            n += 1;
-        }
-    } else {
-        for (self.file_index.items) |entry| {
-            if (!view_module.matches(query, entry.label)) continue;
-            if (n == self.overlay_index) {
-                try openPath(self, entry.path);
-                return;
-            }
-            n += 1;
-        }
-    }
-}
+
 pub fn drag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: u8) !void {
     switch (e.data) {
         .pointer_down => |pointer| {

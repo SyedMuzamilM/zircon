@@ -32,10 +32,11 @@ fn errorText(self: *Shell, message: []const u8) !void {
     a.free(self.catalog.error_text);
     self.catalog.error_text = next;
 }
+
 pub fn search(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.catalog.busy) return;
     var query: []u8 = undefined;
-    try cx.read(self.fields.?.extension_query, ui.controls.TextInput.copy, .{ a, &query });
+    try cx.read(self.fields.?.extensions.query, ui.controls.TextInput.copy, .{ a, &query });
     defer a.free(query);
     self.catalog.generation +%= 1;
     try host.start(self, cx, &.{ "catalog", query }, null, .{ .generation = self.catalog.generation }, searched);
@@ -44,6 +45,7 @@ pub fn search(self: *Shell, cx: *ui.Context(Shell)) !void {
     try errorText(self, "");
     cx.notify();
 }
+
 fn searched(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
     self.catalog.busy = false;
     const box = raw catch |err| {
@@ -68,6 +70,7 @@ fn searched(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void
     self.catalog.parsed = parsed;
     cx.notify();
 }
+
 pub fn install(self: *Shell, cx: *ui.Context(Shell), id: []const u8) !void {
     if (self.catalog.installing != null) return error.ExtensionInstallBusy;
     const registry = if (self.extensions) |*r| r else return error.ExtensionsNotConfigured;
@@ -81,6 +84,7 @@ pub fn install(self: *Shell, cx: *ui.Context(Shell), id: []const u8) !void {
     try errorText(self, "");
     cx.notify();
 }
+
 pub fn importDev(self: *Shell, cx: *ui.Context(Shell), source: []const u8) !void {
     if (self.catalog.installing != null) return error.ExtensionInstallBusy;
     const registry = if (self.extensions) |*r| r else return error.ExtensionsNotConfigured;
@@ -93,6 +97,7 @@ pub fn importDev(self: *Shell, cx: *ui.Context(Shell), source: []const u8) !void
     self.catalog.install_id = id;
     cx.notify();
 }
+
 fn installed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void {
     const directory = self.catalog.installing orelse return;
     self.catalog.installing = null;
@@ -132,6 +137,7 @@ fn installed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
     self.catalog.show_available = false;
     cx.notify();
 }
+
 pub fn recommend(self: *Shell, cx: *ui.Context(Shell)) !void {
     const current = try actions.active(self);
     const record = try self.workspace.getConst(current.id);
@@ -148,7 +154,7 @@ pub fn recommend(self: *Shell, cx: *ui.Context(Shell)) !void {
             context.notify();
         }
     };
-    try cx.update(self.fields.?.extension_query, Set.call, .{suffix});
+    try cx.update(self.fields.?.extensions.query, Set.call, .{suffix});
     self.showTool(.extensions);
     self.tool_tabs.extensions = true;
     self.catalog.show_available = true;

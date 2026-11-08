@@ -5,10 +5,31 @@ const actions = @import("../../actions.zig");
 const services_extensions = @import("../../services/extensions.zig");
 const services_language = @import("../../services/language.zig");
 const shell = @import("../../shell.zig");
-const view = @import("../../view.zig");
 const v = @import("../components.zig");
+const field_input = @import("../input.zig");
+const overlays = @import("../overlays.zig");
 const panel = @import("panel.zig");
 const Shell = shell.Shell;
+
+pub const Fields = struct {
+    query: field_input.Handle,
+
+    pub fn init(cx: *ui.Context(Shell), a: std.mem.Allocator) !Fields {
+        return .{ .query = try field_input.create(cx, a, query_options) };
+    }
+};
+
+const query_options: field_input.Options = .{
+    .placeholder = "Select a language…",
+    .height = 38,
+    .font_size = 14,
+    .borderless = true,
+};
+
+pub fn prepare(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try field_input.reset(cx, self.fields.?.language_picker.query, "", query_options);
+}
+
 pub const Choice = struct { name: []const u8, path: []const u8 };
 const defaults = [_]Choice{
     .{ .name = "Plain Text", .path = "plain.txt" }, .{ .name = "Zig", .path = "file.zig" },
@@ -17,7 +38,7 @@ const defaults = [_]Choice{
 };
 pub fn choices(self: *const Shell, a: std.mem.Allocator, query: []const u8) ![]Choice {
     var items: std.ArrayList(Choice) = .empty;
-    for (defaults) |choice| if (view.matches(query, choice.name)) try items.append(a, choice);
+    for (defaults) |choice| if (overlays.matches(query, choice.name)) try items.append(a, choice);
     if (self.extension_snapshot) |snapshot| for (snapshot.installed()) |extension| if (extension.enabled) {
         for (extension.languages) |language| {
             var duplicate = false;
@@ -25,20 +46,22 @@ pub fn choices(self: *const Shell, a: std.mem.Allocator, query: []const u8) ![]C
                 duplicate = true;
                 break;
             };
-            if (duplicate or !view.matches(query, language.name)) continue;
+            if (duplicate or !overlays.matches(query, language.name)) continue;
             const path = if (language.extensions.len > 0) try std.fmt.allocPrint(a, "file.{s}", .{std.mem.trimStart(u8, language.extensions[0], ".")}) else if (language.filenames.len > 0) language.filenames[0] else continue;
             try items.append(a, .{ .name = language.name, .path = path });
         }
     };
     return items.toOwnedSlice(a);
 }
+
 fn onChoice(self: *Shell, event: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const query = try actions.field(cx, self.fields.?.query, arena.allocator());
+    const query = try field_input.read(cx, self.fields.?.language_picker.query, arena.allocator());
     const items = try choices(self, arena.allocator(), query);
     if (index < items.len) try choose(self, event, cx, items[index]);
 }
+
 pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choice: Choice) !void {
     const current = try actions.active(self);
     const path = try self.allocator.dupe(u8, choice.path);
@@ -73,27 +96,45 @@ pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choi
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
-    const query = try view.fieldText(b, self.fields.?.query);
+    const query = try field_input.text(b, self.fields.?.language_picker.query);
     var rows: std.ArrayList(ui.Element) = .empty;
-    try panel.query(self, b, &rows);
+    try panel.query(self, b, &rows, self.fields.?.language_picker.query);
     var options: std.ArrayList(ui.Element) = .empty;
     const items = try choices(self, b.allocator(), query);
     for (items, 0..) |choice, i| {
         const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
         const selected_name = self.languageName(id);
         const selected = if (selected_name) |name| std.mem.eql(u8, name, choice.name) else std.mem.eql(u8, std.fs.path.extension((try self.workspace.getConst(id)).path orelse ""), std.fs.path.extension(choice.path));
-        try options.append(b.allocator(), try b.fluent().button(.{ .label = choice.name, .children = &.{ try v.fileGlyph(self, b, choice.path, false, false, 14), try v.text(b, choice.name, c.text, 13), try b.fluent().div().grow().children(.{}).build(), try v.text(b, if (selected) "Current" else "", c.muted, 11) }, .on_click = b.onClickWith(onChoice, @as(u32, @intCast(i))), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 10, .right = 10 }, .background = if (i == @min(self.overlay_index, items.len -| 1)) c.selected else null, .hover_background = c.hover } }).build());
+        try options.append(b.allocator(), try b.fluent().button(.{
+            .label = choice.name,
+        })
+            .flex()
+            .h(.{ .px = 30 })
+            .shrink_0()
+            .items_center()
+            .gap_px(8)
+            .padding(.{ .left = 10, .right = 10 })
+            .background(if (i == @min(self.overlay_index, items.len -| 1)) c.selected else null)
+            .hover_background(c.hover)
+            .on_click(b.onClickWith(onChoice, @as(u32, @intCast(i))))
+            .children(&.{
+                try v.fileGlyph(self, b, choice.path, false, false, 14),
+                try v.text(b, choice.name, c.text, 13),
+                try b.fluent().div().grow().children(.{}).build(),
+                try v.text(b, if (selected) "Current" else "", c.muted, 11),
+            }).build());
     }
     if (options.items.len == 0) try options.append(b.allocator(), try v.text(b, "No matches", c.muted, 13));
     const visible = try panel.options(self, b, &rows, options.items, 30);
     return panel.render(self, b, .{ .width = 520, .height = 52 + visible, .centered = true }, rows.items);
 }
+
 pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool {
     const key = e.data.key_down.key;
     if (key != .up and key != .down and key != .enter) return false;
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const query = try actions.field(cx, self.fields.?.query, arena.allocator());
+    const query = try field_input.read(cx, self.fields.?.language_picker.query, arena.allocator());
     const items = try choices(self, arena.allocator(), query);
     if (items.len > 0) {
         self.overlay_index = @min(self.overlay_index, items.len - 1);

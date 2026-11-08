@@ -316,6 +316,7 @@ pub fn create(self: *Shell) !void {
     self.terminal.focus +%= 1;
     self.terminal.focused = true;
 }
+
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.terminal.visible and self.terminal.sessions.items.len > 0) if (self.window) |handle| {
         const frame = &(try cx.app.window(handle)).frames.committed;
@@ -352,6 +353,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (changed) cx.notify();
     };
 }
+
 fn select(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u32) void {
     for (self.terminal.sessions.items, 0..) |session, i| if (session.id == id) {
         self.terminal.active = i;
@@ -361,6 +363,7 @@ fn select(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u32)
     };
     cx.notify();
 }
+
 fn closeTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u32) void {
     for (self.terminal.sessions.items, 0..) |session, i| if (session.id == id) {
         var removed = self.terminal.sessions.orderedRemove(i);
@@ -375,6 +378,7 @@ fn closeTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u3
     }
     cx.notify();
 }
+
 pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (self.terminal.sessions.items.len == 0) return;
     const session = &self.terminal.sessions.items[self.terminal.active];
@@ -432,6 +436,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
     }
     cx.notify();
 }
+
 pub fn onDivider(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     switch (event.data) {
         .pointer_down => |pointer| {
@@ -496,7 +501,36 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
     var tabs: std.ArrayList(ui.Element) = .empty;
     for (self.terminal.sessions.items, 0..) |session, i| {
         const name = try std.fmt.allocPrint(b.allocator(), "Terminal {d}{s}", .{ session.id, if (session.exited) " · exited" else "" });
-        try tabs.append(b.allocator(), try b.fluent().div().h(.{ .px = 32 }).background(if (i == self.terminal.active) c.document else c.tab_bar).items_center().flex().children(.{ b.fluent().button(.{ .label = name, .children = &.{ try v.icon(b, .terminal, c.muted, 13), try v.text(b, name, c.text, 12) }, .on_click = b.onClickWith(select, session.id), .style = .{ .direction = .row, .height = .{ .px = 32 }, .gap = 5, .padding = .{ .left = 10, .right = 6 }, .align_items = .center } }), b.fluent().button(.{ .label = "Close terminal", .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(closeTab, session.id), .style = .{ .width = .{ .px = 22 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }) }).build());
+        try tabs.append(b.allocator(), try b.fluent().div()
+            .h(.{ .px = 32 })
+            .background(if (i == self.terminal.active) c.document else c.tab_bar)
+            .items_center()
+            .flex()
+            .children(.{
+                b.fluent().button(.{
+                    .label = name,
+                })
+                    .flex()
+                    .h(.{ .px = 32 })
+                    .gap_px(5)
+                    .padding(.{ .left = 10, .right = 6 })
+                    .items_center()
+                    .on_click(b.onClickWith(select, session.id))
+                    .children(&.{
+                    try v.icon(b, .terminal, c.muted, 13),
+                    try v.text(b, name, c.text, 12),
+                }),
+                b.fluent().button(.{
+                    .label = "Close terminal",
+                })
+                    .w(.{ .px = 22 })
+                    .h(.{ .px = 22 })
+                    .items_center()
+                    .justify_center()
+                    .hover_background(c.hover)
+                    .on_click(b.onClickWith(closeTab, session.id))
+                    .children(&.{try v.icon(b, .close, c.muted, 12)}),
+            }).build());
     }
     try tabs.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
     try tabs.append(b.allocator(), try v.iconButton(b, c, .new_terminal, "New terminal", .plus, false));
@@ -511,8 +545,29 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
     @memset(cells, .{});
     for (session.lines.items[start..end], 0..) |line, row| @memcpy(cells[row * cols ..][0..cols], line.cells[0..cols]);
     const canvas = try b.custom(Canvas, .{ .cells = cells, .cols = cols, .rows = rows, .cursor_row = if (session.cursor_visible and session.row >= start and session.row < end) session.row - start else null, .cursor_col = @min(session.col, cols - 1), .background = c.document, .foreground = c.text }, .{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden });
-    const surface = try b.fluent().adopt(canvas).id(.{ .string = "terminal-canvas" }).listeners(.{ .focusable = true, .on_input = b.onInput(input) }).request_focus(self.terminal.focus).build();
-    return b.fluent().div().w(.{ .px = width }).h(.{ .px = height }).shrink_0().min_w(.{ .px = 0 }).min_h(.{ .px = 0 }).overflow_hidden().flex_col().children(.{ b.fluent().div().h(.{ .px = 32 }).shrink_0().background(c.tab_bar).overflow_hidden().flex().children(tabs.items), surface }).id(.{ .string = "terminal-panel" }).build();
+    const surface = try b.fluent().adopt(canvas)
+        .id(.{ .string = "terminal-canvas" })
+        .listeners(.{ .focusable = true, .on_input = b.onInput(input) })
+        .request_focus(self.terminal.focus)
+        .build();
+    return b.fluent().div()
+        .w(.{ .px = width })
+        .h(.{ .px = height })
+        .shrink_0()
+        .min_w(.{ .px = 0 })
+        .min_h(.{ .px = 0 })
+        .overflow_hidden()
+        .flex_col()
+        .children(.{
+            b.fluent().div()
+                .h(.{ .px = 32 })
+                .shrink_0()
+                .background(c.tab_bar)
+                .overflow_hidden()
+                .flex()
+                .children(tabs.items),
+            surface,
+        }).id(.{ .string = "terminal-panel" }).build();
 }
 
 const Wake = struct {

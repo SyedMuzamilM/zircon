@@ -153,6 +153,7 @@ fn prepare(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.S
     result.* = .{ .allocator = a, .owner = std.Thread.getCurrentId(), .document = document, .revision = snapshot.revision(), .path = owned_path, .assets = owned_assets };
     return result;
 }
+
 fn loadAsset(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, target: []const u8, list: *std.ArrayList(Asset), previous: ?*Generation) !void {
     for (list.items) |item| if (std.mem.eql(u8, item.target, target)) return;
     var asset: Asset = .{ .target = target };
@@ -190,9 +191,11 @@ fn loadAsset(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, target: []cons
     }
     try list.append(a, asset);
 }
+
 fn external(target: []const u8) bool {
     return std.mem.startsWith(u8, target, "https://") or std.mem.startsWith(u8, target, "http://") or std.mem.startsWith(u8, target, "mailto:");
 }
+
 fn anchor(document: md.Document, target: []const u8) ?usize {
     for (document.blocks) |block| if (block.kind == .heading) {
         var i: usize = 0;
@@ -449,6 +452,7 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
     }
     return .{ .texts = flow.texts.items, .fills = flow.fills.items, .images = flow.images.items, .hits = flow.hits.items, .height = flow.y + 20 };
 }
+
 fn tokenColor(kind: syntax.Kind, colors: Colors) ui.Color {
     return colors.tokens[@backingInt(kind)];
 }
@@ -495,6 +499,7 @@ fn translated(rect: ui.Rect, viewport: ui.Rect, scroll: f32) ui.Rect {
     result.y += viewport.y - scroll;
     return result;
 }
+
 fn contains(rect: ui.Rect, point: ui.Point) bool {
     return point.x >= rect.x and point.y >= rect.y and point.x < rect.x + rect.width and point.y < rect.y + rect.height;
 }

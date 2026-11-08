@@ -63,7 +63,7 @@ const Job = struct {
 };
 pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     var query: []u8 = undefined;
-    try cx.read(self.fields.?.project_query, ui.controls.TextInput.copy, .{ a, &query });
+    try cx.read(self.fields.?.project_search.query, ui.controls.TextInput.copy, .{ a, &query });
     errdefer a.free(query);
     if (query.len == 0) {
         a.free(query);
@@ -124,6 +124,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.search.scroll.offset = 0;
     cx.notify();
 }
+
 fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     const box = result catch |err| {
         if (err != error.Canceled) {
@@ -141,9 +142,11 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     self.search.task = null;
     cx.notify();
 }
+
 pub fn id(document: zircon_workspace.DocumentId) u64 {
     return (@as(u64, document.generation) << 32) | document.slot;
 }
+
 pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_index: usize) !void {
     const results = self.search.results orelse return;
     if (group_index >= results.groups.len) return;

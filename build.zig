@@ -133,6 +133,8 @@ pub fn build(b: *std.Build) void {
     examples_compile.dependOn(&fluent_migration_tests.step);
     const fluent_callers_check = b.addSystemCommand(&.{ "python3", "tools/migrate_fluent.py", "--check", "apps/zircon/src", "packages/zircon_ui/src/controls", "packages/zircon_editor/src", "examples" });
     examples_compile.dependOn(&fluent_callers_check.step);
+    const fluent_layout_check = b.addSystemCommand(&.{ "python3", "tools/fluent_layout.py", "--check", "apps/zircon/src/views", "apps/zircon/src/settings/view.zig", "apps/zircon/src/view.zig", "apps/zircon/src/terminal.zig" });
+    examples_compile.dependOn(&fluent_layout_check.step);
     const import_check = b.addSystemCommand(&.{ "python3", "tools/hoist_zig_imports.py", "--check", "apps", "packages", "examples", "tools", "build.zig" });
     examples_compile.dependOn(&import_check.step);
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);

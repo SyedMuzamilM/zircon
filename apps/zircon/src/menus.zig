@@ -5,6 +5,7 @@ const Command = commands.Command;
 fn item(label: []const u8, command: Command, key: []const u8) ui.MenuItem {
     return .{ .label = label, .action = @backingInt(command), .key = key };
 }
+
 fn shifted(label: []const u8, command: Command, key: []const u8) ui.MenuItem {
     var result = item(label, command, key);
     result.modifiers.shift = true;

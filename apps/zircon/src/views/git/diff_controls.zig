@@ -4,10 +4,10 @@ const std = @import("std");
 const git = @import("zircon_git");
 const zircon_git_ui = @import("zircon_git_ui");
 const ui = @import("zircon_ui");
-const commands = @import("../commands.zig");
-const services_git = @import("../services/git.zig");
-const shell = @import("../shell.zig");
-const v = @import("components.zig");
+const commands = @import("../../commands.zig");
+const services_git = @import("../../services/git.zig");
+const shell = @import("../../shell.zig");
+const v = @import("../components.zig");
 const layout = zircon_git_ui.layout;
 const Shell = shell.Shell;
 const Command = commands.Command;
@@ -33,13 +33,29 @@ pub fn hunkHeader(self: *const Shell, b: *ui.Ui, index: usize) !ui.Element {
             try children.append(b.allocator(), try b.fluent().button(.{
                 .label = label,
                 .tooltip = label,
-                .children = &.{ try v.icon(b, .copy, if (side == .added) c.added else c.deleted, 13), try v.text(b, if (side == .added) "Copy added" else "Copy deleted", c.muted, 11) },
-                .on_click = b.onClickWith(copyHunk, HunkTarget{ .index = index, .generation = self.git.diff_generation, .side = side }),
-                .style = .{ .direction = .row, .gap = 4, .align_items = .center, .height = .{ .px = 22 }, .padding = .{ .left = 5, .right = 5 }, .hover_background = c.hover },
-            }).build());
+            })
+                .flex()
+                .gap_px(4)
+                .items_center()
+                .h(.{ .px = 22 })
+                .padding(.{ .left = 5, .right = 5 })
+                .hover_background(c.hover)
+                .on_click(b.onClickWith(copyHunk, HunkTarget{ .index = index, .generation = self.git.diff_generation, .side = side }))
+                .children(&.{
+                    try v.icon(b, .copy, if (side == .added) c.added else c.deleted, 13),
+                    try v.text(b, if (side == .added) "Copy added" else "Copy deleted", c.muted, 11),
+                }).build());
         }
     }
-    return b.fluent().row().h_px(layout.context_height).shrink_0().items_center().gap_px(5).padding(.{ .left = 76, .right = 8 }).background(c.sidebar).children(children.items).build();
+    return b.fluent().row()
+        .h_px(layout.context_height)
+        .shrink_0()
+        .items_center()
+        .gap_px(5)
+        .padding(.{ .left = 76, .right = 8 })
+        .background(c.sidebar)
+        .children(children.items)
+        .build();
 }
 
 fn copyHunk(self: *Shell, e: *ui.Event(ui.Click), _: *ui.Context(Shell), target: HunkTarget) !void {
@@ -50,17 +66,20 @@ fn copyHunk(self: *Shell, e: *ui.Event(ui.Click), _: *ui.Context(Shell), target:
     defer self.allocator.free(bytes);
     try e.writeClipboard(bytes);
 }
+
 fn resolve(self: *const Shell, target: Target) ?layout.File {
     if (target.generation != self.git.diff_generation) return null;
     const projection = self.git.projection orelse return null;
     return if (target.file < projection.files.len) projection.files[target.file] else null;
 }
+
 pub fn selectFile(self: *Shell, file: layout.File) !void {
     const owned = try a.dupe(u8, file.path);
     a.free(self.git.selected_path);
     self.git.selected_path = owned;
     if (self.git.diff_view.active_hunk == null or self.git.diff_view.active_hunk.? < file.first_hunk or self.git.diff_view.active_hunk.? >= file.end_hunk) self.git.diff_view.active_hunk = file.first_hunk;
 }
+
 fn toggle(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Target) !void {
     const file = resolve(self, target) orelse return;
     try selectFile(self, file);
@@ -68,6 +87,7 @@ fn toggle(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: 
     clampScroll(self);
     cx.notify();
 }
+
 fn open(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Target) !void {
     const file = resolve(self, target) orelse return;
     try selectFile(self, file);
@@ -77,6 +97,7 @@ fn open(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Ta
     try self.openPath(absolute);
     cx.notify();
 }
+
 fn stage(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: Target) !void {
     const file = resolve(self, target) orelse return;
     if (self.git.selected_commit.len > 0) return;
@@ -84,10 +105,12 @@ fn stage(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: T
     try selectFile(self, file);
     try services_git.start(self, cx, if (entry.staged and !entry.unstaged) .{ .unstage = file.path } else .{ .stage = file.path });
 }
+
 fn statusFor(self: *const Shell, path: []const u8) ?git.Entry {
     if (self.git.status) |status| for (status.entries) |entry| if (std.mem.eql(u8, entry.path, path)) return entry;
     return null;
 }
+
 pub fn header(self: *const Shell, b: *ui.Ui, file: layout.File, index: usize) !ui.Element {
     const c = self.colors;
     const target: Target = .{ .file = index, .generation = self.git.diff_generation };
@@ -95,13 +118,57 @@ pub fn header(self: *const Shell, b: *ui.Ui, file: layout.File, index: usize) !u
     const active = std.mem.eql(u8, self.git.selected_path, file.path);
     const entry = if (self.git.selected_commit.len == 0) statusFor(self, file.path) else null;
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (collapsed) "Expand" else "Collapse", file.path }), .children = &.{try v.icon(b, if (collapsed) .chevron_right else .chevron_down, c.muted, 14)}, .on_click = b.onClickWith(toggle, target), .style = v.iconButtonStyle(c, false) }).build());
-    if (entry) |value| try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (value.staged and !value.unstaged) "Unstage" else "Stage", file.path }), .tooltip = "Stage saved file changes", .children = &.{try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16)}, .on_click = if (self.git.updating()) null else try b.onClickWith(stage, target), .style = v.iconButtonStyle(c, false) }).build());
-    try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13), try b.fluent().adopt(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12)).style(.{ .flex_grow = 1, .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }).build(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{file.added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{file.deleted}), c.deleted, 12) });
-    if (active or self.git.diff_view.hover_file == index) try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Open File {s}", .{file.path}), .children = &.{try v.text(b, "Open File", c.text, 12)}, .on_click = b.onClickWith(open, target), .style = v.buttonStyle(c, false) }).build());
-    const inner = try b.fluent().div().h(.{ .px = 36 }).padding(.{ .left = 7, .right = 10 }).items_center().gap_px(8).rounded_px(v.metrics.control_radius).background(if (active) c.selected else c.sidebar).overflow_hidden().flex().children(children.items).build();
-    return b.fluent().div().h(.{ .px = layout.file_height }).padding(.{ .top = 5, .bottom = 5, .left = 6, .right = 6 }).shrink_0().flex_col().children(.{inner}).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "diff-file:{s}", .{file.path}) }).build();
+    try children.append(b.allocator(), try b.fluent().button(.{
+        .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (collapsed) "Expand" else "Collapse", file.path }),
+    }).style(v.iconButtonStyle(c, false)).on_click(b.onClickWith(toggle, target)).children(&.{
+        try v.icon(b, if (collapsed) .chevron_right else .chevron_down, c.muted, 14),
+    }).build());
+    if (entry) |value| try children.append(b.allocator(), try b.fluent().button(.{
+        .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (value.staged and !value.unstaged) "Unstage" else "Stage", file.path }),
+        .tooltip = "Stage saved file changes",
+    })
+        .style(v.iconButtonStyle(c, false))
+        .on_click(if (self.git.updating()) null else try b.onClickWith(stage, target))
+        .children(&.{
+            try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16),
+        }).build());
+    try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13), try b.fluent().adopt(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12))
+        .style(.{
+            .flex_grow = 1,
+            .flex_shrink = 1,
+            .min_width = .{ .px = 0 },
+            .text = .{ .size = 12, .color = c.muted },
+            .overflow = .hidden,
+        })
+        .build(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{file.added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{file.deleted}), c.deleted, 12) });
+    if (active or self.git.diff_view.hover_file == index) try children.append(b.allocator(), try b.fluent().button(.{
+        .label = try std.fmt.allocPrint(b.allocator(), "Open File {s}", .{file.path}),
+    })
+        .style(v.buttonStyle(c, false))
+        .on_click(b.onClickWith(open, target))
+        .children(&.{try v.text(b, "Open File", c.text, 12)})
+        .build());
+    const inner = try b.fluent().div()
+        .h(.{ .px = 36 })
+        .padding(.{ .left = 7, .right = 10 })
+        .items_center()
+        .gap_px(8)
+        .rounded_px(v.metrics.control_radius)
+        .background(if (active) c.selected else c.sidebar)
+        .overflow_hidden()
+        .flex()
+        .children(children.items)
+        .build();
+    return b.fluent().div()
+        .h(.{ .px = layout.file_height })
+        .padding(.{ .top = 5, .bottom = 5, .left = 6, .right = 6 })
+        .shrink_0()
+        .flex_col()
+        .children(.{inner})
+        .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "diff-file:{s}", .{file.path}) })
+        .build();
 }
+
 pub fn command(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
     const projection = self.git.projection orelse return;
     if (which == .git_collapse_all) {
@@ -118,6 +185,7 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
     clampScroll(self);
     cx.notify();
 }
+
 pub fn navigate(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
     const diff = self.git.diff orelse return;
     const projection = self.git.projection orelse return;
@@ -133,6 +201,7 @@ pub fn navigate(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
     self.git.diff_scroll.offset = projection.hunkOffset(&self.git.diff_view, index, self.editor_options.font_size * self.editor_options.line_height) orelse 0;
     cx.notify();
 }
+
 fn clampScroll(self: *Shell) void {
     self.git.diff_scroll.offset = @min(self.git.diff_scroll.offset, @max(0, if (self.git.projection) |projection| projection.contentHeight(&self.git.diff_view, self.editor_options.font_size * self.editor_options.line_height) else 0 - 40));
 }

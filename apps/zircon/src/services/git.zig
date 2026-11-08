@@ -208,9 +208,11 @@ fn statusEntry(entries: []const git.Entry, path: []const u8) ?git.Entry {
     for (entries) |entry| if (std.mem.eql(u8, entry.path, path)) return entry;
     return null;
 }
+
 fn newFile(entry: git.Entry) bool {
     return !entry.conflicted and (entry.index == .added or entry.index == .untracked or entry.worktree == .untracked);
 }
+
 fn sameStatus(left: git.Status, right: git.Status) bool {
     if (!std.mem.eql(u8, left.branch, right.branch) or left.unborn != right.unborn or left.detached != right.detached or left.entries.len != right.entries.len) return false;
     for (left.entries, right.entries) |x, y| {
@@ -220,6 +222,7 @@ fn sameStatus(left: git.Status, right: git.Status) bool {
     }
     return true;
 }
+
 fn sameDiff(left: git.Diff, right: git.Diff) bool {
     if (left.hunks.len != right.hunks.len) return false;
     if (left.hunks.len == 0) return std.mem.eql(u8, left.text, right.text);
@@ -231,6 +234,7 @@ fn sameDiff(left: git.Diff, right: git.Diff) bool {
     }
     return true;
 }
+
 pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
     // Opening a diff also loads the live documents that have no source tab yet.
     // Keep the selected pane and tool while adding them to workspace ownership.
@@ -576,6 +580,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
     if (operation != .blame) self.git.active_document = job.document;
     if (!self.git.background) cx.notify();
 }
+
 fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     var changed = !self.git.background;
     self.git.busy = false;
@@ -733,6 +738,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         try start(self, cx, .refresh);
     }
 }
+
 fn installEditor(editor: *zircon_editor.Editor, result: *const Result) !void {
     if (result.blame) |blame| {
         try editor.setBlame(.{ .line = blame.line - 1, .revision = result.revision, .author = blame.author, .summary = blame.summary, .oid = blame.oid, .timestamp = blame.timestamp, .email = blame.email, .message = result.blame_message, .uncommitted = blame.uncommitted, .expanded = result.blame_expanded and (editor.blame_hovered or editor.blame_pinned) });
@@ -815,6 +821,7 @@ fn copyOperation(operation: Operation) !Operation {
         else => operation,
     };
 }
+
 fn freeOperation(operation: Operation) void {
     switch (operation) {
         .diff => |r| a.free(r.path),

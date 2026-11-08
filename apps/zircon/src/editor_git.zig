@@ -104,6 +104,7 @@ pub fn dismissOutside(self: *Shell, cx: *ui.Context(Shell), e: *ui.Event(ui.Inpu
     for (self.tabs.items) |*tab| dismissState(&tab.editor, point, leaving, cx);
     if (self.secondary) |*pane| dismissState(&pane.editor, point, leaving, cx);
 }
+
 fn dismissState(state: *editing.Editor, point: ?ui.Point, leaving: bool, cx: *ui.Context(Shell)) void {
     if (state.blame_pinned or !state.blame_hovered) return;
     if (leaving or (point != null and !annotations.contains(state.blame_bounds, point.?))) {

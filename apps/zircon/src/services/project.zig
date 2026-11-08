@@ -15,12 +15,14 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.project_watch.fingerprint = try fingerprint(self);
     cx.notify();
 }
+
 fn fingerprint(self: *const Shell) !u64 {
     var hash = std.hash.Wyhash.init(0);
     try directoryStamp(self, &hash, self.workspace.root_path);
     for (self.tree.items) |row| if (row.directory and row.expanded) try directoryStamp(self, &hash, row.path);
     return hash.final();
 }
+
 fn directoryStamp(self: *const Shell, hash: *std.hash.Wyhash, path: []const u8) !void {
     hash.update(path);
     const stat = std.Io.Dir.cwd().statFile(self.workspace.io, path, .{}) catch |err| switch (err) {

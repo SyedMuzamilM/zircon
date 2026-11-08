@@ -4,11 +4,12 @@ const t = std.testing;
 const View = struct {
     count: u32 = 0,
     fail: bool = false,
+    enabled: bool = true,
     pub fn render(self: *const View, b: *ui.Ui) !ui.Element {
         const f = b.fluent();
         const child: anyerror!ui.Element = if (self.fail) error.ChildFailed else b.text("kept");
         return f.div().p_4().gap_2().bg(.rgb(0x123456))
-            .child(f.button(.{ .label = "Add", .autofocus = true }).id(.named("add")).h_px(30).on_click(b.onClickWith(add, @as(u32, 2))))
+            .child(f.button(.{ .label = "Add", .autofocus = true }).id(.named("add")).h_px(30).on_click(if (self.enabled) b.onClickWith(add, @as(u32, 2)) else null))
             .child(child).build();
     }
     fn add(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), amount: u32) void {
@@ -22,7 +23,29 @@ const View = struct {
     fn value(self: *const View) u32 {
         return self.count;
     }
+    fn enable(self: *View, cx: *ui.Context(View), enabled: bool) void {
+        self.enabled = enabled;
+        cx.notify();
+    }
 };
+
+test "fluent optional click handlers stop and resume activation across frames" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try app.openWindow(View, .{ .visible = false, .width = 200, .height = 100 }, .{});
+    const owner = try app.windowEntity(View, handle);
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .key_down = .{ .key = .enter } });
+    try t.expectEqual(@as(u32, 2), try app.read(owner, View.value, .{}));
+    try app.update(owner, View.enable, .{false});
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .key_down = .{ .key = .enter } });
+    try t.expectEqual(@as(u32, 2), try app.read(owner, View.value, .{}));
+    try app.update(owner, View.enable, .{true});
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .key_down = .{ .key = .enter } });
+    try t.expectEqual(@as(u32, 4), try app.read(owner, View.value, .{}));
+}
 
 test "fluent typed events and failed frames preserve committed handlers" {
     var app = try ui.App.init(.{ .allocator = t.allocator });

@@ -29,18 +29,30 @@ const settings_store = @import("settings/store.zig");
 const terminal_module = @import("terminal.zig");
 const theme_module = @import("theme.zig");
 const view_module = @import("view.zig");
-const components = @import("views/components.zig");
 const views_image = @import("views/image.zig");
+const view_inputs = @import("views/inputs.zig");
 const views_markdown = @import("views/markdown.zig");
-const views_search = @import("views/search.zig");
+const views_search = @import("views/project_search.zig");
 pub const Command = command.Command;
 pub const Tab = struct { document: workspace.DocumentId, editor: editor.Editor, primary: bool = true, secondary: bool = false, language_path: ?[]u8 = null, language_name: ?[]u8 = null, secondary_state: ?editor.Editor = null };
 pub const Pane = struct { document: workspace.DocumentId, editor: editor.Editor };
 pub const TreeRow = struct { name: []u8, path: []u8, directory: bool, depth: u16 = 0, expanded: bool = false };
 pub const IndexedFile = struct { path: []u8, label: []u8 };
-pub const Overlay = enum { none, open_project, palette, quick_open, open_path, save_as, extension_path, project_search, find, replace, dirty };
+pub const Overlay = enum {
+    none,
+    open_project,
+    palette,
+    quick_open,
+    open_path,
+    save_as,
+    extension_path,
+    project_search,
+    find,
+    replace,
+    dirty,
+};
 pub const CloseTarget = union(enum) { tab: usize, window };
-pub const Fields = struct { find_query: ui.Entity(ui.controls.TextInput), agent_query: ui.Entity(ui.controls.TextInput), extension_query: ui.Entity(ui.controls.TextInput), query: ui.Entity(ui.controls.TextInput), project_query: ui.Entity(ui.controls.TextInput), replacement: ui.Entity(ui.controls.TextInput), path: ui.Entity(ui.controls.TextInput), destination: ui.Entity(ui.controls.TextInput), commit: ui.Entity(ui.controls.TextInput) };
+pub const Fields = view_inputs.Fields;
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     workspace: workspace.Workspace,
@@ -368,8 +380,7 @@ pub const Shell = struct {
         cx.notify();
     }
     pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
-        const appearance = components.inputAppearance(self.colors);
-        if (self.fields) |fields| inline for (.{ "find_query", "agent_query", "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
+        if (self.fields) |fields| try fields.style(cx, self.colors);
     }
     pub fn panelWidth(self: *const Shell) f32 {
         return if (self.left_panel == .project) self.sidebar_width else self.git_sidebar_width;

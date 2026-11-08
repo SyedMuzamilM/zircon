@@ -25,9 +25,19 @@ pub fn gitFileColor(c: Palette, entry: git.Entry) ui.Color {
     if (entry.index == .added or entry.index == .untracked or entry.worktree == .untracked) return c.added;
     return c.modified;
 }
+
 pub fn iconButton(b: *ui.Ui, c: Palette, action: commands_module.Command, label: []const u8, name: Icon, selected: bool) !ui.Element {
-    return b.fluent().button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = b.onClickWith(Shell.onCommand, action), .style = iconButtonStyle(c, selected) }).build();
+    return b.fluent().button(.{
+        .label = label,
+        .tooltip = label,
+        .tooltip_colors = .{ c.panel, c.text, c.line },
+    })
+        .style(iconButtonStyle(c, selected))
+        .on_click(b.onClickWith(Shell.onCommand, action))
+        .children(&.{try icon(b, name, if (selected) c.accent else c.muted, 16)})
+        .build();
 }
+
 pub fn actionButton(b: *ui.Ui, c: Palette, action: commands_module.Command, label: []const u8, primary: bool) !ui.Element {
     const glyph: ?Icon = switch (action) {
         .open_path => .folder_open,
@@ -47,8 +57,15 @@ pub fn actionButton(b: *ui.Ui, c: Palette, action: commands_module.Command, labe
     const color = if (primary) c.on_primary else c.text;
     if (glyph) |name| try children.append(b.allocator(), try icon(b, name, color, 14));
     try children.append(b.allocator(), try text(b, label, color, 12));
-    return b.fluent().button(.{ .label = label, .children = children.items, .on_click = b.onClickWith(Shell.onCommand, action), .style = buttonStyle(c, primary) }).build();
+    return b.fluent().button(.{
+        .label = label,
+    })
+        .style(buttonStyle(c, primary))
+        .on_click(b.onClickWith(Shell.onCommand, action))
+        .children(children.items)
+        .build();
 }
+
 pub fn fileIcon(path: []const u8) Icon {
     const ext = std.fs.path.extension(path);
     if (std.ascii.eqlIgnoreCase(ext, ".zig")) return .zig;
@@ -57,6 +74,7 @@ pub fn fileIcon(path: []const u8) Icon {
     for ([_][]const u8{ ".rs", ".json", ".js", ".ts", ".tsx", ".c", ".h", ".py", ".toml", ".zon" }) |candidate| if (std.ascii.eqlIgnoreCase(ext, candidate)) return .code;
     return .file;
 }
+
 pub fn fileColor(c: Palette, path: []const u8) ui.Color {
     const ext = std.fs.path.extension(path);
     if (std.ascii.eqlIgnoreCase(ext, ".zig") or std.ascii.eqlIgnoreCase(ext, ".zon")) return ui.Color.rgb(0xb8bf8d);

@@ -51,7 +51,7 @@ const Ops = struct {
                 context.notify();
             }
         };
-        try cx.update(self.fields.?.extension_query, Set.call, .{});
+        try cx.update(self.fields.?.extensions.query, Set.call, .{});
         try command(self, cx, .extension_search);
     }
     fn remotelyInstalled(self: *const Shell) bool {
