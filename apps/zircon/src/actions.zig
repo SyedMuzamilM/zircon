@@ -439,6 +439,19 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
     if (which != .complete) self.language.clearCompletion();
     if (try git_editing.command(self, cx, which)) return;
     switch (which) {
+        .cut, .copy, .paste => {
+            // Native menu actions arrive through globalInput with the original
+            // event surface. Palette actions are handled by the focused editor.
+            const current = try active(self);
+            var key_event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = if (which == .cut) .x else if (which == .copy) .c else .v, .modifiers = .{ .command = true } } } };
+            if (self.window) |handle| key_event._surface = (try cx.app.window(handle)).surface;
+            if (git_editing.active(self)) {
+                try git_editing.clipboard(self, cx, &key_event);
+            } else {
+                var outcome = try current.editor.handle(&(try self.workspace.get(current.id)).doc, &key_event);
+                try applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .typing);
+            }
+        },
         // Retired actions can still occur in saved key bindings.
         .agent_mode, .agent_transcript, .agent_new, .agent_connect, .agent_send, .agent_cancel, .agent_config, .agent_reload, .agent_context, .agent_toggle_editor, .layout_agentic => {},
         .open_project => {
@@ -908,6 +921,27 @@ pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !
     }
 }
 pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data == .action) {
+        const which = std.enums.fromInt(Command, e.data.action) orelse return;
+        // Clipboard actions stay on the focused text input, including search
+        // and commit fields. Other actions use the application's command path.
+        if (which == .cut or which == .copy or which == .paste or which == .select_all or which == .undo or which == .redo) {
+            e.data = .{ .key_down = .{ .key = switch (which) {
+                .cut => .x,
+                .copy => .c,
+                .paste => .v,
+                .select_all => .a,
+                else => .z,
+            }, .modifiers = .{ .command = true, .shift = which == .redo } } };
+        } else {
+            self.menu_open = false;
+            execute(self, cx, which, e) catch |err| try self.reportError(err);
+            e.preventDefault();
+            e.stopPropagation();
+            cx.notify();
+            return;
+        }
+    }
     if (try workspace_controls.input(self, e, cx)) return;
     if (self.popup == .none and self.overlay == .none and self.terminal.visible and self.terminal.focused and e.data == .key_down) {
         const key = e.data.key_down;

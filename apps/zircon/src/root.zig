@@ -1,16 +1,18 @@
 //! Zircon application composition. Reusable UI, text, persistence and editing
 //! live in separate packages; this module owns tabs, panes and workspace policy.
 pub const git = @import("zircon_git");
+const zircon_git_ui = @import("zircon_git_ui");
 const app_icon = @import("app_icon.zig");
 const commands_module = @import("commands.zig");
 const language_suggestions = @import("language_suggestions.zig");
-pub const diff_layout = @import("models/diff_layout.zig");
+pub const menus = @import("menus.zig");
 const extensions = @import("services/extensions.zig");
 const model = @import("settings/model.zig");
 const store = @import("settings/store.zig");
 const settings_view = @import("settings/view.zig");
 const shell = @import("shell.zig");
 pub const view = @import("view.zig");
+pub const diff_layout = zircon_git_ui.layout;
 pub const Shell = shell.Shell;
 pub const Command = commands_module.Command;
 pub const commands = commands_module.commands;

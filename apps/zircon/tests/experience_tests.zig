@@ -181,7 +181,7 @@ const Ops = struct {
 };
 fn open(app: *ui.App, root: []const u8, file: []const u8) !ui.WindowHandle {
     var shell = try zircon.Shell.init(t.allocator, t.io, root, file);
-    const h = app.openWindow(zircon.Shell, .{ .visible = false, .width = 1200, .height = 760 }, shell) catch |err| {
+    const h = app.openWindow(zircon.Shell, .{ .visible = false, .menus = &zircon.menus.groups, .width = 1200, .height = 760 }, shell) catch |err| {
         shell.deinit(t.allocator);
         return err;
     };
@@ -964,4 +964,140 @@ test "Git diff edits live files directly and uses source undo save and redo" {
     defer t.allocator.free(saved);
     try t.expectEqualStrings(actual, saved);
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-editable-git.png");
+}
+
+test "Git multibuffer drags across source rows survives redraw and edits either split side safely" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 1;\nconst b = 2;\nconst c = 3;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "helper.zig", .data = "const helper = false;\n" });
+    try command(root, &.{ "init", "-b", "main" });
+    try command(root, &.{ "config", "user.email", "fixture@zircon.invalid" });
+    try command(root, &.{ "config", "user.name", "Zircon fixture" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Initial" });
+    const initial = "const a = 4;\nconst b = 5;\nconst c = 6;\n";
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = initial });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "helper.zig", .data = "const helper = true;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_changes);
+    try settle(&app);
+    try t.expectEqual(@as(usize, 2), try app.read(owner, Ops.editableGitSources, .{}));
+    const first = try elementBounds(&app, h, "git-live:main.zig:1");
+    const begin: ui.Point = .{ .x = first.x + 76, .y = first.y + first.height / 2 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = begin } });
+    _ = try app.step(0);
+    const third = try elementBounds(&app, h, "git-live:main.zig:3");
+    const end: ui.Point = .{ .x = third.x + 76, .y = third.y + third.height / 2 };
+    try app.dispatch(h, .{ .pointer_move = .{ .position = end } });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_up = .{ .position = end } });
+    const Check = struct {
+        fn selection(self: *const zircon.Shell) bool {
+            const view = self.git.editing.current() orelse return false;
+            const range = view.editor.primary().range();
+            return range.start == 0 and range.end == "const a = 4;\nconst b = 5;\n".len and !view.editor.dragging;
+        }
+    };
+    try t.expect(try app.read(owner, Check.selection, .{}));
+    try app.dispatch(h, .{ .text = "// replacement\n" });
+    try settle(&app);
+    var actual: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &actual });
+    defer t.allocator.free(actual);
+    try t.expectEqualStrings("// replacement\nconst c = 6;\n", actual);
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.undo) });
+    try settle(&app);
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.git_split_view) });
+    _ = try app.step(0);
+    const split_row = try elementBounds(&app, h, "git-live:main.zig:1");
+    const surface = try elementBounds(&app, h, "git-diff-lines");
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-split-inspect.png");
+    try t.expect(split_row.x > surface.x + surface.width * 0.45);
+    const old_point: ui.Point = .{ .x = surface.x + 90, .y = split_row.y + split_row.height / 2 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = old_point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = old_point } });
+    try app.dispatch(h, .{ .text = "must not edit" });
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.undo) });
+    try settle(&app);
+    var readonly: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &readonly });
+    defer t.allocator.free(readonly);
+    try t.expectEqualStrings(initial, readonly);
+    const current = try elementBounds(&app, h, "git-live:main.zig:1");
+    const current_point: ui.Point = .{ .x = current.x + 76, .y = current.y + current.height / 2 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = current_point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = current_point } });
+    try app.dispatch(h, .{ .key_down = .{ .key = .home } });
+    try app.dispatch(h, .{ .text = "// split edit\n" });
+    try settle(&app);
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.save) });
+    try settle(&app);
+    const saved = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(saved);
+    try t.expectEqualStrings("// split edit\n" ++ initial, saved);
+    const sibling = try tmp.dir.readFileAlloc(t.io, "helper.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(sibling);
+    try t.expectEqualStrings("const helper = true;\n", sibling);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-multibuffer-split.png");
+}
+
+test "platform menus dispatch commands without duplicating a menu bar in the window" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 1;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const shell = try zircon.Shell.init(t.allocator, t.io, root, "main.zig");
+    const h = try app.openWindow(zircon.Shell, .{ .title = "ZirconMenuJourney", .visible = false, .menus = &zircon.menus.groups, .width = 1200, .height = 760 }, shell);
+    try app.update(try app.windowEntity(zircon.Shell, h), zircon.Shell.bootstrap, .{h});
+    try settle(&app);
+    const frame = &(try app.window(h)).frames.committed;
+    for (frame.nodes.items) |node| if (node.key) |key| if (key == .string) {
+        try t.expect(!std.mem.startsWith(u8, key.string, "app-menu:"));
+        try t.expect(!std.mem.eql(u8, key.string, "application-menu"));
+    };
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.new_file) });
+    _ = try app.step(0);
+    const Check = struct {
+        fn newFile(self: *const zircon.Shell) bool {
+            return self.tabs.items.len == 2;
+        }
+        fn nativeNewFile(self: *const zircon.Shell) bool {
+            return self.tabs.items.len == 3;
+        }
+    };
+    try t.expect(try app.read(try app.windowEntity(zircon.Shell, h), Check.newFile, .{}));
+    if (comptime ui.testing.native != void) {
+        const objc = ui.testing.native.objc;
+        const native_app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+        const bar = objc.send(objc.Id, native_app, "mainMenu", .{});
+        try t.expectEqual(@as(usize, zircon.menus.groups.len), objc.send(usize, bar, "numberOfItems", .{}));
+        const heading = objc.send(objc.Id, bar, "itemAtIndex:", .{@as(isize, 6)});
+        try t.expectEqualStrings("Git", objc.fromString(objc.send(objc.Id, heading, "title", .{})));
+        const windows = objc.send(objc.Id, native_app, "windows", .{});
+        var native_window: objc.Id = null;
+        for (0..objc.send(usize, windows, "count", .{})) |index| {
+            const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{index});
+            if (std.mem.eql(u8, "ZirconMenuJourney", objc.fromString(objc.send(objc.Id, candidate, "title", .{})))) native_window = candidate;
+        }
+        const window = native_window orelse return error.MenuJourneyWindowMissing;
+        objc.send(void, window, "makeKeyAndOrderFront:", .{@as(objc.Id, null)});
+        const file_heading = objc.send(objc.Id, bar, "itemAtIndex:", .{@as(isize, 1)});
+        const file_menu = objc.send(objc.Id, file_heading, "submenu", .{});
+        objc.send(void, native_app, "activateIgnoringOtherApps:", .{true});
+        for (0..16) |_| try ui.testing.native.pump(0);
+        objc.send(void, window, "makeKeyWindow", .{});
+        objc.send(void, file_menu, "performActionForItemAtIndex:", .{@as(isize, 0)});
+        for (0..4) |_| try ui.testing.native.pump(0);
+        _ = try app.step(0);
+        try t.expect(try app.read(try app.windowEntity(zircon.Shell, h), Check.nativeNewFile, .{}));
+    }
 }

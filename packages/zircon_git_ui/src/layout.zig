@@ -98,6 +98,62 @@ pub const Projection = struct {
         }
         return null;
     }
+    pub const Hit = struct { path: []const u8, source_row: usize, top: f32 };
+    pub fn hit(self: Projection, diff: git.Diff, state: *const State, line_height: f32, y: f32) ?Hit {
+        var file_top: f32 = 0;
+        for (self.files) |file| {
+            const height = file.height(state, line_height);
+            defer file_top += height;
+            if (y < file_top or y >= file_top + height or state.collapsed.contains(file.path)) continue;
+            const local = y - file_top - file_height;
+            if (local < 0) return null;
+            const rows = file.rows(state.mode);
+            const index = visibleStart(rows, line_height, local);
+            if (index >= rows.len or rows[index].kind != .code) return null;
+            const code = rows[index].kind.code;
+            const at = code.new orelse return null;
+            const line = diff.hunks[code.hunk].lines[at].new_line orelse return null;
+            return .{ .path = file.path, .source_row = line -| 1, .top = file_top + file_height + rows[index].top(line_height) };
+        }
+        return null;
+    }
+    /// Adjacent editable row in display order, skipping removed lines, folded
+    /// files and undisplayed source gaps.
+    pub fn adjacent(self: Projection, diff: git.Diff, state: *const State, path: []const u8, source_row: usize, forward: bool) ?Hit {
+        var previous: ?Hit = null;
+        var found = false;
+        for (self.files) |file| {
+            if (state.collapsed.contains(file.path)) continue;
+            for (file.rows(state.mode)) |row| {
+                if (row.kind != .code) continue;
+                const code = row.kind.code;
+                const at = code.new orelse continue;
+                const number = diff.hunks[code.hunk].lines[at].new_line orelse continue;
+                const hit_value: Hit = .{ .path = file.path, .source_row = number -| 1, .top = 0 };
+                if (found) return hit_value;
+                if (std.mem.eql(u8, path, file.path) and source_row == number -| 1) {
+                    if (!forward) return previous;
+                    found = true;
+                }
+                previous = hit_value;
+            }
+        }
+        return null;
+    }
+    pub fn sourceOffset(self: Projection, diff: git.Diff, state: *const State, path: []const u8, source_row: usize, line_height: f32) ?f32 {
+        var top: f32 = 0;
+        for (self.files) |file| {
+            defer top += file.height(state, line_height);
+            if (!std.mem.eql(u8, file.path, path) or state.collapsed.contains(file.path)) continue;
+            for (file.rows(state.mode)) |row| if (row.kind == .code) {
+                const code = row.kind.code;
+                const at = code.new orelse continue;
+                const number = diff.hunks[code.hunk].lines[at].new_line orelse continue;
+                if (number -| 1 == source_row) return top + file_height + row.top(line_height);
+            };
+        }
+        return null;
+    }
     pub fn hunkOffset(self: Projection, state: *const State, hunk: usize, line_height: f32) ?f32 {
         var top: f32 = 0;
         for (self.files) |file| {

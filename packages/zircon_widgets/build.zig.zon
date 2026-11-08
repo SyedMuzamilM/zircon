@@ -1,0 +1,8 @@
+.{
+    .name = .zircon_widgets,
+    .version = "0.1.0",
+    .fingerprint = 0x59bdf0e356bd9d81,
+    .minimum_zig_version = "0.17.1",
+    .dependencies = .{ .zircon_ui = .{ .path = "../zircon_ui" } },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "README.md" },
+}

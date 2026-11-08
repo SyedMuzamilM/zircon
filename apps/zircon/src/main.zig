@@ -42,7 +42,7 @@ pub fn main(init: std.process.Init) !void {
     var app = try ui.App.init(.{ .allocator = init.gpa, .icon = icon });
     defer app.deinit();
     var shell = try Shell.init(init.gpa, init.io, root, file);
-    const handle = app.openWindow(Shell, .{ .title = "Zircon", .chrome = .integrated, .width = 1240, .height = 820, .visible = snapshot_path == null }, shell) catch |err| {
+    const handle = app.openWindow(Shell, .{ .title = "Zircon", .menus = &zircon.menus.groups, .chrome = .integrated, .width = 1240, .height = 820, .visible = snapshot_path == null }, shell) catch |err| {
         shell.deinit(init.gpa);
         return err;
     };

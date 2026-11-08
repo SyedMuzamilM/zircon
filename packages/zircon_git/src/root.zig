@@ -16,6 +16,7 @@ pub const Status = status_module.Status;
 pub const Entry = status_module.Entry;
 pub const Change = status_module.Change;
 pub const Diff = diff_module.Diff;
+pub const parseDiff = diff_module.parse;
 pub const Hunk = diff_module.Hunk;
 pub const Line = diff_module.Line;
 pub const LineChange = diff_module.LineChange;

@@ -1,11 +1,12 @@
 //! Persistent project-search tab with source-linked excerpts. Buffers override
 //! disk files; clicking a row opens the original document, never a copied buffer.
 const std = @import("std");
+const zircon_editor = @import("zircon_editor");
 const search = @import("zircon_search");
 const ui = @import("zircon_ui");
 const shell = @import("../shell.zig");
-const code = @import("code_line.zig");
 const v = @import("components.zig");
+const code = zircon_editor.code_line;
 const Shell = shell.Shell;
 pub const Target = struct { group: u32, match: u32, generation: u64 };
 const header_height: f32 = 36;

@@ -2,12 +2,13 @@
 //! navigation resolves against the discovered repository, including subfolders.
 const std = @import("std");
 const git = @import("zircon_git");
+const zircon_git_ui = @import("zircon_git_ui");
 const ui = @import("zircon_ui");
 const commands = @import("../commands.zig");
-const layout = @import("../models/diff_layout.zig");
 const services_git = @import("../services/git.zig");
 const shell = @import("../shell.zig");
 const v = @import("components.zig");
+const layout = zircon_git_ui.layout;
 const Shell = shell.Shell;
 const Command = commands.Command;
 const a = std.heap.page_allocator;
@@ -105,6 +106,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
         const height = if (self.git.projection) |projection| projection.contentHeight(&self.git.diff_view, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
+        e.stopPropagation();
         cx.notify();
         return;
     }

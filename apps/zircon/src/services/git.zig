@@ -3,17 +3,17 @@
 const std = @import("std");
 const zircon_editor = @import("zircon_editor");
 const git = @import("zircon_git");
+const zircon_git_ui = @import("zircon_git_ui");
 const multibuffer = @import("zircon_multibuffer");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const workspace = @import("zircon_workspace");
 const actions = @import("../actions.zig");
 const git_editing = @import("../git_editing.zig");
-const diff_layout = @import("../models/diff_layout.zig");
 const git_tree = @import("../models/git_tree.zig");
 const shell = @import("../shell.zig");
-const views_git_diff = @import("../views/git_diff.zig");
 const handoff = @import("handoff.zig");
+const diff_layout = zircon_git_ui.layout;
 const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 const BlameRequest = struct { line: usize, expanded: bool = true, document: ?workspace.DocumentId = null };
@@ -125,15 +125,6 @@ pub const Model = struct {
         self.editable = null;
         self.editable_source = null;
     }
-    pub fn setEditableSource(self: *Model, id: workspace.DocumentId, snapshot: text.Snapshot) !void {
-        self.clearEditable();
-        var projection = multibuffer.MultiBuffer.init(a);
-        errdefer projection.deinit();
-        try projection.addSource(id, snapshot);
-        try projection.setExcerpts(id, &.{.{ .start = 0, .end = snapshot.byteLen() }});
-        self.editable = projection;
-        self.editable_source = id;
-    }
     pub fn setEditableProjection(self: *Model, projection: multibuffer.MultiBuffer, source: ?workspace.DocumentId) void {
         self.clearEditable();
         self.editable = projection;
@@ -206,24 +197,6 @@ pub const Model = struct {
         self.restorePresentation(&self.history_tabs.items[found.?].presentation);
     }
 };
-fn matchesPath(absolute: []const u8, relative: []const u8) bool {
-    if (std.mem.eql(u8, absolute, relative)) return true;
-    if (absolute.len <= relative.len or !std.mem.endsWith(u8, absolute, relative)) return false;
-    const separator = absolute[absolute.len - relative.len - 1];
-    return separator == '/' or separator == '\\';
-}
-pub fn ensureEditable(self: *Shell) !void {
-    if (self.git.editable != null or self.git.selected_path.len == 0) return;
-    for (self.tabs.items) |tab| {
-        const record = try self.workspace.getConst(tab.document);
-        if (record.path) |path| if (std.mem.endsWith(u8, path, self.git.selected_path)) {
-            var snapshot = record.doc.snapshot();
-            defer snapshot.deinit();
-            try self.git.setEditableSource(tab.document, snapshot);
-            return;
-        };
-    }
-}
 fn statusEntry(entries: []const git.Entry, path: []const u8) ?git.Entry {
     for (entries) |entry| if (std.mem.eql(u8, entry.path, path)) return entry;
     return null;
@@ -271,27 +244,26 @@ pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
     errdefer projection.deinit();
     var source: ?workspace.DocumentId = null;
     var source_count: usize = 0;
-    for (self.tabs.items, 0..) |tab, tab_index| {
-        const record = self.workspace.getConst(tab.document) catch continue;
-        const path = record.path orelse continue;
-        var duplicate = false;
-        for (self.tabs.items[0..tab_index]) |previous| if (std.meta.eql(previous.document, tab.document)) {
-            duplicate = true;
+    var previous_path: []const u8 = "";
+    for (diff.hunks) |hunk| {
+        if (std.mem.eql(u8, previous_path, hunk.path)) continue;
+        previous_path = hunk.path;
+        const absolute = try std.fs.path.resolve(a, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, hunk.path });
+        defer a.free(absolute);
+        for (self.tabs.items) |tab| {
+            const record = self.workspace.getConst(tab.document) catch continue;
+            const path = record.path orelse continue;
+            if (!std.mem.eql(u8, path, absolute)) continue;
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            try projection.addSource(tab.document, snapshot);
+            const ranges = try zircon_git_ui.sources.ranges(a, snapshot, diff.hunks, hunk.path);
+            defer a.free(ranges);
+            try projection.setExcerpts(tab.document, ranges);
+            source = tab.document;
+            source_count += 1;
             break;
-        };
-        if (duplicate) continue;
-        var included = false;
-        for (diff.hunks) |hunk| if (matchesPath(path, hunk.path)) {
-            included = true;
-            break;
-        };
-        if (!included) continue;
-        var snapshot = record.doc.snapshot();
-        defer snapshot.deinit();
-        try projection.addSource(tab.document, snapshot);
-        try projection.setExcerpts(tab.document, &.{.{ .start = 0, .end = snapshot.byteLen() }});
-        source = tab.document;
-        source_count += 1;
+        }
     }
     self.git.setEditableProjection(projection, if (source_count == 1) source else null);
 }
@@ -507,7 +479,6 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
         const record = try self.workspace.getConst(tab.document);
         if (record.path != null and record.dirty()) return error.SaveBeforeGitOperation;
     };
-    if (operation == .diff or operation == .all_diff) try ensureEditable(self);
     if (operation == .blame) {
         if (self.tabs.items.len == 0) return error.NoDocument;
         const id = if (operation == .blame and operation.blame.document != null) operation.blame.document.? else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
@@ -566,7 +537,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
         .stage, .unstage, .stage_all, .unstage_all, .commit, .network, .switch_branch, .stash_save, .stash_apply => true,
         else => false,
     };
-    if ((mutation or operation == .refresh) and (self.panel == .git_diff or self.secondary_tool == .git_diff) and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
+    if ((mutation or operation == .refresh) and (self.panel == .git_diff or self.secondary_tool == .git_diff) and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (!self.git.combined and self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
     job.include_references = self.git.needs_metadata or self.git.references == null or switch (operation) {
         .network, .switch_branch, .stash_save, .stash_apply, .commit => true,
         else => false,
@@ -677,7 +648,9 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.message = &.{};
         try rebuildEditable(self, diff);
         if (self.git.reveal_path.len > 0) {
-            if (views_git_diff.fileOffset(diff, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| self.git.diff_scroll.offset = offset;
+            if (self.git.projection) |projection| if (projection.fileOffset(&self.git.diff_view, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
+                self.git.diff_scroll.offset = offset;
+            };
             a.free(self.git.reveal_path);
             self.git.reveal_path = &.{};
         }

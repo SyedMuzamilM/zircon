@@ -23,6 +23,9 @@ pub const Editor = struct {
     allocator: std.mem.Allocator,
     vim: vim_module.State = .{},
     selections: selection.Set,
+    /// Optional source range exposed by an excerpt view. Edits cannot consume
+    /// bytes outside it; insertion at either endpoint remains valid.
+    edit_scope: ?text.Range = null,
     scroll: ui.controls.Scroll = .{},
     horizontal: f32 = 0,
     soft_wrap: wrap.Mode = .none,
@@ -121,6 +124,10 @@ pub const Editor = struct {
         };
     }
     pub fn mapChange(self: *Editor, change: *const text.Change) void {
+        if (self.edit_scope) |*range| {
+            range.start = change.map(range.start, .before);
+            range.end = change.map(range.end, .after);
+        }
         self.wrap_cache.noteChange(change);
         self.vim.recording.active = false;
         self.vim.cursor = change.map(self.vim.cursor, .after);
@@ -203,6 +210,9 @@ pub const Editor = struct {
     }
     pub fn applyEdits(self: *Editor, document: *text.Document, edits: []const text.Edit, group: u64) !Outcome {
         if (edits.len == 0) return .{ .handled = true };
+        if (self.edit_scope) |scope| for (edits) |edit| {
+            if (edit.range.start < scope.start or edit.range.end > scope.end) return error.CrossExcerptEdit;
+        };
         var before = document.snapshot();
         defer before.deinit();
         try self.remember(before.stateId(), self.selections.items.items);
@@ -212,6 +222,10 @@ pub const Editor = struct {
         errdefer self.allocator.free(after_selections);
         try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
         var change = try document.apply(document.revision(), edits, group);
+        if (self.edit_scope) |*range| {
+            range.start = change.map(range.start, .before);
+            range.end = change.map(range.end, .after);
+        }
         self.wrap_cache.noteChange(&change);
         vim_repeat.changed(self, &change, edits);
         for (edits, 0..) |edit, i| {
@@ -256,7 +270,8 @@ pub const Editor = struct {
         switch (command) {
             .insert => |bytes| return self.insert(document, bytes),
             .select_all => {
-                self.selections.single(.{ .anchor = 0, .head = snapshot.byteLen() });
+                const range = self.edit_scope orelse text.Range{ .start = 0, .end = snapshot.byteLen() };
+                self.selections.single(.{ .anchor = range.start, .head = range.end });
                 self.typing_group = 0;
             },
             .move => |request| {

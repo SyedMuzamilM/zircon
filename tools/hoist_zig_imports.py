@@ -98,6 +98,8 @@ def main():
     changed = []
     for root in options.paths:
         for path in ([root] if root.is_file() else sorted(root.rglob("*.zig"))):
+            if any(part in {".zig-cache", "zig-out", "target", "node_modules"} for part in path.parts):
+                continue
             before = path.read_text()
             after = hoist(before)
             if after != before:

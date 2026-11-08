@@ -1,0 +1,8 @@
+.{
+    .name = .zircon_git_ui,
+    .version = "0.1.0",
+    .fingerprint = 0x51d41b8d9e1337d8,
+    .minimum_zig_version = "0.17.1",
+    .dependencies = .{ .zircon_ui = .{ .path = "../zircon_ui" }, .zircon_editor = .{ .path = "../zircon_editor" }, .zircon_text = .{ .path = "../zircon_text" }, .zircon_workspace = .{ .path = "../zircon_workspace" }, .zircon_multibuffer = .{ .path = "../zircon_multibuffer" }, .zircon_git = .{ .path = "../zircon_git" }, .zircon_widgets = .{ .path = "../zircon_widgets" } },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "README.md" },
+}

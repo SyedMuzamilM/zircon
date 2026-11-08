@@ -29,7 +29,6 @@ const terminal_module = @import("terminal.zig");
 const theme_module = @import("theme.zig");
 const view_module = @import("view.zig");
 const components = @import("views/components.zig");
-const views_git_diff = @import("views/git_diff.zig");
 const views_image = @import("views/image.zig");
 const views_markdown = @import("views/markdown.zig");
 const views_search = @import("views/search.zig");
@@ -354,6 +353,14 @@ pub const Shell = struct {
             try actions.prepareEditor(self, cx, &pane.editor, snapshot, "secondary-editor");
         }
         self.editor_options = .{ .indent_guides = values.indent_guides, .active_line = values.active_line, .fold_controls = values.fold_controls, .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        for (self.git.editing.views.items) |*view| {
+            const record = self.workspace.getConst(view.document) catch continue;
+            self.configureEditor(&view.editor, record.path orelse "");
+            view.editor.soft_wrap = .none;
+            view.editor.show_fold_controls = false;
+            view.editor.show_git_gutters = false;
+            view.editor.show_indent_guides = false;
+        }
         try self.styleInputs(cx);
         cx.notify();
     }
@@ -618,14 +625,13 @@ pub const Shell = struct {
             self.git.selected_commit = &.{};
             self.showTool(.git_diff);
             self.rememberPanel();
-            if (self.git.combined and self.git.diff != null) {
-                try services_git.ensureEditable(self);
-                if (views_git_diff.fileOffset(self.git.diff.?, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
+            if (self.git.combined) if (self.git.projection) |projection| {
+                if (projection.fileOffset(&self.git.diff_view, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
                     self.git.diff_scroll.offset = offset;
                     cx.notify();
                     return;
                 }
-            }
+            };
             services_git.start(self, cx, if (self.git.combined) blk: {
                 std.heap.page_allocator.free(self.git.reveal_path);
                 self.git.reveal_path = try std.heap.page_allocator.dupe(u8, path);
@@ -662,7 +668,7 @@ pub const Shell = struct {
     }
     pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
-        const height = if (self.git.diff) |diff| views_git_diff.contentHeight(diff, self.editor_options.font_size * self.editor_options.line_height) else 0;
+        const height = if (self.git.projection) |projection| projection.contentHeight(&self.git.diff_view, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
         cx.notify();

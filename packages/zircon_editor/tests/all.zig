@@ -1165,3 +1165,23 @@ test "folds survive edits before a header and unfolding restores all wrapped sou
     try t.expectEqual(source.lineCount(), state.wrap_cache.rows.items.len);
     for (state.wrap_cache.rows.items, 0..) |row, i| try t.expectEqual(i, row.line);
 }
+
+test "excerpt editing refuses hidden source bytes and remaps its range after insertion" {
+    var document = try text.Document.init(t.allocator, "hidden\nvisible\ntrailer\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.edit_scope = .{ .start = 7, .end = 15 };
+    try t.expectError(error.CrossExcerptEdit, state.applyEdits(&document, &.{.{ .range = .{ .start = 6, .end = 8 }, .text = "" }}, 0));
+    var result = try state.applyEdits(&document, &.{.{ .range = .{ .start = 7, .end = 7 }, .text = "new\n" }}, 0);
+    defer result.change.?.deinit();
+    try t.expectEqual(@as(usize, 19), state.edit_scope.?.end);
+    _ = try state.execute(&document, .select_all);
+    try t.expectEqual(@as(usize, 7), state.primary().range().start);
+    try t.expectEqual(@as(usize, 19), state.primary().range().end);
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    const bytes = try snapshot.copy(t.allocator, .{ .start = 0, .end = snapshot.byteLen() });
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings("hidden\nnew\nvisible\ntrailer\n", bytes);
+}
