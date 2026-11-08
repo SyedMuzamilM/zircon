@@ -9,6 +9,8 @@ pub fn build(b: *std.Build) void {
     const text_module = text_dependency.module("zircon_text");
     const workspace_dependency = b.dependency("zircon_workspace", .{ .target = target, .optimize = optimize });
     const workspace_module = workspace_dependency.module("zircon_workspace");
+    const multibuffer_dependency = b.dependency("zircon_multibuffer", .{ .target = target, .optimize = optimize });
+    const multibuffer_module = multibuffer_dependency.module("zircon_multibuffer");
     const editor_dependency = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize });
     const editor_module = editor_dependency.module("zircon_editor");
     const git_module = b.dependency("zircon_git", .{ .target = target, .optimize = optimize }).module("zircon_git");
@@ -52,7 +54,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("apps/zircon/src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
+        .imports = &.{ .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
     });
     const app_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("apps/zircon/tests/all.zig"),
@@ -73,6 +75,9 @@ pub fn build(b: *std.Build) void {
     }) });
     const workspace_run = b.addRunArtifact(workspace_tests);
     b.step("test-workspace", "Test file identities, saves, and project navigation").dependOn(&workspace_run.step);
+    const multibuffer_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("packages/zircon_multibuffer/tests/all.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module } } }) });
+    const multibuffer_run = b.addRunArtifact(multibuffer_tests);
+    b.step("test-multibuffer", "Test source-backed editable excerpt projections").dependOn(&multibuffer_run.step);
     const text_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("packages/zircon_text/tests/all.zig"),
         .target = target,
@@ -96,6 +101,7 @@ pub fn build(b: *std.Build) void {
     portable_compile.dependOn(&tests.step);
     portable_compile.dependOn(&text_tests.step);
     portable_compile.dependOn(&workspace_tests.step);
+    portable_compile.dependOn(&multibuffer_tests.step);
     portable_compile.dependOn(&editor_tests.step);
     portable_compile.dependOn(&app_tests.step);
     const run = b.addRunArtifact(tests);
@@ -130,7 +136,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("apps/zircon/src/root.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
+            .imports = &.{ .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
         });
         const editor_bench = b.addExecutable(.{ .name = "zircon-editor-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_editor.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_git", .module = git_module } } }) });
         const recovery_journey = b.addExecutable(.{ .name = "zircon-recovery-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_recovery.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
@@ -267,6 +273,7 @@ pub fn build(b: *std.Build) void {
     check.dependOn(&run.step);
     check.dependOn(&text_run.step);
     check.dependOn(&workspace_run.step);
+    check.dependOn(&multibuffer_run.step);
     check.dependOn(&editor_run.step);
     check.dependOn(&app_run.step);
     check.dependOn(&format.step);

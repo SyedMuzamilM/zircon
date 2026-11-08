@@ -1,0 +1,1 @@
+.{ .name = .zircon_multibuffer, .version = "0.1.0", .fingerprint = 0x4248fcabd3846997, .minimum_zig_version = "0.17.1", .dependencies = .{ .zircon_text = .{ .path = "../zircon_text" }, .zircon_workspace = .{ .path = "../zircon_workspace" } }, .paths = .{ "build.zig", "build.zig.zon", "src", "tests", "README.md" } }

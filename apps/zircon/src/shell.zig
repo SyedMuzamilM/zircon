@@ -120,6 +120,7 @@ pub const Shell = struct {
         }
         self.tabs.deinit(self.allocator);
         self.document_changes.clear();
+        self.git.clearEditable();
         if (self.secondary) |*pane| pane.editor.deinit();
         for (self.tree.items) |row| {
             self.allocator.free(row.name);
@@ -598,6 +599,7 @@ pub const Shell = struct {
             self.showTool(.git_diff);
             self.rememberPanel();
             if (self.git.combined and self.git.diff != null) {
+                try @import("services/git.zig").ensureEditable(self);
                 if (@import("views/git_diff.zig").fileOffset(self.git.diff.?, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
                     self.git.diff_scroll.offset = offset;
                     cx.notify();

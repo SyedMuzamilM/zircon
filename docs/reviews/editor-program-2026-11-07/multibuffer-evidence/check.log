@@ -1,0 +1,65 @@
+2 UI example matches compiled source
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.443s
+
+OK
+    Finished `release` profile [optimized] target(s) in 0.40s
+Build Summary: 45/45 steps succeeded
+check success
++- run test cached
+|  +- compile test debug native cached 61ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 79ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 65ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 63ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 80ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 63ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 84ms MaxRSS:31M
++- contracts success
+|  +- compile test debug native success 197ms MaxRSS:101M
+|  |  +- options cached
+|  +- compile test debug native success 276ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 291ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 286ms MaxRSS:103M
+|  |  +- options (reused)
+|  +- compile test debug native success 300ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 213ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 279ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 276ms MaxRSS:102M
+|     +- options (reused)
++- examples-check success
+|  +- compile exe counter-tree debug native cached 75ms MaxRSS:31M
+|  |  +- options (reused)
+|  +- run python3 success 86ms
+|  +- run python3 success 495ms
+|  +- compile exe zircon-counter debug native cached 58ms MaxRSS:32M
+|     +- options cached
++- run test cached
+|  +- compile test debug native cached 50ms MaxRSS:31M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 80ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 84ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 86ms MaxRSS:31M
++- run test cached
+|  +- compile test debug native cached 49ms MaxRSS:31M
+|     +- options (reused)
++- run test cached
+|  +- compile test debug native cached 79ms MaxRSS:31M
+|  |  +- options (reused)
+|  +- run cargo success 472ms
++- zig fmt --check success
+

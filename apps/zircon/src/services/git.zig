@@ -5,12 +5,17 @@ const ui = @import("zircon_ui");
 const git = @import("zircon_git");
 const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
+const multibuffer = @import("zircon_multibuffer");
 const Shell = @import("../shell.zig").Shell;
 const a = std.heap.page_allocator;
 const BlameRequest = struct { line: usize, expanded: bool = true, document: ?workspace.DocumentId = null };
 pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: BlameRequest, network: git.Network, switch_branch: struct { name: []const u8, create: bool = false, track: bool = false }, stash_save: bool, stash_apply: struct { oid: []const u8, pop: bool }, stash_show: []const u8 };
 const BlameTarget = struct { document: workspace.DocumentId, revision: u64, line: usize };
 pub const Model = struct {
+    /// Source-backed projection for the active editable Git view. The current
+    /// patch renderer still uses `diff`; this is the mapping seam for WORK-02.
+    editable: ?multibuffer.MultiBuffer = null,
+    editable_source: ?workspace.DocumentId = null,
     projection: ?@import("../models/diff_layout.zig").Projection = null,
     diff_view: @import("../models/diff_layout.zig").State = .{},
     commit_focus: u64 = 0,
@@ -49,6 +54,7 @@ pub const Model = struct {
     staged_diff: bool = false,
     error_text: []u8 = &.{},
     pub fn deinit(self: *Model) void {
+        if (self.editable) |*value| value.deinit();
         a.free(self.root_path);
         self.tree.deinit(a);
         self.diff_view.deinit(a);
@@ -64,7 +70,33 @@ pub const Model = struct {
         a.free(self.error_text);
         self.* = undefined;
     }
+    pub fn clearEditable(self: *Model) void {
+        if (self.editable) |*value| value.deinit();
+        self.editable = null;
+        self.editable_source = null;
+    }
+    pub fn setEditableSource(self: *Model, id: workspace.DocumentId, snapshot: text.Snapshot) !void {
+        self.clearEditable();
+        var projection = multibuffer.MultiBuffer.init(a);
+        errdefer projection.deinit();
+        try projection.addSource(id, snapshot);
+        try projection.setExcerpts(id, &.{.{ .start = 0, .end = snapshot.byteLen() }});
+        self.editable = projection;
+        self.editable_source = id;
+    }
 };
+pub fn ensureEditable(self: *Shell) !void {
+    if (self.git.editable != null or self.git.selected_path.len == 0) return;
+    for (self.tabs.items) |tab| {
+        const record = try self.workspace.getConst(tab.document);
+        if (record.path) |path| if (std.mem.endsWith(u8, path, self.git.selected_path)) {
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            try self.git.setEditableSource(tab.document, snapshot);
+            return;
+        };
+    }
+}
 const Result = struct {
     root_path: []u8 = &.{},
     projection: ?@import("../models/diff_layout.zig").Projection = null,
@@ -219,6 +251,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
         const record = try self.workspace.getConst(tab.document);
         if (record.path != null and record.dirty()) return error.SaveBeforeGitOperation;
     };
+    if (operation == .diff or operation == .all_diff) try ensureEditable(self);
     if (operation == .blame) {
         if (self.tabs.items.len == 0) return error.NoDocument;
         const id = if (operation == .blame and operation.blame.document != null) operation.blame.document.? else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;

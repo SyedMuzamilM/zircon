@@ -74,6 +74,9 @@ const Ops = struct {
     fn gitGeneration(self: *const zircon.Shell) u64 {
         return self.git.generation;
     }
+    fn editableGitSource(self: *const zircon.Shell) bool {
+        return self.git.editable != null and self.git.editable_source != null;
+    }
     fn previewImage(self: *const zircon.Shell) ?u64 {
         return self.preview.?.view.imageIdentity("image.png");
     }
@@ -411,6 +414,7 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try app.update(owner, Ops.gitFile, .{});
     try t.expectEqual(before_navigation, try app.read(owner, Ops.gitGeneration, .{}));
     try settle(&app);
+    try t.expect(try app.read(owner, Ops.editableGitSource, .{}));
     var numbered = false;
     var addition = false;
     for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .text) {
