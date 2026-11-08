@@ -108,6 +108,15 @@ const ServerOps = struct {
         const doc = self.language.documents.items[0];
         return doc.version != null and self.language.sessions.items[doc.session].client.?.ready();
     }
+    fn resultsTool(self: *const zircon.Shell) !void {
+        try t.expectEqual(.language_results, self.currentTool(0).?);
+        try t.expect(self.tool_tabs.language_results);
+    }
+    fn searchTool(self: *const zircon.Shell) !void {
+        try t.expectEqual(.search, self.currentTool(0).?);
+        try t.expect(self.language.code_actions != null);
+        try t.expect(self.tool_tabs.language_results and self.tool_tabs.search);
+    }
     fn actionReady(self: *const zircon.Shell) bool {
         return self.language.code_actions != null;
     }
@@ -157,6 +166,15 @@ test "language action survives the full response path and keeps its server alive
     const identity = try app.read(owner, ServerOps.identity, .{});
     try app.update(owner, ServerOps.command, .{.code_actions});
     try waitFor(&app, owner, ServerOps.actionReady);
+    try app.read(owner, ServerOps.resultsTool, .{});
+    try app.update(owner, ServerOps.command, .{.project_search});
+    try app.read(owner, ServerOps.searchTool, .{});
+    _ = try app.step(0);
+    var query_visible = false;
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "project-query")) {
+        query_visible = true;
+    };
+    try t.expect(query_visible);
     try app.update(owner, Ops.applyAction, .{});
     try app.read(owner, Ops.source, .{"fixedld\n"});
     try t.expectEqual(identity, try app.read(owner, ServerOps.identity, .{}));

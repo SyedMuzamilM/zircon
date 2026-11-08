@@ -46,6 +46,7 @@ const PendingCodeActions = workspace_edits.Pending;
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
+    diagnostics_generation: u64 = 0,
     syntax_documents: std.ArrayList(SyntaxDocument) = .empty,
     syntax_waiting: bool = false,
     sessions: std.ArrayList(Session) = .empty,
@@ -63,6 +64,9 @@ pub const Model = struct {
     signature_pending: ?PendingSignature = null,
     code_actions: ?lsp.Message = null,
     code_actions_pending: ?PendingCodeActions = null,
+    results_kind: enum { references, code_actions } = .references,
+    results_scroll: [2]ui.controls.Scroll = @splat(.{}),
+    results_viewport: [2]?f32 = @splat(null),
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -346,6 +350,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     if (value.version == null) message.data.diagnostics.version = doc.version;
                     if (doc.diagnostics) |*old| old.deinit();
                     doc.diagnostics = message;
+                    self.language.diagnostics_generation +%= 1;
                     moved = true;
                     changed = true;
                     break;
@@ -376,7 +381,9 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                         self.language.references = message;
                         moved = true;
                         changed = true;
-                        self.showTool(.search);
+                        self.language.results_scroll = @splat(.{});
+                        self.language.results_kind = .references;
+                        self.showTool(.language_results);
                     }
                 },
                 .workspace_edit => |value| if (self.language.rename_pending) |pending| {
@@ -406,7 +413,9 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     self.language.code_actions = message;
                     moved = true;
                     changed = true;
-                    self.showTool(.search);
+                    self.language.results_scroll = @splat(.{});
+                    self.language.results_kind = .code_actions;
+                    self.showTool(.language_results);
                 },
                 else => {},
             }
@@ -560,15 +569,6 @@ fn acceptFormatting(self: *Shell, cx: *ui.Context(Shell), items: []const lsp.Tex
     try workspace_edits.apply(self, cx, .{ .document = pending.document, .session = pending.session, .request = pending.request, .revision = pending.revision }, &.{.{ .uri = uri, .edits = items, .version = pending.revision }}, .formatting);
 }
 
-fn selectDocument(self: *Shell, id: ws.DocumentId) !bool {
-    for (self.tabs.items, 0..) |tab, index| if (std.meta.eql(tab.document, id)) {
-        self.active = index;
-        self.active_pane = .primary;
-        return true;
-    };
-    return false;
-}
-
 pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, message: @FieldType(lsp.Message, "data")) !void {
     const pending = self.language.definition_pending orelse return;
     const value = message.locations;
@@ -577,18 +577,10 @@ pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, me
     if (record.doc.revision() != pending.revision) return self.language.clearDefinition();
     if (value.items.len == 0) return self.language.clearDefinition();
     const location = value.items[0];
-    var path: ?[]u8 = null;
-    var target_document: ?ws.DocumentId = null;
-    for (self.language.documents.items) |doc| if (std.mem.eql(u8, doc.uri, location.uri)) {
-        target_document = doc.id;
-        path = try self.allocator.dupe(u8, doc.path);
-        break;
-    };
-    if (path == null) path = try lsp.filePath(self.allocator, location.uri);
-    defer self.allocator.free(path.?);
-    if (target_document) |id| {
-        if (!try selectDocument(self, id)) try self.openPath(path.?);
-    } else try self.openPath(path.?);
+    const path = try lsp.filePath(self.allocator, location.uri);
+    defer self.allocator.free(path);
+    try actions.openPath(self, path);
+    if (self.active_pane == .secondary) self.secondary_tool = null else self.panel = .editor;
     const current = try actions.active(self);
     var snapshot = try self.workspace.snapshot(current.id);
     defer snapshot.deinit();
@@ -607,18 +599,10 @@ pub fn acceptReference(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
     const record = self.workspace.getConst(pending.document) catch return error.StaleReferences;
     if (record.doc.revision() != pending.revision) return error.StaleReferences;
     const location = message.data.locations.items[index];
-    var path: ?[]u8 = null;
-    var target_document: ?ws.DocumentId = null;
-    for (self.language.documents.items) |doc| if (std.mem.eql(u8, doc.uri, location.uri)) {
-        target_document = doc.id;
-        path = try self.allocator.dupe(u8, doc.path);
-        break;
-    };
-    if (path == null) path = try lsp.filePath(self.allocator, location.uri);
-    defer self.allocator.free(path.?);
-    if (target_document) |id| {
-        if (!try selectDocument(self, id)) try self.openPath(path.?);
-    } else try self.openPath(path.?);
+    const path = try lsp.filePath(self.allocator, location.uri);
+    defer self.allocator.free(path);
+    try actions.openPath(self, path);
+    if (self.active_pane == .secondary) self.secondary_tool = null else self.panel = .editor;
     const current = try actions.active(self);
     var snapshot = try self.workspace.snapshot(current.id);
     defer snapshot.deinit();
@@ -627,23 +611,6 @@ pub fn acceptReference(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
     current.editor.reveal(snapshot);
     self.editor_focus_request +%= 1;
     cx.notify();
-}
-
-pub fn selectDiagnostic(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
-    const current = try actions.active(self);
-    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
-        const message = doc.diagnostics orelse return;
-        if (index >= message.data.diagnostics.items.len) return;
-        var snapshot = try self.workspace.snapshot(current.id);
-        defer snapshot.deinit();
-        if (message.data.diagnostics.version != snapshot.revision()) return error.StaleDiagnostics;
-        const range = message.data.diagnostics.items[index].range;
-        try current.editor.setSelection(snapshot, .{ .start = try lsp.offsetAt(snapshot, range.start), .end = try lsp.offsetAt(snapshot, range.end) });
-        current.editor.reveal(snapshot);
-        self.editor_focus_request +%= 1;
-        cx.notify();
-        return;
-    };
 }
 
 pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {

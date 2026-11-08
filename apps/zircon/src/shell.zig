@@ -29,6 +29,7 @@ const settings_store = @import("settings/store.zig");
 const terminal_module = @import("terminal.zig");
 const theme_module = @import("theme.zig");
 const view_module = @import("view.zig");
+const views_diagnostics = @import("views/diagnostics.zig");
 const views_image = @import("views/image.zig");
 const view_inputs = @import("views/inputs.zig");
 const views_markdown = @import("views/markdown.zig");
@@ -134,7 +135,8 @@ pub const Shell = struct {
     agent_mode: bool = false,
     agent_editor: bool = true,
     left_panel: enum { project, git_changes, git_history } = .project,
-    panel: enum { editor, git_diff, extensions, search, image, markdown } = .editor,
+    panel: Panel = .editor,
+    diagnostics: views_diagnostics.Model = .{},
     image: ?views_image.Asset = null,
     preview: ?struct { document: workspace.DocumentId, view: views_markdown.Preview } = null,
     status: []u8 = &.{},
@@ -441,42 +443,44 @@ pub const Shell = struct {
         e.preventDefault();
         cx.notify();
     }
-    pub const ToolTabs = struct { search: bool = false, git_diff: bool = false, extensions: bool = false };
-    pub const Tool = enum { search, git_diff, extensions };
-    pub fn rememberPanel(self: *Shell) void {
-        switch (self.panel) {
-            .search => self.tool_tabs.search = true,
-            .git_diff => self.tool_tabs.git_diff = true,
-            .extensions => self.tool_tabs.extensions = true,
-            else => {},
+    pub const Panel = enum { editor, git_diff, extensions, search, image, markdown, diagnostics, language_results };
+    pub const Tool = enum { search, git_diff, extensions, diagnostics, language_results };
+    pub const ToolTabs = struct {
+        search: bool = false,
+        git_diff: bool = false,
+        extensions: bool = false,
+        diagnostics: bool = false,
+        language_results: bool = false,
+
+        pub fn contains(self: ToolTabs, tool: Tool) bool {
+            inline for (@typeInfo(Tool).@"enum".field_names) |name| if (tool == @field(Tool, name)) return @field(self, name);
+            unreachable;
         }
+        pub fn set(self: *ToolTabs, tool: Tool, opened: bool) void {
+            inline for (@typeInfo(Tool).@"enum".field_names) |name| if (tool == @field(Tool, name)) {
+                @field(self, name) = opened;
+                return;
+            };
+        }
+    };
+    pub fn rememberPanel(self: *Shell) void {
+        if (self.currentTool(0)) |tool| self.tool_tabs.set(tool, true);
     }
     pub const ToolTab = struct { tool: Tool, pane: u8 = 0 };
     pub fn showTool(self: *Shell, tool: Tool) void {
         if (self.active_pane == .secondary and self.secondary != null) {
             self.secondary_tool = tool;
-            switch (tool) {
-                .search => self.secondary_tools.search = true,
-                .git_diff => self.secondary_tools.git_diff = true,
-                .extensions => self.secondary_tools.extensions = true,
-            }
+            self.secondary_tools.set(tool, true);
         } else {
-            self.panel = switch (tool) {
-                .search => .search,
-                .git_diff => .git_diff,
-                .extensions => .extensions,
+            inline for (@typeInfo(Tool).@"enum".field_names) |name| if (tool == @field(Tool, name)) {
+                self.panel = @field(Panel, name);
             };
             self.rememberPanel();
         }
     }
     pub fn currentTool(self: *const Shell, pane: u8) ?Tool {
         if (pane == 1) return self.secondary_tool;
-        return switch (self.panel) {
-            .search => .search,
-            .git_diff => .git_diff,
-            .extensions => .extensions,
-            else => null,
-        };
+        return std.meta.stringToEnum(Tool, @tagName(self.panel));
     }
     pub fn onToolTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: ToolTab) void {
         if (target.tool == .git_diff) self.git.showWorking();
@@ -488,11 +492,7 @@ pub const Shell = struct {
     }
     pub fn onCloseTool(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: ToolTab) void {
         const opened = if (target.pane == 1) &self.secondary_tools else &self.tool_tabs;
-        switch (target.tool) {
-            .search => opened.search = false,
-            .git_diff => opened.git_diff = false,
-            .extensions => opened.extensions = false,
-        }
+        opened.set(target.tool, false);
         if (target.pane == 1) {
             if (self.secondary_tool == target.tool) self.secondary_tool = null;
         } else if (self.currentTool(0) == target.tool) self.panel = .editor;
@@ -753,10 +753,6 @@ pub const Shell = struct {
     }
     pub fn onDefinition(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.language.definitions) |message| try services_language.acceptDefinition(self, cx, self.language.definition_pending.?.session, message.data);
-    }
-    pub fn onDiagnostic(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
-        services_language.selectDiagnostic(self, cx, index) catch |err| try self.reportError(err);
-        cx.notify();
     }
     pub fn onSearchScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;

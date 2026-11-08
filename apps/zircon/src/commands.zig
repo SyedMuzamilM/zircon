@@ -131,9 +131,11 @@ pub const Command = enum {
     format_document,
     show_signature_help,
     code_actions,
+    show_diagnostics,
 };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
+    .{ .command = .show_diagnostics, .label = "Diagnostics: show project issues" },
     .{ .command = .show_symbol_info, .label = "Language: show symbol information", .shortcut = "⌥⌘I" },
     .{ .command = .go_to_definition, .label = "Language: go to definition", .shortcut = "F12" },
     .{ .command = .find_references, .label = "Language: find all references", .shortcut = "⇧F12" },

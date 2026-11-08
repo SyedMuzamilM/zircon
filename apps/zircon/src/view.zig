@@ -14,14 +14,15 @@ const theme = @import("theme.zig");
 const buffer_find = @import("views/buffer_find.zig");
 const chrome = @import("views/chrome.zig");
 const components = @import("views/components.zig");
+const views_diagnostics = @import("views/diagnostics.zig");
 const views_extensions = @import("views/extensions.zig");
 const views_git_diff = @import("views/git/diff.zig");
 const git_controls = @import("views/git/menus.zig");
 const views_image = @import("views/image.zig");
+const views_language_results = @import("views/language_results.zig");
 const overlays = @import("views/overlays.zig");
 const project = @import("views/project.zig");
 const views_search = @import("views/project_search.zig");
-const views_references = @import("views/references.zig");
 const workspace_controls = @import("views/workspace_controls.zig");
 const Shell = shell.Shell;
 const Command = catalogue.Command;
@@ -164,6 +165,8 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             .extensions => try views_extensions.render(self, b),
             .search => try views_search.render(self, b),
             .git_diff => try views_git_diff.render(self, b),
+            .diagnostics => try views_diagnostics.render(self, b, 0),
+            .language_results => try views_language_results.render(self, b, 0),
             else => unreachable,
         };
         return b.fluent().div()
@@ -191,7 +194,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const tab = &self.tabs.items[@min(self.active, self.tabs.items.len - 1)];
         const primary_record = try self.workspace.getConst(tab.document);
         const primary_source = self.panel == .editor or self.panel == .markdown;
-        var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0));
+        var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0), 0);
         primary = try b.fluent().adopt(primary).style(.{
             .width = .{ .px = primary_width },
             .flex_grow = 1,
@@ -258,7 +261,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             try panes.append(b.allocator(), try divider(b, colors, 1, vertical));
             const record = try self.workspace.getConst(secondary.document);
             const secondary_source = self.secondary_tool == null;
-            var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool);
+            var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool, 1);
             secondary_canvas = try b.fluent().adopt(secondary_canvas)
                 .style(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden })
                 .build();
@@ -295,30 +298,6 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             .children(panes.items)
             .id(.{ .string = "panes" })
             .build());
-        const active_id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else tab.document;
-        for (self.language.documents.items) |document| if (std.meta.eql(document.id, active_id)) {
-            const message = document.diagnostics orelse break;
-            const record = try self.workspace.getConst(active_id);
-            if (message.data.diagnostics.version != record.doc.revision()) break;
-            for (message.data.diagnostics.items, 0..) |diagnostic, index| try children.append(b.allocator(), try b.fluent().button(.{
-                .label = try std.fmt.allocPrint(b.allocator(), "{s}  {d}:{d}  {s}", .{ switch (diagnostic.severity) {
-                    .error_value => "Error",
-                    .warning => "Warning",
-                    .information => "Information",
-                    .hint => "Hint",
-                }, diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }),
-            })
-                .h(.{ .px = 28 })
-                .shrink_0()
-                .padding(.{ .left = 14, .top = 6 })
-                .background(colors.panel)
-                .text_style(.{ .size = 12, .color = colors.warning })
-                .overflow_hidden()
-                .on_click(b.onClickWith(Shell.onDiagnostic, @as(u32, @intCast(index))))
-                .id(.{ .number = @intCast(index) })
-                .build());
-            break;
-        };
     }
     return b.fluent().div()
         .grow()
@@ -331,10 +310,12 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         .build();
 }
 
-fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool) !ui.Element {
+fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool, pane: u8) !ui.Element {
     if (tool) |which| return switch (which) {
         .git_diff => views_git_diff.render(self, b),
-        .search => if (self.language.references != null or self.language.code_actions != null) views_references.render(self, b) else views_search.render(self, b),
+        .search => views_search.render(self, b),
+        .language_results => views_language_results.render(self, b, pane),
+        .diagnostics => views_diagnostics.render(self, b, pane),
         .extensions => views_extensions.render(self, b),
     };
     return views_image.render(self, b);

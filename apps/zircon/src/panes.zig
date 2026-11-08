@@ -110,9 +110,7 @@ pub fn closePrimaryTab(self: *Shell, index: usize) void {
 }
 
 pub fn closeSplit(self: *Shell) void {
-    if (self.secondary_tools.search) self.tool_tabs.search = true;
-    if (self.secondary_tools.git_diff) self.tool_tabs.git_diff = true;
-    if (self.secondary_tools.extensions) self.tool_tabs.extensions = true;
+    inline for (std.meta.tags(Shell.Tool)) |tool| if (self.secondary_tools.contains(tool)) self.tool_tabs.set(tool, true);
     self.secondary_tools = .{};
     self.secondary_tool = null;
     if (self.secondary) |*pane| pane.editor.deinit();

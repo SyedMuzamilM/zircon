@@ -92,7 +92,11 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
     try items.append(b.allocator(), try navigation(self, b, if (position + 1 < indices.items.len) indices.items[position + 1] | mask else null, "next-tab", .chevron_right));
     const opened_tools = if (pane == 1) self.secondary_tools else self.tool_tabs;
     const active_tool = self.currentTool(pane);
-    const tool_count: f32 = @as(f32, @floatFromInt(@as(u32, @intFromBool(opened_tools.search or active_tool == .search)) + @as(u32, @intFromBool(opened_tools.git_diff or active_tool == .git_diff)) + @as(u32, @intFromBool(opened_tools.extensions or active_tool == .extensions))));
+    var opened_count: u32 = 0;
+    inline for (std.meta.tags(Shell.Tool)) |tool| if (opened_tools.contains(tool) or active_tool == tool) {
+        opened_count += 1;
+    };
+    const tool_count: f32 = @floatFromInt(opened_count);
     const source_view = active_tool == null and (pane == 1 or self.panel == .editor or self.panel == .markdown);
     const utility = tool_count > 0 or self.panel == .image;
     const source_room = @max(0, width - 104 - tool_count * 160);
@@ -167,24 +171,24 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
             }).id(.{ .number = panes.key(tab.document) }).build());
     }
     var shown_tools: usize = 0;
-    inline for (.{ Shell.Tool.search, Shell.Tool.git_diff, Shell.Tool.extensions }) |tool| {
+    inline for (std.meta.tags(Shell.Tool)) |tool| {
         const selected = active_tool == tool and (tool != .git_diff or self.git.selected_commit.len == 0);
-        const opened = switch (tool) {
-            .search => opened_tools.search,
-            .git_diff => opened_tools.git_diff,
-            .extensions => opened_tools.extensions,
-        };
+        const opened = opened_tools.contains(tool);
         if ((opened or selected) and (width >= 520 or selected or (active_tool == null and shown_tools == 0))) {
             shown_tools += 1;
             const name: []const u8 = switch (tool) {
                 .search => "Project search",
                 .git_diff => if (self.git.stash_view) "Stash changes" else "Uncommitted changes",
                 .extensions => "Extensions",
+                .diagnostics => "Diagnostics",
+                .language_results => "Language results",
             };
             const glyph: v.Icon = switch (tool) {
                 .search => .search,
                 .git_diff => .branch,
                 .extensions => .extension,
+                .diagnostics => .warning,
+                .language_results => .code,
             };
             const title = try b.fluent().button(.{
                 .label = name,
@@ -406,6 +410,7 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
         .children(.{})
         .build());
     try items.append(b.allocator(), try statusIcon(b, c, .project_search, "Project search", .search, self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search));
+    try items.append(b.allocator(), try statusIcon(b, c, .show_diagnostics, "Diagnostics", .warning, self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .diagnostics));
     var unhealthy = false;
     for (self.language.sessions.items) |session| {
         if (session.retired) continue;
