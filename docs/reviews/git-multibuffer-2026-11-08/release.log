@@ -1,0 +1,94 @@
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK
+0 files need import hoisting
+0 files need migration
+    Finished `release` profile [optimized] target(s) in 0.44s
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.325s
+
+OK
+2 UI example matches compiled source
+/Users/syedmuzamilm/work/expirements/zigpui/artifacts/zircon-package-ozz6layi/Zircon.app: replacing existing signature
+/Users/syedmuzamilm/work/expirements/zigpui/artifacts/Zircon.app
+/Users/syedmuzamilm/work/expirements/zigpui/artifacts/Zircon-macos-arm64.zip
+Build Summary: 60/60 steps succeeded; 99/103 tests passed (4 skipped)
+package success
++- run python3 success 1s
+   +- install success
+      +- install tools/zed-extension-host/target/release/zircon-extension-host to zircon-extension-host cached
+      |  +- run cargo success 517ms
+      +- install zircon success
+      |  +- compile exe zircon fast native success 41s MaxRSS:1G
+      |     +- options cached
+      +- install assets/icons/LICENSES to share/zircon/icons-LICENSES cached
+      +- install assets/icons/SOURCE.md to share/zircon/icons-SOURCE.md cached
+      +- check success
+         +- run test cached
+         |  +- compile test fast native cached 47ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 52ms MaxRSS:31M
+         |     +- options cached
+         +- run test cached
+         |  +- compile test fast native cached 85ms MaxRSS:31M
+         |     +- options (reused)
+         +- run test cached
+         |  +- compile test fast native cached 47ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 47ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 51ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 50ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 64ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 62ms MaxRSS:31M
+         +- contracts success
+         |  +- compile test fast native success 173ms MaxRSS:99M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 179ms MaxRSS:100M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 170ms MaxRSS:99M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 210ms MaxRSS:99M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 174ms MaxRSS:99M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 171ms MaxRSS:99M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 212ms MaxRSS:100M
+         |  |  +- options (reused)
+         |  +- compile test fast native success 207ms MaxRSS:99M
+         |     +- options (reused)
+         +- examples-check success
+         |  +- compile exe counter-tree fast native cached 52ms MaxRSS:31M
+         |  |  +- options (reused)
+         |  +- run python3 success 36ms
+         |  +- run python3 success 373ms
+         |  +- run python3 success 55ms
+         |  +- run python3 success 163ms
+         |  +- run python3 success 1s
+         |  +- compile exe zircon-counter fast native cached 53ms MaxRSS:32M
+         |     +- options (reused)
+         +- run test cached
+         |  +- compile test fast native cached 56ms MaxRSS:31M
+         |     +- options (reused)
+         +- run test cached
+         |  +- compile test fast native cached 68ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 72ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 45ms MaxRSS:31M
+         +- run test cached
+         |  +- compile test fast native cached 78ms MaxRSS:31M
+         |     +- options (reused)
+         +- run test 99 pass, 4 skip (103 total) 14s MaxRSS:209M
+         |  +- compile test fast native success 46s MaxRSS:1G
+         |  |  +- options (reused)
+         |  +- run cargo (reused)
+         +- zig fmt --check success
+

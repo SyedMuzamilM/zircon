@@ -9,10 +9,18 @@ for name in ('zircon','zircon-extension-host'):
 with tempfile.TemporaryDirectory(prefix='zircon-package-',dir=args.output) as temp:
     app=Path(temp)/'Zircon.app';mac=app/'Contents/MacOS';resources=app/'Contents/Resources';mac.mkdir(parents=True);resources.mkdir()
     for name in ('zircon','zircon-extension-host'):shutil.copy2(args.input/'bin'/name,mac/name)
-    info={'CFBundleDevelopmentRegion':'en','CFBundleExecutable':'zircon','CFBundleIdentifier':'dev.zircon.editor','CFBundleInfoDictionaryVersion':'6.0','CFBundleName':'Zircon','CFBundleDisplayName':'Zircon','CFBundlePackageType':'APPL','CFBundleShortVersionString':'0.1.0','CFBundleVersion':'1','LSMinimumSystemVersion':'13.0','NSHighResolutionCapable':True,'NSSupportsAutomaticGraphicsSwitching':True,'NSPrincipalClass':'NSApplication'}
+    info={'CFBundleDevelopmentRegion':'en','CFBundleExecutable':'zircon','CFBundleIdentifier':'dev.zircon.editor','CFBundleInfoDictionaryVersion':'6.0','CFBundleName':'Zircon','CFBundleDisplayName':'Zircon','CFBundlePackageType':'APPL','CFBundleIconFile':'Zircon.icns','CFBundleShortVersionString':'0.1.0','CFBundleVersion':'1','LSMinimumSystemVersion':'13.0','NSHighResolutionCapable':True,'NSSupportsAutomaticGraphicsSwitching':True,'NSPrincipalClass':'NSApplication'}
     with (app/'Contents/Info.plist').open('wb') as f:plistlib.dump(info,f)
     for source,name in [('assets/icons/LICENSES','icons-LICENSES'),('assets/icons/SOURCE.md','icons-SOURCE.md'),('docs/zed-extensions.md','zed-extensions.md'),('docs/agent-mode.md','agent-mode.md')]:
         if Path(source).is_file():shutil.copy2(source,resources/name)
+    iconset=Path(temp)/'Zircon.iconset';iconset.mkdir()
+    logo=Path('assets/branding/zircon-logo.png')
+    shutil.copy2(logo,resources/'zircon-logo.png')
+    for size in (16,32,128,256,512):
+        for scale in (1,2):
+            target_icon=iconset/f'icon_{size}x{size}{"@2x" if scale==2 else ""}.png'
+            subprocess.run(['/usr/bin/sips','-z',str(size*scale),str(size*scale),str(logo),'--out',str(target_icon)],check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(['/usr/bin/iconutil','-c','icns',str(iconset),'-o',str(resources/'Zircon.icns')],check=True)
     source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
     dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip())
     (resources/'build.json').write_text(json.dumps({'source':source,'uncommitted_changes':dirty,'architecture':subprocess.check_output(['uname','-m'],text=True).strip()},indent=2)+'\n')
