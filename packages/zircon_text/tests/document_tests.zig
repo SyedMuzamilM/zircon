@@ -365,3 +365,43 @@ test "bare CR detection composes across rope leaves and edits" {
     defer undone.deinit();
     try t.expect(!undone.hasBareCarriageReturn());
 }
+
+test "prepared edits abort without changing text history or revision" {
+    var first = try text.Document.init(t.allocator, "first");
+    defer first.deinit();
+    var second = try text.Document.init(t.allocator, "second");
+    defer second.deinit();
+    var change = try first.apply(0, &.{.{ .range = .{ .start = 0, .end = 5 }, .text = "changed" }}, 0);
+    change.deinit();
+    try t.expect(try first.undo());
+    {
+        var candidate = try first.prepare(first.revision(), &.{.{ .range = .{ .start = 0, .end = 5 }, .text = "ready" }}, 0);
+        defer candidate.deinit();
+        try t.expectError(error.InvalidRange, second.prepare(0, &.{.{ .range = .{ .start = 0, .end = 99 }, .text = "bad" }}, 0));
+        try expectText("first", &first);
+        try expectText("second", &second);
+    }
+    try t.expectEqual(@as(u64, 2), first.revision());
+    try t.expect(try first.redo());
+    try expectText("changed", &first);
+}
+
+test "prepared edits reject another document stale commits and repeated commits" {
+    var doc = try text.Document.init(t.allocator, "old");
+    defer doc.deinit();
+    var other = try text.Document.init(t.allocator, "old");
+    defer other.deinit();
+    var candidate = try doc.prepare(0, &.{.{ .range = .{ .start = 0, .end = 3 }, .text = "new" }}, 0);
+    defer candidate.deinit();
+    try t.expectError(error.WrongDocument, candidate.commit(&other));
+    var change = try candidate.commit(&doc);
+    change.deinit();
+    try t.expectError(error.EditAlreadyCommitted, candidate.commit(&doc));
+    var stale = try doc.prepare(1, &.{.{ .range = .{ .start = 0, .end = 3 }, .text = "stale" }}, 0);
+    defer stale.deinit();
+    change = try doc.apply(1, &.{.{ .range = .{ .start = 0, .end = 0 }, .text = "typed " }}, 0);
+    change.deinit();
+    try t.expectError(error.StaleRevision, stale.commit(&doc));
+    try expectText("typed new", &doc);
+    try expectText("old", &other);
+}

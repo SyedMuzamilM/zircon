@@ -9,6 +9,7 @@ const Shell = shell.Shell;
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const colors = self.colors;
     const locations = if (self.language.references) |message| message.data.locations.items else &.{};
+    const code_actions = if (self.language.code_actions) |message| message.data.code_actions.items else &.{};
     var rows: std.ArrayList(ui.Element) = .empty;
     try rows.append(b.allocator(), try b.fluent().div()
         .h(.{ .px = 48 })
@@ -16,10 +17,17 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .padding(.{ .left = 14, .right = 14 })
         .items_center()
         .flex()
-        .children(.{v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} references", .{locations.len}), colors.text, 14)})
+        .children(.{v.text(b, if (code_actions.len > 0) try std.fmt.allocPrint(b.allocator(), "{d} code actions", .{code_actions.len}) else try std.fmt.allocPrint(b.allocator(), "{d} references", .{locations.len}), colors.text, 14)})
         .build());
     try rows.append(b.allocator(), try v.rule(b, colors));
-    for (locations, 0..) |location, index| {
+    if (code_actions.len > 0) for (code_actions, 0..) |action, index| {
+        const label = if (action.disabled_reason) |reason| try std.fmt.allocPrint(b.allocator(), "{s} · {s}", .{ action.title, reason }) else action.title;
+        try rows.append(b.allocator(), try b.fluent().button(.{ .label = label })
+            .h(.{ .px = 36 }).shrink_0().padding(.{ .left = 14, .right = 10 }).items_center()
+            .hover_background(colors.hover)
+            .on_click(b.onClickWith(Shell.onCodeAction, @as(u32, @intCast(index))))
+            .children(.{v.text(b, label, if (action.disabled_reason != null) colors.muted else colors.text, 12)}).build());
+    } else for (locations, 0..) |location, index| {
         const label = try std.fmt.allocPrint(b.allocator(), "{s}:{d}:{d}", .{ location.uri, location.range.start.line + 1, location.range.start.character + 1 });
         try rows.append(b.allocator(), try b.fluent().button(.{ .label = label })
             .h(.{ .px = 32 })
@@ -30,8 +38,8 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             .on_click(b.onClickWith(Shell.onReference, @as(u32, @intCast(index))))
             .children(.{v.text(b, label, colors.text, 12)})
             .build());
-    }
-    if (locations.len == 0) try rows.append(b.allocator(), try v.text(b, "No references found.", colors.muted, 13));
+    };
+    if (code_actions.len == 0 and locations.len == 0) try rows.append(b.allocator(), try v.text(b, "No results found.", colors.muted, 13));
     return b.fluent().div()
         .grow()
         .min_h(.{ .px = 0 })

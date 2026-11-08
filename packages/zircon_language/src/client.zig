@@ -8,12 +8,13 @@ const frame = @import("framing.zig");
 const hover_content = @import("hover.zig");
 const model = @import("model.zig");
 const synchronization = @import("synchronization.zig");
+const workspace_edit = @import("workspace_edit.zig");
 const DocumentState = struct { snapshot: text.Snapshot };
 const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
-const Pending = struct { kind: enum { initialize, completion, hover, definition, references, rename, formatting, signature, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
+const Pending = struct { kind: enum { initialize, completion, hover, definition, references, rename, formatting, signature, code_actions, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
     pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0, change_text_bytes: u64 = 0, incremental_changes: u64 = 0, resync_changes: u64 = 0 };
     counters: Stats = .{},
@@ -37,6 +38,7 @@ pub const Client = struct {
     rename_supported: std.atomic.Value(bool) = .init(false),
     formatting_supported: std.atomic.Value(bool) = .init(false),
     signature_supported: std.atomic.Value(bool) = .init(false),
+    code_actions_supported: std.atomic.Value(bool) = .init(false),
     sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
@@ -323,6 +325,28 @@ pub const Client = struct {
             self.lock.unlock(self.io);
         }
         try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/signatureHelp", .params = .{ .textDocument = .{ .uri = uri }, .position = cursor_position } });
+        return id;
+    }
+    pub fn supportsCodeActions(self: *const Client) bool {
+        return self.code_actions_supported.load(.acquire);
+    }
+    pub fn codeActions(self: *Client, uri: []const u8, version: u64, selected_range: model.Range) !u64 {
+        try self.check();
+        if (!self.supportsCodeActions()) return error.CodeActionsNotSupported;
+        if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
+        const id = try self.requestId();
+        const owned = try transport_allocator.dupe(u8, uri);
+        errdefer transport_allocator.free(owned);
+        self.lock.lockUncancelable(self.io);
+        const inserted = self.pending.put(transport_allocator, id, .{ .kind = .code_actions, .uri = owned, .version = version });
+        self.lock.unlock(self.io);
+        try inserted;
+        errdefer {
+            self.lock.lockUncancelable(self.io);
+            _ = self.pending.remove(id);
+            self.lock.unlock(self.io);
+        }
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/codeAction", .params = .{ .textDocument = .{ .uri = uri }, .range = selected_range, .context = .{ .diagnostics = @as([]const std.json.Value, &.{}) } } });
         return id;
     }
     fn requestId(self: *Client) !u64 {
@@ -693,6 +717,8 @@ fn parse(self: *Client, body: []const u8) !void {
             self.formatting_supported.store(formatting_provider, .release);
             const signature_provider = if (field(capabilities, "signatureHelpProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.signature_supported.store(signature_provider, .release);
+            const code_actions_provider = if (field(capabilities, "codeActionProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
+            self.code_actions_supported.store(code_actions_provider, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
             if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
@@ -744,21 +770,10 @@ fn parse(self: *Client, body: []const u8) !void {
             self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = items } } });
         },
         .rename => {
-            if (result == .null) {
-                self.publish(.{ .arena = arena, .data = .{ .workspace_edit = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .files = &.{} } } });
+            const files = workspace_edit.parse(a, result) catch |err| {
+                self.publish(.{ .arena = arena, .data = .{ .failure = .{ .request_id = number, .message = try std.fmt.allocPrint(a, "Cannot apply rename: {s}", .{@errorName(err)}) } } });
                 return;
-            }
-            const changes = field(result, "changes") orelse return error.InvalidWorkspaceEdit;
-            if (changes != .object or changes.object.count() > 1024) return error.InvalidWorkspaceEdit;
-            const files = try a.alloc(model.FileEdits, changes.object.count());
-            var index: usize = 0;
-            var iterator = changes.object.iterator();
-            while (iterator.next()) |entry| : (index += 1) {
-                if (entry.value_ptr.* != .array or entry.value_ptr.array.items.len > 4096) return error.InvalidWorkspaceEdit;
-                const edits = try a.alloc(model.TextEdit, entry.value_ptr.array.items.len);
-                for (entry.value_ptr.array.items, edits) |value, *actual| actual.* = try edit(value);
-                files[index] = .{ .uri = entry.key_ptr.*, .edits = edits };
-            }
+            };
             self.publish(.{ .arena = arena, .data = .{ .workspace_edit = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .files = files } } });
         },
         .formatting => {
@@ -774,6 +789,34 @@ fn parse(self: *Client, body: []const u8) !void {
         .signature => {
             const contents = if (result == .null) "" else if (field(result, "signatures")) |signatures| if (signatures == .array and signatures.array.items.len > 0) try string(field(signatures.array.items[0], "label") orelse return error.InvalidSignatureHelp) else "" else "";
             self.publish(.{ .arena = arena, .data = .{ .signature_help = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } } });
+        },
+        .code_actions => {
+            if (result == .null) {
+                self.publish(.{ .arena = arena, .data = .{ .code_actions = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = &.{} } } });
+                return;
+            }
+            if (result != .array or result.array.items.len > 256) return error.InvalidCodeActionsResult;
+            const items = try a.alloc(model.CodeAction, result.array.items.len);
+            for (result.array.items, items) |value, *action| {
+                action.* = .{ .title = try string(field(value, "title") orelse return error.InvalidCodeActionsResult), .files = &.{} };
+                if (field(value, "disabled")) |disabled| {
+                    action.disabled_reason = try string(field(disabled, "reason") orelse return error.InvalidCodeActionsResult);
+                    continue;
+                }
+                if (field(value, "command") != null) {
+                    action.disabled_reason = "This action requires a language-server command, which is not supported yet.";
+                    continue;
+                }
+                const edit_value = field(value, "edit") orelse {
+                    action.disabled_reason = "This action requires codeAction/resolve, which is not supported yet.";
+                    continue;
+                };
+                action.files = workspace_edit.parse(a, edit_value) catch |err| {
+                    action.disabled_reason = try std.fmt.allocPrint(a, "Cannot apply this action: {s}", .{@errorName(err)});
+                    continue;
+                };
+            }
+            self.publish(.{ .arena = arena, .data = .{ .code_actions = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } } });
         },
     }
 }

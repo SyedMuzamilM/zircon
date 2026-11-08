@@ -12,6 +12,7 @@ const model = @import("../settings/model.zig");
 const shell = @import("../shell.zig");
 const host = @import("extension_host.zig");
 const symbol_hover = @import("symbol_hover.zig");
+const workspace_edits = @import("workspace_edits.zig");
 const Shell = shell.Shell;
 const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false, scope: ?ws.DocumentId = null, retired: bool = false, epoch: u64 = 0 };
 const SyntaxDocument = struct {
@@ -38,9 +39,10 @@ const Document = struct {
 pub const Pending = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64, cursor: usize };
 const PendingDefinition = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64 };
 const PendingReferences = PendingDefinition;
-const PendingRename = PendingDefinition;
+const PendingRename = workspace_edits.Pending;
 const PendingFormatting = PendingDefinition;
 const PendingSignature = PendingDefinition;
+const PendingCodeActions = workspace_edits.Pending;
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
@@ -59,6 +61,8 @@ pub const Model = struct {
     formatting_pending: ?PendingFormatting = null,
     signature: ?lsp.Message = null,
     signature_pending: ?PendingSignature = null,
+    code_actions: ?lsp.Message = null,
+    code_actions_pending: ?PendingCodeActions = null,
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -91,6 +95,7 @@ pub const Model = struct {
         self.references_pending = null;
     }
     pub fn clearRename(self: *Model) void {
+        if (self.rename_pending) |*pending| pending.deinit();
         self.rename_pending = null;
     }
     pub fn clearFormatting(self: *Model) void {
@@ -101,6 +106,12 @@ pub const Model = struct {
         self.signature = null;
         self.signature_pending = null;
     }
+    pub fn clearCodeActions(self: *Model) void {
+        if (self.code_actions) |*value| value.deinit();
+        self.code_actions = null;
+        if (self.code_actions_pending) |*pending| pending.deinit();
+        self.code_actions_pending = null;
+    }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         self.clearCompletion();
         self.clearDefinition();
@@ -108,6 +119,7 @@ pub const Model = struct {
         self.clearRename();
         self.clearFormatting();
         self.clearSignature();
+        self.clearCodeActions();
         for (self.documents.items) |*doc| {
             if (doc.diagnostics) |*value| value.deinit();
             a.free(doc.uri);
@@ -319,6 +331,9 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                         symbol_hover.clear(self, cx);
                         continue;
                     };
+                    if (self.language.rename_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearRename();
+                    if (self.language.formatting_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearFormatting();
+                    if (self.language.code_actions_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearCodeActions();
                     try self.setStatus(try self.allocator.dupe(u8, failure.message));
                     self.status_is_error = true;
                     changed = true;
@@ -366,14 +381,14 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                 },
                 .workspace_edit => |value| if (self.language.rename_pending) |pending| {
                     if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
-                    try acceptRename(self, cx, value.files);
-                    moved = true;
+                    defer self.language.clearRename();
+                    workspace_edits.apply(self, cx, pending, value.files, .project_edit) catch |err| try self.reportError(err);
                     changed = true;
                 },
                 .edits => |value| if (self.language.formatting_pending) |pending| {
                     if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
-                    try acceptFormatting(self, cx, value.items);
-                    moved = true;
+                    defer self.language.clearFormatting();
+                    acceptFormatting(self, cx, value.items) catch |err| try self.reportError(err);
                     changed = true;
                 },
                 .signature_help => |value| if (self.language.signature_pending) |pending| {
@@ -384,6 +399,14 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     moved = true;
                     changed = true;
                     if (value.contents.len > 0) try self.setStatus(try self.allocator.dupe(u8, value.contents));
+                },
+                .code_actions => |value| if (self.language.code_actions_pending) |pending| {
+                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                    if (self.language.code_actions) |*old| old.deinit();
+                    self.language.code_actions = message;
+                    moved = true;
+                    changed = true;
+                    self.showTool(.search);
                 },
                 else => {},
             }
@@ -443,15 +466,19 @@ pub fn requestReferences(self: *Shell, cx: *ui.Context(Shell)) !void {
 }
 
 pub fn requestRename(self: *Shell, cx: *ui.Context(Shell), new_name: []const u8) !void {
+    try poll(self, cx);
     if (new_name.len == 0) return error.InvalidRename;
     const current = try actions.active(self);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
         const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
         var snapshot = try self.workspace.snapshot(current.id);
         defer snapshot.deinit();
-        const request_id = try client.rename(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head), new_name);
+        var pending: PendingRename = .{ .document = current.id, .session = doc.session, .request = 0, .revision = snapshot.revision() };
+        try pending.capture(&self.workspace, self.allocator);
+        errdefer pending.deinit();
+        pending.request = try client.rename(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head), new_name);
         self.language.clearRename();
-        self.language.rename_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+        self.language.rename_pending = pending;
         cx.notify();
         return;
     };
@@ -490,67 +517,47 @@ pub fn requestSignature(self: *Shell, cx: *ui.Context(Shell)) !void {
     return error.NoLanguageServer;
 }
 
-fn acceptFormatting(self: *Shell, cx: *ui.Context(Shell), items: []const lsp.TextEdit) !void {
-    const pending = self.language.formatting_pending orelse return;
+pub fn requestCodeActions(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try poll(self, cx);
     const current = try actions.active(self);
-    if (!std.meta.eql(current.id, pending.document)) return error.StaleFormatting;
-    const record = try self.workspace.get(current.id);
-    var snapshot = record.doc.snapshot();
-    defer snapshot.deinit();
-    const edits = try self.allocator.alloc(text.Edit, items.len);
-    defer self.allocator.free(edits);
-    for (items, edits) |item, *actual| actual.* = .{ .range = .{ .start = try lsp.offsetAt(snapshot, item.range.start), .end = try lsp.offsetAt(snapshot, item.range.end) }, .text = item.new_text };
-    std.mem.sort(text.Edit, edits, {}, struct {
-        fn less(_: void, a: text.Edit, b: text.Edit) bool {
-            return a.range.start < b.range.start;
-        }
-    }.less);
-    const selection = current.editor.primary().range();
-    var outcome = try current.editor.applyEditsWithSelection(&record.doc, edits, try zircon_editor.Editor.freshGroup(), selection);
-    try actions.applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .formatting);
-    self.language.clearFormatting();
-    cx.notify();
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
+        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const selected = current.editor.primary().range();
+        var pending: PendingCodeActions = .{ .document = current.id, .session = doc.session, .request = 0, .revision = snapshot.revision() };
+        try pending.capture(&self.workspace, self.allocator);
+        errdefer pending.deinit();
+        pending.request = try client.codeActions(doc.uri, snapshot.revision(), .{ .start = try lsp.positionAt(snapshot, selected.start), .end = try lsp.positionAt(snapshot, selected.end) });
+        self.language.clearCodeActions();
+        self.language.code_actions_pending = pending;
+        cx.notify();
+        return;
+    };
+    return error.NoLanguageServer;
 }
 
-fn acceptRename(self: *Shell, cx: *ui.Context(Shell), files: []const lsp.FileEdits) !void {
-    for (files) |file| {
-        var id: ?ws.DocumentId = null;
-        for (self.language.documents.items) |doc| if (std.mem.eql(u8, doc.uri, file.uri)) {
-            id = doc.id;
-            break;
-        };
-        if (id == null) {
-            const path = try filePathFromUri(self.allocator, file.uri);
-            defer self.allocator.free(path);
-            id = try self.workspace.open(path);
-        }
-        const document_id = id.?;
-        var snapshot = try self.workspace.snapshot(document_id);
-        defer snapshot.deinit();
-        const edits = try self.allocator.alloc(text.Edit, file.edits.len);
-        defer self.allocator.free(edits);
-        for (file.edits, edits) |edit, *actual| actual.* = .{ .range = .{ .start = try lsp.offsetAt(snapshot, edit.range.start), .end = try lsp.offsetAt(snapshot, edit.range.end) }, .text = edit.new_text };
-        std.mem.sort(text.Edit, edits, {}, struct {
-            fn less(_: void, a: text.Edit, b: text.Edit) bool {
-                return a.range.start < b.range.start;
-            }
-        }.less);
-        var applied = false;
-        for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, document_id)) {
-            const record = try self.workspace.get(document_id);
-            var outcome = try tab.editor.applyEdits(&record.doc, edits, try zircon_editor.Editor.freshGroup());
-            try actions.applyOutcome(self, cx, document_id, 0, &outcome, .project_edit);
-            applied = true;
-            break;
-        };
-        if (!applied) {
-            var change = try self.workspace.apply(document_id, snapshot.revision(), edits, try zircon_editor.Editor.freshGroup(), .project_edit);
-            change.deinit();
-        }
-        try invalidateDocument(self, document_id);
+pub fn applyCodeAction(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
+    const message = self.language.code_actions orelse return error.StaleCodeActions;
+    if (index >= message.data.code_actions.items.len) return error.StaleCodeActions;
+    if (message.data.code_actions.items[index].disabled_reason) |reason| {
+        try self.setStatus(try self.allocator.dupe(u8, reason));
+        self.status_is_error = true;
+        cx.notify();
+        return;
     }
-    self.language.clearRename();
-    cx.notify();
+    const pending = self.language.code_actions_pending orelse return error.StaleCodeActions;
+    defer self.language.clearCodeActions();
+    try workspace_edits.apply(self, cx, pending, message.data.code_actions.items[index].files, .project_edit);
+}
+
+fn acceptFormatting(self: *Shell, cx: *ui.Context(Shell), items: []const lsp.TextEdit) !void {
+    const pending = self.language.formatting_pending orelse return;
+    const record = try self.workspace.getConst(pending.document);
+    if (record.doc.revision() != pending.revision) return error.StaleFormatting;
+    const uri = try lsp.fileUri(self.allocator, record.path orelse return error.NoDocument);
+    defer self.allocator.free(uri);
+    try workspace_edits.apply(self, cx, .{ .document = pending.document, .session = pending.session, .request = pending.request, .revision = pending.revision }, &.{.{ .uri = uri, .edits = items, .version = pending.revision }}, .formatting);
 }
 
 fn selectDocument(self: *Shell, id: ws.DocumentId) !bool {
@@ -560,24 +567,6 @@ fn selectDocument(self: *Shell, id: ws.DocumentId) !bool {
         return true;
     };
     return false;
-}
-
-fn filePathFromUri(a: std.mem.Allocator, uri: []const u8) ![]u8 {
-    if (!std.mem.startsWith(u8, uri, "file://")) return error.UnsupportedLocationUri;
-    const encoded = uri[7..];
-    var path: std.ArrayList(u8) = .empty;
-    errdefer path.deinit(a);
-    const digits = "0123456789abcdefABCDEF";
-    var i: usize = 0;
-    while (i < encoded.len) : (i += 1) {
-        if (encoded[i] == '%' and i + 2 < encoded.len) {
-            const hi = std.mem.indexOfScalar(u8, digits, encoded[i + 1]) orelse return error.InvalidFileUri;
-            const lo = std.mem.indexOfScalar(u8, digits, encoded[i + 2]) orelse return error.InvalidFileUri;
-            try path.append(a, @as(u8, @intCast((hi % 16) * 16 + lo % 16)));
-            i += 2;
-        } else try path.append(a, encoded[i]);
-    }
-    return path.toOwnedSlice(a);
 }
 
 pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, message: @FieldType(lsp.Message, "data")) !void {
@@ -595,7 +584,7 @@ pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, me
         path = try self.allocator.dupe(u8, doc.path);
         break;
     };
-    if (path == null) path = try filePathFromUri(self.allocator, location.uri);
+    if (path == null) path = try lsp.filePath(self.allocator, location.uri);
     defer self.allocator.free(path.?);
     if (target_document) |id| {
         if (!try selectDocument(self, id)) try self.openPath(path.?);
@@ -625,7 +614,7 @@ pub fn acceptReference(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
         path = try self.allocator.dupe(u8, doc.path);
         break;
     };
-    if (path == null) path = try filePathFromUri(self.allocator, location.uri);
+    if (path == null) path = try lsp.filePath(self.allocator, location.uri);
     defer self.allocator.free(path.?);
     if (target_document) |id| {
         if (!try selectDocument(self, id)) try self.openPath(path.?);

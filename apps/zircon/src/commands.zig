@@ -130,6 +130,7 @@ pub const Command = enum {
     submit_rename,
     format_document,
     show_signature_help,
+    code_actions,
 };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
@@ -139,6 +140,7 @@ pub const commands = [_]Entry{
     .{ .command = .rename_symbol, .label = "Language: rename symbol", .shortcut = "F2" },
     .{ .command = .format_document, .label = "Language: format document", .shortcut = "⇧⌥F" },
     .{ .command = .show_signature_help, .label = "Language: show signature help", .shortcut = "⌃⇧Space" },
+    .{ .command = .code_actions, .label = "Language: code actions", .shortcut = "⌘." },
     .{ .command = .cut, .label = "Cut", .shortcut = "⌘X" },
     .{ .command = .copy, .label = "Copy", .shortcut = "⌘C" },
     .{ .command = .paste, .label = "Paste", .shortcut = "⌘V" },

@@ -107,16 +107,18 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
     const rename = try client.rename(uri, snap.revision(), .{ .line = 0, .character = 3 }, "renamed");
     const formatting = try client.formatting(uri, snap.revision());
     const signature = try client.signature(uri, snap.revision(), .{ .line = 0, .character = 3 });
+    const code_actions = try client.codeActions(uri, snap.revision(), .{ .start = .{ .line = 0, .character = 3 }, .end = .{ .line = 0, .character = 3 } });
     var diagnostics = false;
     var definition_seen = false;
     var references_seen = false;
     var rename_seen = false;
     var formatting_seen = false;
     var signature_seen = false;
+    var code_actions_seen = false;
     var ids: [2]u64 = undefined;
     var count: usize = 0;
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
-    while (!diagnostics or !definition_seen or !references_seen or !rename_seen or !formatting_seen or !signature_seen or count < 2) {
+    while (!diagnostics or !definition_seen or !references_seen or !rename_seen or !formatting_seen or !signature_seen or !code_actions_seen or count < 2) {
         const messages = try client.drain(t.allocator);
         defer language.deinitMessages(t.allocator, messages);
         for (messages) |message| switch (message.data) {
@@ -162,6 +164,12 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
                 try t.expectEqual(signature, value.id);
                 try t.expectEqualStrings("answer(value: u32) u32", value.contents);
                 signature_seen = true;
+            },
+            .code_actions => |value| {
+                try t.expectEqual(code_actions, value.id);
+                try t.expectEqual(@as(usize, 1), value.items.len);
+                try t.expectEqualStrings("Fix answer", value.items[0].title);
+                code_actions_seen = true;
             },
             .failure => return error.FixtureFailure,
             else => {},
@@ -470,5 +478,62 @@ test "full and incremental servers reconstruct bare CR and Unicode line separato
         try client.didChange("file:///tmp/sync.zig", undone);
         try expectServerText(client, undone.revision(), "a\rb\u{2028}c", 1);
         try client.didClose("file:///tmp/sync.zig");
+    }
+}
+
+test "file URI decoding roundtrips uppercase hex unicode and reserved path characters" {
+    const path = "/tmp/日 {a} #?.zig";
+    const uri = try language.fileUri(t.allocator, path);
+    defer t.allocator.free(uri);
+    const decoded = try language.filePath(t.allocator, uri);
+    defer t.allocator.free(decoded);
+    try t.expectEqualStrings(path, decoded);
+    const lower = try language.filePath(t.allocator, "file://localhost/tmp/%7bfile%7d.zig");
+    defer t.allocator.free(lower);
+    try t.expectEqualStrings("/tmp/{file}.zig", lower);
+    for ([_][]const u8{ "file:///tmp/%", "file:///tmp/%zz", "file:///tmp/%00", "file://remote/tmp/a", "file:///tmp/a?query", "file:///tmp/a#fragment" }) |invalid| {
+        try t.expectError(error.InvalidFileUri, language.filePath(t.allocator, invalid));
+    }
+}
+
+test "stdio code actions keep unsupported variants visible without stopping the server" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try fixturePath(tmp);
+    defer t.allocator.free(path);
+    const client = try language.Client.start(t.allocator, t.io, .{ .command = "python3", .args = &.{ path, "action-variants" }, .cwd = "/tmp" });
+    defer client.deinit();
+    try waitReady(client);
+    var doc = try text.Document.init(t.allocator, "old");
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    const uri = "file:///tmp/actions.zig";
+    try client.didOpen(uri, "zig", snapshot);
+    const request = try client.codeActions(uri, 0, .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 3 } });
+    var actions_seen = false;
+    var hover_seen = false;
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
+    while (!actions_seen or !hover_seen) {
+        const messages = try client.drain(t.allocator);
+        defer language.deinitMessages(t.allocator, messages);
+        for (messages) |message| switch (message.data) {
+            .code_actions => |value| {
+                try t.expectEqual(request, value.id);
+                try t.expectEqual(@as(usize, 5), value.items.len);
+                try t.expect(value.items[0].disabled_reason == null);
+                try t.expectEqual(@as(?u64, 0), value.items[0].files[0].version);
+                try t.expectEqualStrings("fixed", value.items[0].files[0].edits[0].new_text);
+                for (value.items[1..]) |item| try t.expect(item.disabled_reason != null);
+                try t.expectEqualStrings("Already fixed", value.items[3].disabled_reason.?);
+                actions_seen = true;
+                _ = try client.hover(uri, 0, .{ .line = 0, .character = 0 });
+            },
+            .hover => hover_seen = true,
+            .failure, .exited => return error.ActionStoppedServer,
+            else => {},
+        };
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.CodeActionsTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
     }
 }

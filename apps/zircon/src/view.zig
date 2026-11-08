@@ -334,7 +334,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
 fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool) !ui.Element {
     if (tool) |which| return switch (which) {
         .git_diff => views_git_diff.render(self, b),
-        .search => if (self.language.references != null) views_references.render(self, b) else views_search.render(self, b),
+        .search => if (self.language.references != null or self.language.code_actions != null) views_references.render(self, b) else views_search.render(self, b),
         .extensions => views_extensions.render(self, b),
     };
     return views_image.render(self, b);

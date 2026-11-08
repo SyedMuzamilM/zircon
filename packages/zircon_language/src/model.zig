@@ -8,7 +8,8 @@ pub const Diagnostic = struct { range: Range, severity: enum { error_value, warn
 pub const TextEdit = struct { range: Range, new_text: []const u8 };
 pub const Location = struct { uri: []const u8, range: Range };
 pub const LocationsKind = enum { definition, references };
-pub const FileEdits = struct { uri: []const u8, edits: []const TextEdit };
+pub const FileEdits = struct { uri: []const u8, edits: []const TextEdit, version: ?u64 = null };
+pub const CodeAction = struct { title: []const u8, files: []const FileEdits, disabled_reason: ?[]const u8 = null };
 pub const Completion = struct { label: []const u8, insert_text: []const u8, detail: ?[]const u8 = null, text_edit: ?TextEdit = null, additional_edits: []const TextEdit = &.{}, snippet: bool = false };
 pub const Message = struct {
     arena: std.heap.ArenaAllocator,
@@ -21,6 +22,7 @@ pub const Message = struct {
         workspace_edit: struct { id: u64, uri: []const u8, version: u64, files: []const FileEdits },
         edits: struct { id: u64, uri: []const u8, version: u64, items: []const TextEdit },
         signature_help: struct { id: u64, uri: []const u8, version: u64, contents: []const u8 },
+        code_actions: struct { id: u64, uri: []const u8, version: u64, items: []const CodeAction },
         log: struct { message: []const u8, severity: u8 = 3 },
         failure: struct { message: []const u8, request_id: ?u64 = null },
         exited,
@@ -103,4 +105,28 @@ pub fn fileUri(a: std.mem.Allocator, path: []const u8) ![]u8 {
         }
     }
     return result.toOwnedSlice(a);
+}
+
+/// Local file URIs accept uppercase and lowercase percent escapes.
+pub fn filePath(a: std.mem.Allocator, uri: []const u8) ![]u8 {
+    if (!std.mem.startsWith(u8, uri, "file://")) return error.UnsupportedLocationUri;
+    var encoded = uri[7..];
+    if (std.mem.startsWith(u8, encoded, "localhost/")) encoded = encoded[9..];
+    if (encoded.len == 0 or encoded[0] != '/') return error.InvalidFileUri;
+    var path: std.ArrayList(u8) = .empty;
+    errdefer path.deinit(a);
+    var i: usize = 0;
+    while (i < encoded.len) : (i += 1) {
+        const byte = if (encoded[i] == '%') blk: {
+            if (i + 2 >= encoded.len) return error.InvalidFileUri;
+            const hi = std.fmt.charToDigit(encoded[i + 1], 16) catch return error.InvalidFileUri;
+            const lo = std.fmt.charToDigit(encoded[i + 2], 16) catch return error.InvalidFileUri;
+            i += 2;
+            break :blk hi * 16 + lo;
+        } else encoded[i];
+        if (byte == 0 or encoded[i] == '?' or encoded[i] == '#') return error.InvalidFileUri;
+        try path.append(a, byte);
+    }
+    if (!std.unicode.utf8ValidateSlice(path.items)) return error.InvalidFileUri;
+    return path.toOwnedSlice(a);
 }

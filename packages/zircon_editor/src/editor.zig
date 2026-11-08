@@ -236,52 +236,102 @@ pub const Editor = struct {
     /// is used by language edits that include auxiliary edits elsewhere in the
     /// document, such as an import added by completion.
     pub fn applyEditsWithSelection(self: *Editor, document: *text.Document, edits: []const text.Edit, group: u64, selection_range: ?text.Range) !Outcome {
-        if (edits.len == 0) return .{ .handled = true };
+        var prepared = try self.prepareEdits(document, edits, group, if (selection_range) |range| .{ .caret = range } else .edit_carets);
+        defer prepared.deinit();
+        return prepared.commit();
+    }
+
+    pub const EditSelection = union(enum) { preserve, edit_carets, caret: text.Range };
+
+    /// Prepares text and selection history without changing the document. The
+    /// editor and document must stay at their current addresses until commit.
+    pub const PreparedEdit = struct {
+        editor: *Editor,
+        document: *text.Document,
+        text_edit: text.Document.PreparedEdit,
+        before: text.Snapshot,
+        edits: []const text.Edit,
+        selections: []selection.Selection,
+        transferred: bool = false,
+
+        pub fn deinit(self: *PreparedEdit) void {
+            self.text_edit.deinit();
+            self.before.deinit();
+            if (!self.transferred) self.editor.allocator.free(self.selections);
+        }
+
+        pub fn commit(self: *PreparedEdit) !Outcome {
+            if (self.transferred) return error.EditAlreadyCommitted;
+            const editor_value = self.editor;
+            var change = try self.text_edit.commit(self.document);
+            if (change.before == change.after) {
+                change.deinit();
+                return .{ .handled = true };
+            }
+            editor_value.mapHighlights(&change);
+            if (editor_value.edit_scope) |*scope| {
+                scope.start = change.map(scope.start, .before);
+                scope.end = change.map(scope.end, .after);
+            }
+            editor_value.wrap_cache.noteChange(&change);
+            vim_repeat.changed(editor_value, &change, self.edits);
+            editor_value.selections.items.clearRetainingCapacity();
+            editor_value.selections.items.appendSliceAssumeCapacity(self.selections);
+            editor_value.selections.normalize();
+            editor_value.history.appendAssumeCapacity(.{ .state = change.state, .items = self.selections });
+            self.transferred = true;
+            if (editor_value.history.items.len > 1024) {
+                const old = editor_value.history.orderedRemove(0);
+                editor_value.allocator.free(old.items);
+            }
+            var snapshot = self.document.snapshot();
+            defer snapshot.deinit();
+            const row = if (self.edits.len > 0) (self.before.pointAt(self.edits[0].range.start) catch unreachable).line else 0;
+            if (editor_value.language == .plain) editor_value.syntax_cache.clear() else {
+                if (editor_value.syntax_cache.revision != self.before.revision() or self.edits.len > 1) editor_value.syntax_cache.clear();
+                editor_value.syntax_cache.refresh(snapshot, editor_value.language, row) catch editor_value.syntax_cache.clear();
+            }
+            editor_value.reveal(snapshot);
+            return .{ .handled = true, .change = change };
+        }
+    };
+
+    pub fn prepareEdits(self: *Editor, document: *text.Document, edits: []const text.Edit, group: u64, selection_mode: EditSelection) !PreparedEdit {
         if (self.edit_scope) |scope| for (edits) |edit| {
             if (edit.range.start < scope.start or edit.range.end > scope.end) return error.CrossExcerptEdit;
         };
         var before = document.snapshot();
-        defer before.deinit();
+        errdefer before.deinit();
         try self.remember(before.stateId(), self.selections.items.items);
-        // Reserve selection history and its payload before document mutation.
         try self.history.ensureUnusedCapacity(self.allocator, 1);
-        const selection_count: usize = if (selection_range != null) 1 else edits.len;
-        const after_selections = try self.allocator.alloc(selection.Selection, selection_count);
-        errdefer self.allocator.free(after_selections);
-        try self.selections.items.ensureTotalCapacity(self.allocator, @max(1, edits.len));
-        var change = try document.apply(document.revision(), edits, group);
-        self.mapHighlights(&change);
-        if (self.edit_scope) |*range| {
-            range.start = change.map(range.start, .before);
-            range.end = change.map(range.end, .after);
+        const count = switch (selection_mode) {
+            .preserve => self.selections.items.items.len,
+            .edit_carets => @max(1, edits.len),
+            .caret => 1,
+        };
+        const after = try self.allocator.alloc(selection.Selection, count);
+        errdefer self.allocator.free(after);
+        try self.selections.items.ensureTotalCapacity(self.allocator, count);
+        var prepared = try document.prepare(before.revision(), edits, group);
+        errdefer prepared.deinit();
+        const change = &prepared.change;
+        switch (selection_mode) {
+            .preserve => for (self.selections.items.items, after) |item, *mapped| {
+                mapped.* = .{ .anchor = change.map(item.anchor, .after), .head = change.map(item.head, .after) };
+            },
+            .caret => |range| {
+                const end = change.map(range.end, .after);
+                after[0] = .{ .anchor = end, .head = end };
+            },
+            .edit_carets => {
+                if (edits.len == 0) after[0] = self.primary();
+                for (edits, after[0..edits.len]) |edit, *mapped| {
+                    const end = change.map(edit.range.end, .after);
+                    mapped.* = .{ .anchor = end, .head = end };
+                }
+            },
         }
-        self.wrap_cache.noteChange(&change);
-        vim_repeat.changed(self, &change, edits);
-        if (selection_range) |range| {
-            const end = change.map(range.end, .after);
-            after_selections[0] = .{ .anchor = end, .head = end };
-        } else for (edits, 0..) |edit, i| {
-            const end = change.map(edit.range.end, .after);
-            after_selections[i] = .{ .anchor = end, .head = end };
-        }
-        self.selections.items.clearRetainingCapacity();
-        self.selections.items.appendSliceAssumeCapacity(after_selections);
-        if (self.selections.items.items.len == 0) self.selections.items.appendAssumeCapacity(.{ .anchor = 0, .head = 0 });
-        self.selections.normalize();
-        self.history.appendAssumeCapacity(.{ .state = change.state, .items = after_selections });
-        if (self.history.items.len > 1024) {
-            const old = self.history.orderedRemove(0);
-            self.allocator.free(old.items);
-        }
-        var snapshot = document.snapshot();
-        defer snapshot.deinit();
-        const row = if (edits.len > 0) (before.pointAt(edits[0].range.start) catch unreachable).line else 0;
-        if (self.language == .plain) self.syntax_cache.clear() else {
-            if (self.syntax_cache.revision != before.revision() or edits.len > 1) self.syntax_cache.clear();
-            self.syntax_cache.refresh(snapshot, self.language, row) catch self.syntax_cache.clear();
-        }
-        self.reveal(snapshot);
-        return .{ .handled = true, .change = change };
+        return .{ .editor = self, .document = document, .text_edit = prepared, .before = before, .edits = edits, .selections = after };
     }
     pub fn insert(self: *Editor, document: *text.Document, bytes: []const u8) !Outcome {
         self.preferred_x = null;

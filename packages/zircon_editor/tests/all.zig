@@ -1210,3 +1210,28 @@ test "excerpt editing refuses hidden source bytes and remaps its range after ins
     defer t.allocator.free(bytes);
     try t.expectEqualStrings("hidden\nnew\nvisible\ntrailer\n", bytes);
 }
+
+test "prepared language edits preserve reversed selections and multiple carets through undo" {
+    var document = try text.Document.init(t.allocator, "import\nhello world\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.selections.single(.{ .anchor = 12, .head = 7 });
+    try state.selections.items.append(t.allocator, .{ .anchor = 18, .head = 18 });
+    var candidate = try state.prepareEdits(&document, &.{.{ .range = .{ .start = 0, .end = 0 }, .text = "// note\n" }}, try editor.Editor.freshGroup(), .preserve);
+    defer candidate.deinit();
+    try t.expectEqual(@as(u64, 0), document.revision());
+    try t.expectEqual(@as(usize, 12), state.primary().anchor);
+    var outcome = try candidate.commit();
+    release(&outcome);
+    try t.expectEqual(@as(usize, 2), state.selections.items.items.len);
+    try t.expectEqual(@as(usize, 20), state.primary().anchor);
+    try t.expectEqual(@as(usize, 15), state.primary().head);
+    try t.expectEqual(@as(usize, 26), state.selections.items.items[1].head);
+    outcome = try state.execute(&document, .undo);
+    release(&outcome);
+    try t.expectEqual(@as(usize, 2), state.selections.items.items.len);
+    try t.expectEqual(@as(usize, 12), state.primary().anchor);
+    try t.expectEqual(@as(usize, 7), state.primary().head);
+    try t.expectEqual(@as(usize, 18), state.selections.items.items[1].head);
+}

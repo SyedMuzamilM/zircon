@@ -84,6 +84,48 @@ pub const Document = struct {
         self.history.last_group = 0;
     }
     pub fn apply(self: *Document, expected: u64, edits: []const types.Edit, group: u64) !Change {
+        var prepared = try self.prepare(expected, edits, group);
+        defer prepared.deinit();
+        return prepared.commit(self);
+    }
+
+    /// Candidate text and history capacity are prepared before publication, so
+    /// callers can validate several documents before committing any of them.
+    pub const PreparedEdit = struct {
+        allocator: std.mem.Allocator,
+        document: *Document,
+        expected: u64,
+        group: u64,
+        candidate: ?*rope.Node,
+        change: Change,
+        changed: bool,
+        transferred: bool = false,
+
+        pub fn deinit(self: *PreparedEdit) void {
+            if (!self.transferred) {
+                if (self.changed) rope.release(self.allocator, self.candidate);
+                self.change.deinit();
+            }
+        }
+
+        pub fn commit(self: *PreparedEdit, document_value: *Document) !Change {
+            document_value.check();
+            if (self.transferred) return error.EditAlreadyCommitted;
+            if (document_value != self.document) return error.WrongDocument;
+            if (document_value.revision() != self.expected) return error.StaleRevision;
+            if (self.changed) {
+                document_value.history.commitEdit(document_value.allocator, .{ .root = document_value.root, .id = document_value.state_value }, self.group);
+                document_value.root = self.candidate;
+                document_value.revision_value = self.change.after;
+                document_value.state_value = self.change.state;
+                document_value.next_state += 1;
+            }
+            self.transferred = true;
+            return self.change;
+        }
+    };
+
+    pub fn prepare(self: *Document, expected: u64, edits: []const types.Edit, group: u64) !PreparedEdit {
         self.check();
         if (expected != self.revision_value) return error.StaleRevision;
         var source = self.snapshot();
@@ -101,7 +143,7 @@ pub const Document = struct {
             size = std.math.add(usize, size - removed, edit.text.len) catch return error.DocumentTooLarge;
             if (!sameText(source, edit)) count += 1;
         }
-        if (count == 0) return .{ .allocator = self.allocator, .before = self.revision_value, .after = self.revision_value, .state = self.state_value, .mappings = &.{} };
+        if (count == 0) return .{ .allocator = self.allocator, .document = self, .expected = expected, .group = group, .candidate = null, .changed = false, .change = .{ .allocator = self.allocator, .before = self.revision_value, .after = self.revision_value, .state = self.state_value, .mappings = &.{} } };
         if (self.revision_value == std.math.maxInt(u64)) return error.RevisionExhausted;
         if (self.next_state == std.math.maxInt(u64)) return error.StateIdentityExhausted;
         const mappings = try self.allocator.alloc(Mapping, count);
@@ -124,13 +166,7 @@ pub const Document = struct {
             candidate = next;
         }
         std.debug.assert(rope.summary(candidate).bytes == size);
-        self.history.commitEdit(self.allocator, .{ .root = self.root, .id = self.state_value }, group);
-        const before = self.revision_value;
-        self.root = candidate;
-        self.revision_value += 1;
-        self.state_value = self.next_state;
-        self.next_state += 1;
-        return .{ .allocator = self.allocator, .before = before, .after = self.revision_value, .state = self.state_value, .mappings = mappings };
+        return .{ .allocator = self.allocator, .document = self, .expected = expected, .group = group, .candidate = candidate, .changed = true, .change = .{ .allocator = self.allocator, .before = self.revision_value, .after = self.revision_value + 1, .state = self.next_state, .mappings = mappings } };
     }
     pub fn undo(self: *Document) !bool {
         self.check();
