@@ -13,7 +13,7 @@ const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
-const Pending = struct { kind: enum { initialize, completion, hover, definition, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
+const Pending = struct { kind: enum { initialize, completion, hover, definition, references, shutdown }, uri: []u8 = &.{}, version: u64 = 0 };
 pub const Client = struct {
     pub const Stats = struct { queued_messages: u64 = 0, queued_bytes: u64 = 0, document_changes: u64 = 0, change_text_bytes: u64 = 0, incremental_changes: u64 = 0, resync_changes: u64 = 0 };
     counters: Stats = .{},
@@ -33,6 +33,7 @@ pub const Client = struct {
     completion_supported: std.atomic.Value(bool) = .init(false),
     hover_supported: std.atomic.Value(bool) = .init(false),
     definition_supported: std.atomic.Value(bool) = .init(false),
+    references_supported: std.atomic.Value(bool) = .init(false),
     sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
@@ -231,6 +232,28 @@ pub const Client = struct {
             self.lock.unlock(self.io);
         }
         try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/definition", .params = .{ .textDocument = .{ .uri = uri }, .position = cursor_position } });
+        return id;
+    }
+    pub fn supportsReferences(self: *const Client) bool {
+        return self.references_supported.load(.acquire);
+    }
+    pub fn references(self: *Client, uri: []const u8, version: u64, cursor_position: model.Position) !u64 {
+        try self.check();
+        if (!self.supportsReferences()) return error.ReferencesNotSupported;
+        if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
+        const id = try self.requestId();
+        const owned = try transport_allocator.dupe(u8, uri);
+        errdefer transport_allocator.free(owned);
+        self.lock.lockUncancelable(self.io);
+        const inserted = self.pending.put(transport_allocator, id, .{ .kind = .references, .uri = owned, .version = version });
+        self.lock.unlock(self.io);
+        try inserted;
+        errdefer {
+            self.lock.lockUncancelable(self.io);
+            _ = self.pending.remove(id);
+            self.lock.unlock(self.io);
+        }
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/references", .params = .{ .textDocument = .{ .uri = uri }, .position = cursor_position, .context = .{ .includeDeclaration = true } } });
         return id;
     }
     fn requestId(self: *Client) !u64 {
@@ -593,6 +616,8 @@ fn parse(self: *Client, body: []const u8) !void {
             self.hover_supported.store(hover_provider, .release);
             const definition_provider = if (field(capabilities, "definitionProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
             self.definition_supported.store(definition_provider, .release);
+            const references_provider = if (field(capabilities, "referencesProvider")) |provider| provider != .null and !(provider == .bool and !provider.bool) else false;
+            self.references_supported.store(references_provider, .release);
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
             if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
@@ -626,9 +651,9 @@ fn parse(self: *Client, body: []const u8) !void {
             const contents = if (result == .null) "" else try hover_content.contents(a, field(result, "contents") orelse return error.InvalidHover);
             self.publish(.{ .arena = arena, .data = .{ .hover = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } } });
         },
-        .definition => {
+        .definition, .references => {
             if (result == .null) {
-                self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = &.{} } } });
+                self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = &.{} } } });
                 return;
             }
             const items = if (result == .array) blk: {
@@ -641,7 +666,7 @@ fn parse(self: *Client, body: []const u8) !void {
                 one[0] = .{ .uri = try string(field(result, "uri") orelse return error.InvalidDefinitionResult), .range = try range(field(result, "range") orelse return error.InvalidDefinitionResult) };
                 break :blk one;
             };
-            self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } } });
+            self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = items } } });
         },
     }
 }

@@ -37,6 +37,7 @@ const Document = struct {
 };
 pub const Pending = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64, cursor: usize };
 const PendingDefinition = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64 };
+const PendingReferences = PendingDefinition;
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
@@ -49,6 +50,8 @@ pub const Model = struct {
     pending: ?Pending = null,
     definitions: ?lsp.Message = null,
     definition_pending: ?PendingDefinition = null,
+    references: ?lsp.Message = null,
+    references_pending: ?PendingReferences = null,
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -75,9 +78,15 @@ pub const Model = struct {
         self.definitions = null;
         self.definition_pending = null;
     }
+    pub fn clearReferences(self: *Model) void {
+        if (self.references) |*value| value.deinit();
+        self.references = null;
+        self.references_pending = null;
+    }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         self.clearCompletion();
         self.clearDefinition();
+        self.clearReferences();
         for (self.documents.items) |*doc| {
             if (doc.diagnostics) |*value| value.deinit();
             a.free(doc.uri);
@@ -315,13 +324,24 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     changed = true;
                 },
                 .hover => try symbol_hover.accept(self, cx, session_index, message.data),
-                .locations => |value| if (self.language.definition_pending) |pending| {
-                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
-                    if (self.language.definitions) |*old| old.deinit();
-                    self.language.definitions = message;
-                    moved = true;
-                    changed = true;
-                    try acceptDefinition(self, cx, session_index, self.language.definitions.?.data);
+                .locations => |value| {
+                    if (value.kind == .definition) {
+                        const pending = self.language.definition_pending orelse continue;
+                        if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                        if (self.language.definitions) |*old| old.deinit();
+                        self.language.definitions = message;
+                        moved = true;
+                        changed = true;
+                        try acceptDefinition(self, cx, session_index, self.language.definitions.?.data);
+                    } else {
+                        const pending = self.language.references_pending orelse continue;
+                        if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                        if (self.language.references) |*old| old.deinit();
+                        self.language.references = message;
+                        moved = true;
+                        changed = true;
+                        self.showTool(.search);
+                    }
                 },
                 else => {},
             }
@@ -358,6 +378,22 @@ pub fn requestDefinition(self: *Shell, cx: *ui.Context(Shell)) !void {
         const request_id = try client.definition(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head));
         self.language.clearDefinition();
         self.language.definition_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+        cx.notify();
+        return;
+    };
+    return error.NoLanguageServer;
+}
+
+pub fn requestReferences(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try poll(self, cx);
+    const current = try actions.active(self);
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
+        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const request_id = try client.references(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, current.editor.primary().head));
+        self.language.clearReferences();
+        self.language.references_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
         cx.notify();
         return;
     };
@@ -419,6 +455,35 @@ pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, me
     current.editor.reveal(snapshot);
     self.editor_focus_request +%= 1;
     self.language.clearDefinition();
+    cx.notify();
+}
+
+pub fn acceptReference(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
+    const pending = self.language.references_pending orelse return error.StaleReferences;
+    const message = self.language.references orelse return error.StaleReferences;
+    if (message.data.locations.kind != .references or index >= message.data.locations.items.len) return error.StaleReferences;
+    const record = self.workspace.getConst(pending.document) catch return error.StaleReferences;
+    if (record.doc.revision() != pending.revision) return error.StaleReferences;
+    const location = message.data.locations.items[index];
+    var path: ?[]u8 = null;
+    var target_document: ?ws.DocumentId = null;
+    for (self.language.documents.items) |doc| if (std.mem.eql(u8, doc.uri, location.uri)) {
+        target_document = doc.id;
+        path = try self.allocator.dupe(u8, doc.path);
+        break;
+    };
+    if (path == null) path = try filePathFromUri(self.allocator, location.uri);
+    defer self.allocator.free(path.?);
+    if (target_document) |id| {
+        if (!try selectDocument(self, id)) try self.openPath(path.?);
+    } else try self.openPath(path.?);
+    const current = try actions.active(self);
+    var snapshot = try self.workspace.snapshot(current.id);
+    defer snapshot.deinit();
+    const selected_range: text.Range = .{ .start = try lsp.offsetAt(snapshot, location.range.start), .end = try lsp.offsetAt(snapshot, location.range.end) };
+    try current.editor.setSelection(snapshot, selected_range);
+    current.editor.reveal(snapshot);
+    self.editor_focus_request +%= 1;
     cx.notify();
 }
 

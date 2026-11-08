@@ -32,6 +32,7 @@ pub fn message(err: anyerror) []const u8 {
         error.ServerNotReady => "The language server is starting or unavailable. Try again when it is ready.",
         error.CompletionNotSupported => "This server does not provide completions.",
         error.DefinitionNotSupported => "This server does not provide definitions.",
+        error.ReferencesNotSupported => "This server does not provide references.",
         error.StaleCompletion, error.StaleDiagnostics => "The document or caret changed. Request fresh language results.",
         error.SnippetNotSupported => "Snippet completions are not supported yet.",
         error.ImageDecodingUnavailable => "Image decoding requires the native macOS app.",

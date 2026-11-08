@@ -21,6 +21,7 @@ const views_image = @import("views/image.zig");
 const overlays = @import("views/overlays.zig");
 const project = @import("views/project.zig");
 const views_search = @import("views/project_search.zig");
+const views_references = @import("views/references.zig");
 const workspace_controls = @import("views/workspace_controls.zig");
 const Shell = shell.Shell;
 const Command = catalogue.Command;
@@ -333,7 +334,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
 fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool) !ui.Element {
     if (tool) |which| return switch (which) {
         .git_diff => views_git_diff.render(self, b),
-        .search => views_search.render(self, b),
+        .search => if (self.language.references != null) views_references.render(self, b) else views_search.render(self, b),
         .extensions => views_extensions.render(self, b),
     };
     return views_image.render(self, b);

@@ -439,6 +439,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             error.NoLanguageServer, error.ServerNotReady, error.DefinitionNotSupported => {},
             else => return err,
         },
+        .find_references => services_language.requestReferences(self, cx) catch |err| switch (err) {
+            error.NoLanguageServer, error.ServerNotReady, error.ReferencesNotSupported => {},
+            else => return err,
+        },
         .cut, .copy, .paste => {
             // Native menu actions arrive through globalInput with the original
             // event surface. Palette actions are handled by the focused editor.
@@ -513,6 +517,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .install_extension => try overlays.show(self, cx, .extension_path),
         .install_bundled_extension => try services_extensions.installBundled(self, cx),
         .project_search => {
+            self.language.clearReferences();
             if (self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search) {
                 if (self.active_pane == .secondary) self.secondary_tool = null else self.panel = .editor;
                 return;
@@ -521,7 +526,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.overlay = .none;
             self.search_focus_request +%= 1;
         },
-        .run_project_search => try services_search.start(self, cx),
+        .run_project_search => {
+            self.language.clearReferences();
+            try services_search.start(self, cx);
+        },
 
         .settings => {
             if (self.settings_window) |handle| {

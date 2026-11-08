@@ -695,6 +695,9 @@ pub const Shell = struct {
             cx.notify();
         };
     }
+    pub fn onReference(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+        services_language.acceptReference(self, cx, index) catch |err| try self.reportError(err);
+    }
     pub fn onFindQuery(self: *Shell, cx: *ui.Context(Shell), _: ui.Entity(ui.controls.TextInput)) !void {
         if (self.find.visible) try buffer_find.changed(self, cx);
     }
