@@ -1,6 +1,7 @@
 //! Small visual controls shared by workspace, panels and preferences. Icons are
 //! shared SVG assets; actions keep their readable labels for keyboard/tests.
 const std = @import("std");
+const git = @import("zircon_git");
 const ui = @import("zircon_ui");
 const commands_module = @import("../commands.zig");
 const shell = @import("../shell.zig");
@@ -129,4 +130,9 @@ pub fn fileGlyph(self: *const Shell, b: *ui.Ui, path: []const u8, directory: boo
         .png => |asset| if (self.icons.find(asset.path)) |image| return image_module.element(b, image, .{ .width = .{ .px = size }, .height = .{ .px = size }, .flex_shrink = 0 }),
     };
     return icon(b, if (directory) (if (expanded) .folder_open else .folder) else fileIcon(path), if (directory) self.colors.muted else fileColor(self.colors, path), size);
+}
+pub fn gitFileColor(c: Palette, entry: git.Entry) ui.Color {
+    if (entry.conflicted or entry.worktree == .deleted or entry.index == .deleted) return c.deleted;
+    if (entry.index == .added or entry.index == .untracked or entry.worktree == .untracked) return c.added;
+    return c.modified;
 }

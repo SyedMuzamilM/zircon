@@ -14,6 +14,7 @@ const theme_module = @import("theme.zig");
 const wrap = @import("wrap.zig");
 const line_limit = 64 * 1024;
 const number_right_inset: f32 = 36;
+const scrollbar_width: f32 = 12;
 pub fn gutterWidth(lines: usize, font_size: f32) f32 {
     var digits: usize = 1;
     var remaining = lines;
@@ -300,11 +301,26 @@ const Canvas = struct {
             try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter + offset, .y = bounds.y + bounds.height - 7, .width = @min(available, thumb), .height = 4 }, .radius = 2, .color = self.theme.scrollbar });
         }
         const content = if (self.soft_wrap) self.wrap_cache.y(self.snapshot.lineCount(), self.line_height, self.git_changes) else annotations.rowY(self.snapshot.lineCount(), self.line_height, self.git_changes);
+        const track: ui.Rect = .{ .x = bounds.x + bounds.width - scrollbar_width, .y = bounds.y, .width = scrollbar_width, .height = bounds.height };
+        try cx.painter.fillRect(.{ .bounds = track, .color = self.theme.background });
         if (content > bounds.height and bounds.height > 0) {
-            const height = @max(24, bounds.height * bounds.height / content);
-            const y = bounds.y + (bounds.height - height) * self.scroll / @max(1, content - bounds.height);
-            try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + bounds.width - 7, .y = y, .width = 4, .height = height }, .color = self.theme.scrollbar, .radius = 2 });
+            const height = @min(track.height, @max(24, track.height * track.height / content));
+            const y = track.y + (track.height - height) * std.math.clamp(self.scroll / @max(1, content - track.height), 0, 1);
+            try cx.painter.fillRect(.{ .bounds = .{ .x = track.x, .y = y, .width = track.width, .height = height }, .color = self.theme.scrollbar });
         }
+        if (track.height > 0) for (self.git_changes) |change| {
+            const start = if (self.soft_wrap) self.wrap_cache.y(change.start, self.line_height, self.git_changes) else annotations.rowY(change.start, self.line_height, self.git_changes);
+            const end = if (self.soft_wrap) self.wrap_cache.y(change.end, self.line_height, self.git_changes) else annotations.rowY(change.end, self.line_height, self.git_changes);
+            const top = start - if (change.expanded) @as(f32, @floatFromInt(change.old_count)) * self.line_height else 0;
+            const scale = track.height / @max(content, track.height);
+            const height = @min(track.height, @max(3, (end - top) * scale));
+            const y = track.y + std.math.clamp(top * scale, 0, track.height - height);
+            try cx.painter.fillRect(.{ .bounds = .{ .x = track.x, .y = y, .width = 3, .height = height }, .color = switch (change.kind) {
+                .added => self.theme.git_added,
+                .modified => self.theme.git_modified,
+                .deleted => self.theme.git_deleted,
+            } });
+        };
     }
     fn paintRemoved(self: *Canvas, cx: *ui.PaintCx, metrics: LayoutState, gutter: f32, bounds: ui.Rect, change: annotations.GitChange) !void {
         var rows = std.mem.splitScalar(u8, change.removed, '\n');

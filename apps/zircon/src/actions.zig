@@ -100,9 +100,28 @@ pub fn loadTree(self: *Shell) !void {
     }
 }
 pub fn refreshTree(self: *Shell) !void {
-    for (self.tree.items) |row| freeRow(self.allocator, row);
-    self.tree.clearRetainingCapacity();
+    var previous = self.tree;
+    self.tree = .empty;
+    errdefer {
+        for (self.tree.items) |row| freeRow(self.allocator, row);
+        self.tree.deinit(self.allocator);
+        self.tree = previous;
+    }
     try loadTree(self);
+    var index: usize = 0;
+    while (index < self.tree.items.len) : (index += 1) {
+        const row = self.tree.items[index];
+        if (!row.directory) continue;
+        for (previous.items) |old| if (old.directory and old.expanded and std.mem.eql(u8, old.path, row.path)) {
+            expandDirectory(self, index) catch |err| switch (err) {
+                error.FileNotFound, error.NotDir, error.AccessDenied => {},
+                else => return err,
+            };
+            break;
+        };
+    }
+    for (previous.items) |row| freeRow(self.allocator, row);
+    previous.deinit(self.allocator);
 }
 fn copyRow(a: std.mem.Allocator, entry: ws.Entry, depth: u16) !model.TreeRow {
     const name = try a.dupe(u8, entry.name);

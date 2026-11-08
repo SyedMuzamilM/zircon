@@ -32,6 +32,7 @@ const result_limit = 12;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     try recovery.schedule(self, b);
+    try b.requestFrameAfter(@max(0.001, self.project_watch.next_check - b.frame.time));
     b.frame.tooltips_enabled = self.tooltips;
     b.frame.tooltip_delay = self.tooltip_delay / 1000;
     const colors = self.colors;

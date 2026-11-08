@@ -392,6 +392,50 @@ test "adjacent modified rows paint one continuous Git gutter marker" {
     try t.expectApproxEqAbs(@as(f32, 44), height, 0.01);
 }
 
+test "editor scrollbar is flush and square with document-wide Git markers" {
+    for ([_]bool{ false, true }) |wrapped| {
+        var app = try ui.App.init(.{ .allocator = t.allocator });
+        defer app.deinit();
+        var bytes: [500]u8 = undefined;
+        for (0..100) |row| @memcpy(bytes[row * 5 ..][0..5], "line\n");
+        var document = try text.Document.init(t.allocator, bytes[0 .. bytes.len - 1]);
+        var state = try editor.Editor.init(t.allocator);
+        state.soft_wrap = if (wrapped) .editor_width else .none;
+        state.git_revision = document.revision();
+        state.git_changes = try t.allocator.dupe(editor.GitChange, &.{
+            .{ .kind = .added, .start = 0, .end = 1 },
+            .{ .kind = .modified, .start = 50, .end = 60 },
+            .{ .kind = .deleted, .start = 100, .end = 100, .old_count = 1 },
+        });
+        const theme = state.theme;
+        const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+            document.deinit();
+            state.deinit();
+            return err;
+        };
+        _ = try app.step(0);
+        const frame = &(try app.window(h)).frames.committed;
+        var thumbs: usize = 0;
+        for (frame.scene.items) |item| if (item.kind == .rect and std.meta.eql(item.color, theme.scrollbar)) {
+            thumbs += 1;
+            try t.expect(item.rect.width >= 12);
+            try t.expectEqual(@as(f32, 600), item.rect.x + item.rect.width);
+            try t.expectEqual(@as(f32, 0), item.radius);
+        };
+        try t.expectEqual(@as(usize, 1), thumbs);
+        try t.expectEqual(theme.scrollbar, backgroundAt(frame.scene.items, .{ .x = 599, .y = 1 }));
+        try t.expectEqual(theme.git_added, backgroundAt(frame.scene.items, .{ .x = 589, .y = 1 }));
+        try t.expectEqual(theme.git_modified, backgroundAt(frame.scene.items, .{ .x = 589, .y = 160 }));
+        try t.expectEqual(theme.git_deleted, backgroundAt(frame.scene.items, .{ .x = 589, .y = 299 }));
+        try app.dispatch(h, .{ .scroll = .{ .position = .{ .x = 300, .y = 100 }, .x = 0, .y = -100000 } });
+        _ = try app.step(0);
+        try t.expectEqual(theme.scrollbar, backgroundAt(frame.scene.items, .{ .x = 599, .y = 299 }));
+        try t.expectEqual(theme.git_added, backgroundAt(frame.scene.items, .{ .x = 589, .y = 1 }));
+        try t.expectEqual(theme.git_modified, backgroundAt(frame.scene.items, .{ .x = 589, .y = 160 }));
+        try t.expectEqual(theme.git_deleted, backgroundAt(frame.scene.items, .{ .x = 589, .y = 299 }));
+    }
+}
+
 test "expanded removed rows map to current source across start middle and EOF hunks" {
     const changes = [_]editor.GitChange{
         .{ .kind = .deleted, .start = 0, .end = 0, .old_start = 0, .old_count = 2, .removed = "one\ntwo\n", .expanded = true },

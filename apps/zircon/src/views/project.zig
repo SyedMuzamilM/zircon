@@ -25,7 +25,8 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui
         try children.append(b.allocator(), if (entry.directory) try v.icon(b, if (entry.expanded) .chevron_down else .chevron_right, c.muted, 12) else try b.fluent().div().w(.{ .px = 12 }).shrink_0().children(.{}).build());
         const contribution = if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(self.active_icon_theme)) |icons| icons.resolve(entry.path, entry.directory) else null else null;
         if (if (entry.directory) self.project_folder_icons else self.project_file_icons) try children.append(b.allocator(), try v.fileGlyph(self, b, entry.path, entry.directory, entry.expanded, 16));
-        try children.append(b.allocator(), try v.text(b, entry.name, if (entry.directory) c.folder else c.text, 13));
+        const color = if (entry.directory) c.folder else if (self.git.entryForPath(entry.path)) |status| v.gitFileColor(c, status) else c.text;
+        try children.append(b.allocator(), try v.text(b, entry.name, color, 13));
         const accessible = if (contribution != null and contribution.? == .symbol) try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ contribution.?.symbol, entry.name }) else entry.name;
         const row = try f.button(.{ .label = accessible }).id(.named(entry.path))
             .flex().h_px(tree_row).shrink_0().items_center().gap_px(5)

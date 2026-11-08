@@ -82,6 +82,7 @@ pub const Model = struct {
     generation: u64 = 0,
     status_generation: u64 = 0,
     needs_refresh: bool = false,
+    next_refresh: f64 = 0,
     needs_metadata: bool = true,
     pending_all_diff: bool = false,
     diff_scroll: ui.controls.Scroll = .{},
@@ -89,6 +90,13 @@ pub const Model = struct {
     tree: git_tree.Tree = .{},
     staged_diff: bool = false,
     error_text: []u8 = &.{},
+    pub fn entryForPath(self: *const Model, path: []const u8) ?git.Entry {
+        const status = self.status orelse return null;
+        if (self.root_path.len == 0) return null;
+        const root = std.mem.trimEnd(u8, self.root_path, "/");
+        if (path.len <= root.len or !std.mem.startsWith(u8, path, root) or path[root.len] != '/') return null;
+        return statusEntry(status.entries, path[root.len + 1 ..]);
+    }
     pub fn deinit(self: *Model) void {
         self.editing.deinit();
         if (self.editable) |*value| value.deinit();
@@ -215,6 +223,13 @@ pub fn ensureEditable(self: *Shell) !void {
             return;
         };
     }
+}
+fn statusEntry(entries: []const git.Entry, path: []const u8) ?git.Entry {
+    for (entries) |entry| if (std.mem.eql(u8, entry.path, path)) return entry;
+    return null;
+}
+fn newFile(entry: git.Entry) bool {
+    return !entry.conflicted and (entry.index == .added or entry.index == .untracked or entry.worktree == .untracked);
 }
 pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
     // Opening a diff also loads the live documents that have no source tab yet.
@@ -439,8 +454,10 @@ const Job = struct {
         if (self.comparison) |comparison| result.diff = if (comparison.all) try repo.allChanges(a) else try repo.diff(a, comparison.path, comparison.staged);
         if (self.include_references) result.references = try repo.references(a);
         result.status = try repo.status(a);
-        result.commits = try repo.history(a, 100);
-        result.commits_ready = true;
+        if (self.include_references) {
+            result.commits = try repo.history(a, 100);
+            result.commits_ready = true;
+        }
         if (self.path) |absolute| if (self.snapshot) |snapshot| {
             const path = repo.relativePath(a, absolute) catch return;
             defer a.free(path);
@@ -448,7 +465,8 @@ const Job = struct {
             result.baseline = base;
             const bytes = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
             defer a.free(bytes);
-            result.changes = try git.diffLines(a, base, bytes);
+            const entry = statusEntry(result.status.?.entries, path);
+            if (entry == null or !newFile(entry.?)) result.changes = try git.diffLines(a, base, bytes);
             result.changes_ready = true;
         };
     }
@@ -570,6 +588,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
     _ = try cx.spawn(Job, job, complete);
     if (job.include_references) self.git.needs_metadata = false;
     self.git.busy = true;
+    self.git.next_refresh = try cx.app.currentTime() + 1;
     self.git.operation_label = @tagName(operation);
     if (operation == .diff) self.git.staged_diff = operation.diff.staged;
     if (operation == .all_diff) self.git.staged_diff = false;

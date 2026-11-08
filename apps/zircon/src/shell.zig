@@ -20,6 +20,7 @@ const services_extensions = @import("services/extensions.zig");
 const services_git = @import("services/git.zig");
 const services_icons = @import("services/icons.zig");
 const services_language = @import("services/language.zig");
+const services_project = @import("services/project.zig");
 const services_recovery = @import("services/recovery.zig");
 const services_search = @import("services/search.zig");
 const model = @import("settings/model.zig");
@@ -89,6 +90,7 @@ pub const Shell = struct {
     secondary_tool: ?Tool = null,
     split_ratio: f32 = 0.5,
     tree: std.ArrayList(TreeRow) = .empty,
+    project_watch: services_project.Model = .{},
     file_index: std.ArrayList(IndexedFile) = .empty,
     indexing: bool = false,
     overlay_index: usize = 0,
@@ -695,10 +697,11 @@ pub const Shell = struct {
         try buffer_find.poll(self, cx);
         try services_agents.poll(self, cx);
         try services_language.poll(self, cx);
+        try services_project.poll(self, cx);
         try services_git.pollBlame(self, cx);
-        if (self.git.repository) {
+        if (!self.git.busy) {
             const current: ?workspace.DocumentId = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else null;
-            if (!std.meta.eql(current, self.git.active_document)) try services_git.start(self, cx, .refresh);
+            if (!std.meta.eql(current, self.git.active_document) or try cx.app.currentTime() >= self.git.next_refresh) try services_git.start(self, cx, .refresh);
         }
     }
     pub fn onPreview(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
