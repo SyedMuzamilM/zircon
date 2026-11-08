@@ -450,6 +450,10 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try services_language.requestRename(self, cx, std.mem.trim(u8, name, " \t\r\n"));
             self.overlay = .none;
         },
+        .format_document => services_language.requestFormatting(self, cx) catch |err| switch (err) {
+            error.NoLanguageServer, error.ServerNotReady, error.FormattingNotSupported => {},
+            else => return err,
+        },
         .cut, .copy, .paste => {
             // Native menu actions arrive through globalInput with the original
             // event surface. Palette actions are handled by the focused editor.

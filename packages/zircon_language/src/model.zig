@@ -19,6 +19,7 @@ pub const Message = struct {
         hover: struct { id: u64, uri: []const u8, version: u64, contents: []const u8 },
         locations: struct { id: u64, uri: []const u8, version: u64, kind: LocationsKind, items: []const Location },
         workspace_edit: struct { id: u64, uri: []const u8, version: u64, files: []const FileEdits },
+        edits: struct { id: u64, uri: []const u8, version: u64, items: []const TextEdit },
         log: struct { message: []const u8, severity: u8 = 3 },
         failure: struct { message: []const u8, request_id: ?u64 = null },
         exited,

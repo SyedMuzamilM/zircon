@@ -105,14 +105,16 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
     const definition = try client.definition(uri, snap.revision(), .{ .line = 0, .character = 3 });
     const references = try client.references(uri, snap.revision(), .{ .line = 0, .character = 3 });
     const rename = try client.rename(uri, snap.revision(), .{ .line = 0, .character = 3 }, "renamed");
+    const formatting = try client.formatting(uri, snap.revision());
     var diagnostics = false;
     var definition_seen = false;
     var references_seen = false;
     var rename_seen = false;
+    var formatting_seen = false;
     var ids: [2]u64 = undefined;
     var count: usize = 0;
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
-    while (!diagnostics or !definition_seen or !references_seen or !rename_seen or count < 2) {
+    while (!diagnostics or !definition_seen or !references_seen or !rename_seen or !formatting_seen or count < 2) {
         const messages = try client.drain(t.allocator);
         defer language.deinitMessages(t.allocator, messages);
         for (messages) |message| switch (message.data) {
@@ -147,6 +149,12 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
                 try t.expectEqualStrings(uri, value.files[0].uri);
                 try t.expectEqualStrings("renamed", value.files[0].edits[0].new_text);
                 rename_seen = true;
+            },
+            .edits => |value| {
+                try t.expectEqual(formatting, value.id);
+                try t.expectEqual(@as(usize, 1), value.items.len);
+                try t.expectEqualStrings("F", value.items[0].new_text);
+                formatting_seen = true;
             },
             .failure => return error.FixtureFailure,
             else => {},

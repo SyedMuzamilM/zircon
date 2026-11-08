@@ -39,6 +39,7 @@ pub const Pending = struct { document: ws.DocumentId, session: usize, request: u
 const PendingDefinition = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64 };
 const PendingReferences = PendingDefinition;
 const PendingRename = PendingDefinition;
+const PendingFormatting = PendingDefinition;
 pub const Model = struct {
     syntax_jobs: u64 = 0,
     generation: u64 = 0,
@@ -54,6 +55,7 @@ pub const Model = struct {
     references: ?lsp.Message = null,
     references_pending: ?PendingReferences = null,
     rename_pending: ?PendingRename = null,
+    formatting_pending: ?PendingFormatting = null,
     pub fn activeSessions(self: *const Model) usize {
         var count: usize = 0;
         for (self.sessions.items) |session| if (!session.retired) {
@@ -88,11 +90,15 @@ pub const Model = struct {
     pub fn clearRename(self: *Model) void {
         self.rename_pending = null;
     }
+    pub fn clearFormatting(self: *Model) void {
+        self.formatting_pending = null;
+    }
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         self.clearCompletion();
         self.clearDefinition();
         self.clearReferences();
         self.clearRename();
+        self.clearFormatting();
         for (self.documents.items) |*doc| {
             if (doc.diagnostics) |*value| value.deinit();
             a.free(doc.uri);
@@ -355,6 +361,12 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     moved = true;
                     changed = true;
                 },
+                .edits => |value| if (self.language.formatting_pending) |pending| {
+                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
+                    try acceptFormatting(self, cx, value.items);
+                    moved = true;
+                    changed = true;
+                },
                 else => {},
             }
         }
@@ -426,6 +438,44 @@ pub fn requestRename(self: *Shell, cx: *ui.Context(Shell), new_name: []const u8)
         return;
     };
     return error.NoLanguageServer;
+}
+
+pub fn requestFormatting(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try poll(self, cx);
+    const current = try actions.active(self);
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
+        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const request_id = try client.formatting(doc.uri, snapshot.revision());
+        self.language.clearFormatting();
+        self.language.formatting_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+        cx.notify();
+        return;
+    };
+    return error.NoLanguageServer;
+}
+
+fn acceptFormatting(self: *Shell, cx: *ui.Context(Shell), items: []const lsp.TextEdit) !void {
+    const pending = self.language.formatting_pending orelse return;
+    const current = try actions.active(self);
+    if (!std.meta.eql(current.id, pending.document)) return error.StaleFormatting;
+    const record = try self.workspace.get(current.id);
+    var snapshot = record.doc.snapshot();
+    defer snapshot.deinit();
+    const edits = try self.allocator.alloc(text.Edit, items.len);
+    defer self.allocator.free(edits);
+    for (items, edits) |item, *actual| actual.* = .{ .range = .{ .start = try lsp.offsetAt(snapshot, item.range.start), .end = try lsp.offsetAt(snapshot, item.range.end) }, .text = item.new_text };
+    std.mem.sort(text.Edit, edits, {}, struct {
+        fn less(_: void, a: text.Edit, b: text.Edit) bool {
+            return a.range.start < b.range.start;
+        }
+    }.less);
+    const selection = current.editor.primary().range();
+    var outcome = try current.editor.applyEditsWithSelection(&record.doc, edits, try zircon_editor.Editor.freshGroup(), selection);
+    try actions.applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .formatting);
+    self.language.clearFormatting();
+    cx.notify();
 }
 
 fn acceptRename(self: *Shell, cx: *ui.Context(Shell), files: []const lsp.FileEdits) !void {

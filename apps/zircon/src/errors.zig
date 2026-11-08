@@ -35,6 +35,8 @@ pub fn message(err: anyerror) []const u8 {
         error.ReferencesNotSupported => "This server does not provide references.",
         error.RenameNotSupported => "This server does not provide rename.",
         error.InvalidRename => "Enter a new symbol name.",
+        error.FormattingNotSupported => "This server does not provide document formatting.",
+        error.StaleFormatting => "The document changed before formatting completed. Try again.",
         error.StaleCompletion, error.StaleDiagnostics => "The document or caret changed. Request fresh language results.",
         error.SnippetNotSupported => "Snippet completions are not supported yet.",
         error.ImageDecodingUnavailable => "Image decoding requires the native macOS app.",

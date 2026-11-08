@@ -73,7 +73,7 @@ while True:
         sys.stderr.write("fixture stderr " + "x" * 80000 + "\n")
         sys.stderr.flush()
         assert params["capabilities"]["general"]["positionEncodings"] == ["utf-16"]
-        capabilities = {"positionEncoding": "utf-16", "completionProvider": {}, "hoverProvider": True, "definitionProvider": True, "referencesProvider": True, "renameProvider": True}
+        capabilities = {"positionEncoding": "utf-16", "completionProvider": {}, "hoverProvider": True, "definitionProvider": True, "referencesProvider": True, "renameProvider": True, "documentFormattingProvider": True}
         if mode != "sync-omitted":
             capabilities["textDocumentSync"] = (
                 {"openClose": True, "change": 2} if mode == "incremental-object"
@@ -123,6 +123,8 @@ while True:
         send({"jsonrpc": "2.0", "id": message["id"], "result": [{"uri": params["textDocument"]["uri"], "range": {"start": {"line": 0, "character": 2}, "end": {"line": 0, "character": 3}}}]})
     elif method == "textDocument/rename":
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"changes": {params["textDocument"]["uri"]: [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}, "newText": params["newName"]}]}}})
+    elif method == "textDocument/formatting":
+        send({"jsonrpc": "2.0", "id": message["id"], "result": [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}, "newText": "F"}]})
     elif method == "textDocument/completion":
         assert params["position"]["character"] == 3
         completions.append(message)
