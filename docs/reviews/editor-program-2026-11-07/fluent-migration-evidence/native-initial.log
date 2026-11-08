@@ -1,0 +1,31 @@
+    Finished `release` profile [optimized] target(s) in 0.83s
+test-native-fresh
++- run test
+   +- run test
+      +- run test
+         +- run test 8 pass, 1 fail (9 total)
+error: 'platform.macos.window_test.test.native window presents and routes queued pointer, text, resize and close events' failed:
+       native dispatch failed: keys=3, committed x=1, app active=true, target key=true, target first responder=true
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/platform/macos/window_test.zig:144:5: 0x100839f1b in expectTextDispatch (test)
+           return error.TextDispatchFailed;
+           ^
+       /Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui/src/platform/macos/window_test.zig:64:5: 0x100844903 in test.native window presents and routes queued pointer, text, resize and close events (test)
+           try expectTextDispatch(log, app, native_window);
+           ^
+failed command: ./.zig-cache/o/eeb18cd5e6383dbb5d58ecb4fe76c90c/test --cache-dir=./.zig-cache --seed=0xe386aca0 --listen=-
+
+Build Summary: 7/12 steps succeeded (1 failed); 8/9 tests passed (1 failed)
+test-native-fresh transitive failure
++- run test transitive failure
+   +- compile test debug native success 9s MaxRSS:648M
+   |  +- options cached
+   +- run test transitive failure
+      +- compile test debug native success 10s MaxRSS:785M
+      |  +- options (reused)
+      +- run cargo success 918ms
+      +- run test transitive failure
+         +- compile test debug native success 6s MaxRSS:362M
+         |  +- options cached
+         +- run test 8 pass, 1 fail (9 total)
+            +- compile test debug native success 5s MaxRSS:304M
+               +- options (reused)

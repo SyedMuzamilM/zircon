@@ -1,19 +1,27 @@
 //! Zircon application composition. Reusable UI, text, persistence and editing
 //! live in separate packages; this module owns tabs, panes and workspace policy.
-pub const Shell = @import("shell.zig").Shell;
-pub const Command = @import("commands.zig").Command;
-pub const commands = @import("commands.zig").commands;
-
-pub const view = @import("view.zig");
-pub const Settings = @import("settings/model.zig").Settings;
-pub const SettingsStore = @import("settings/store.zig").Store;
-pub const SettingsPatch = @import("settings/store.zig").Patch;
-pub const SettingsView = @import("settings/view.zig").View;
-
-pub const refreshExtensions = @import("services/extensions.zig").refresh;
-
-pub const languageSuggestion = @import("language_suggestions.zig").query;
-
 pub const git = @import("zircon_git");
+const app_icon = @import("app_icon.zig");
+const commands_module = @import("commands.zig");
+const language_suggestions = @import("language_suggestions.zig");
 pub const diff_layout = @import("models/diff_layout.zig");
-pub const applicationIcon = @import("app_icon.zig").create;
+const extensions = @import("services/extensions.zig");
+const model = @import("settings/model.zig");
+const store = @import("settings/store.zig");
+const settings_view = @import("settings/view.zig");
+const shell = @import("shell.zig");
+pub const view = @import("view.zig");
+pub const Shell = shell.Shell;
+pub const Command = commands_module.Command;
+pub const commands = commands_module.commands;
+
+pub const Settings = model.Settings;
+pub const SettingsStore = store.Store;
+pub const SettingsPatch = store.Patch;
+pub const SettingsView = settings_view.View;
+
+pub const refreshExtensions = extensions.refresh;
+
+pub const languageSuggestion = language_suggestions.query;
+
+pub const applicationIcon = app_icon.create;

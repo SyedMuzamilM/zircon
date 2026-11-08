@@ -2,7 +2,8 @@
 //! replaying native IME events or copying an entire document to repeat one edit.
 const std = @import("std");
 const text = @import("zircon_text");
-const Editor = @import("editor.zig").Editor;
+const editor = @import("editor.zig");
+const Editor = editor.Editor;
 pub const Recording = struct {
     keys: [64]u8 = undefined,
     len: usize = 0,

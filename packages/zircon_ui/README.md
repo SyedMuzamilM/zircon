@@ -12,7 +12,7 @@ _ = try app.openWindow(Counter, .{ .title = "Counter" }, .{});
 try app.run();
 ```
 
-A view implements `pub fn render(self: *const Self, builder: *ui.Ui) !ui.Element`. Use `column`, `row`, `stack`, `div`, `text`, `textFmt`, `button`, `custom`, `view` and `watch`. Styles use typed dimensions, colors and font styles. Native consumers configure the dependency with `.native = true`; the default package remains portable and uses an in-memory window adapter.
+A view implements `pub fn render(self: *const Self, builder: *ui.Ui) !ui.Element`. Use `const f = builder.fluent();`, compose `f.column()`, `f.row()`, `f.stack()`, `f.text()`, `f.button()` and `f.view()`, then finish with `.build()`. Keep owning custom creation explicit through `builder.custom`; use `f.adopt(custom)` to decorate it. Styles use typed dimensions, colors and font styles. Native consumers configure the dependency with `.native = true`; the default package remains portable and uses an in-memory window adapter.
 
 ## Entity ownership and effects
 

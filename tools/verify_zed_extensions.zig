@@ -1,8 +1,8 @@
 //! Opt-in native journey using previously downloaded official extension bundles.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const appmod = @import("zircon");
 const ext = @import("zircon_extensions");
+const ui = @import("zircon_ui");
 const Shell = appmod.Shell;
 const Ops = struct {
     fn healthy(self: *const Shell) bool {
@@ -72,7 +72,7 @@ const Ops = struct {
     }
     fn stop(self: *Shell, cx: *ui.Context(Shell)) !void {
         try self.extensions.?.setEnabled("zed.zig", false);
-        try @import("zircon").refreshExtensions(self, cx);
+        try appmod.refreshExtensions(self, cx);
     }
     fn stopped(self: *const Shell) bool {
         return self.language.sessions.items.len == 0 and self.tabs.items[0].editor.language == .zig;

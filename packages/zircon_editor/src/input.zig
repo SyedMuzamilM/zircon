@@ -3,10 +3,12 @@
 const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
+const canvas = @import("canvas.zig");
 const model = @import("editor.zig");
+const navigation = @import("navigation.zig");
+const vim_module = @import("vim.zig");
 const Editor = model.Editor;
 const Outcome = model.Outcome;
-const navigation = @import("navigation.zig");
 pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !Outcome {
     try self.validate();
     self.last_viewport = .{ .width = e.bounds.width, .height = e.bounds.height };
@@ -14,7 +16,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
         const point = if (e.data == .pointer_move) e.data.pointer_move.position else e.data.pointer_down.position;
         var source = document.snapshot();
         defer source.deinit();
-        const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(source.lineCount(), self.font_size) else 20;
+        const gutter = if (self.show_line_numbers) canvas.gutterWidth(source.lineCount(), self.font_size) else 20;
         self.gutter_hovered = point.x >= e.bounds.x and point.x < e.bounds.x + gutter;
         if (self.show_fold_controls and self.show_line_numbers and e.data == .pointer_down and e.data.pointer_down.button == .primary and point.x >= e.bounds.x + gutter - 28 and point.x < e.bounds.x + gutter - 4) {
             const row = @min(source.lineCount() - 1, self.rowAt(point.y - e.bounds.y + self.scroll.offset, source.revision()));
@@ -24,7 +26,7 @@ pub fn handle(self: *Editor, document: *text.Document, e: *ui.Event(ui.Input)) !
             }
         }
     } else if (e.data == .pointer_leave) self.gutter_hovered = false;
-    if (try @import("vim.zig").handle(self, document, e)) |result| return result;
+    if (try vim_module.handle(self, document, e)) |result| return result;
     var snapshot = document.snapshot();
     defer snapshot.deinit();
     switch (e.data) {

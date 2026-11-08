@@ -1,13 +1,16 @@
 //! Live Git rows resolve through multibuffer source identities. Source documents
 //! retain their own text and history; the diff owns only editor presentation.
 const std = @import("std");
-const ui = @import("zircon_ui");
-const text = @import("zircon_text");
 const editing = @import("zircon_editor");
-const ws = @import("zircon_workspace");
 const git = @import("zircon_git");
-const Shell = @import("shell.zig").Shell;
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const ws = @import("zircon_workspace");
 const actions = @import("actions.zig");
+const commands = @import("commands.zig");
+const services_git = @import("services/git.zig");
+const shell = @import("shell.zig");
+const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 
 const View = struct { document: ws.DocumentId, editor: editing.Editor };
@@ -74,7 +77,7 @@ pub fn active(self: *const Shell) bool {
 }
 
 pub fn renderRow(self: *const Shell, b: *ui.Ui, original: git.Line, path: []const u8, fallback: ui.Element) !ui.Element {
-    const row = original.new_line orelse return b.listen(fallback, .{ .focusable = true, .on_input = b.onInput(readOnly) });
+    const row = original.new_line orelse return b.fluent().adopt(fallback).listeners(.{ .focusable = true, .on_input = b.onInput(readOnly) }).build();
     const destination = (try target(self, path, row -| 1)) orelse return fallback;
     var content = fallback;
     if (self.git.editing.current()) |view| if (std.meta.eql(view.document, destination.document)) {
@@ -93,12 +96,12 @@ pub fn renderRow(self: *const Shell, b: *ui.Ui, original: git.Line, path: []cons
                 state.theme.background = .{ .r = base.r * 0.86 + tint.r * 0.14, .g = base.g * 0.86 + tint.g * 0.14, .b = base.b * 0.86 + tint.b * 0.14, .a = 1 };
             }
             state.highlight_active_line = false;
-            content = try b.styled(try state.render(&record.doc, b), .{ .height = .{ .px = state.line_height }, .flex_grow = 0, .flex_shrink = 0, .overflow = .hidden });
-            content = try b.key(.{ .string = "git-diff-editor" }, content);
-            content = try b.requestFocus(content, self.editor_focus_request);
+            content = try b.fluent().adopt(try state.render(&record.doc, b)).style(.{ .height = .{ .px = state.line_height }, .flex_grow = 0, .flex_shrink = 0, .overflow = .hidden }).build();
+            content = try b.fluent().adopt(content).id(.{ .string = "git-diff-editor" }).build();
+            content = try b.fluent().adopt(content).request_focus(self.editor_focus_request).build();
         }
     };
-    return b.listen(content, .{ .focusable = true, .on_input = b.onInputWith(input, destination) });
+    return b.fluent().adopt(content).listeners(.{ .focusable = true, .on_input = b.onInputWith(input, destination) }).build();
 }
 
 fn readOnly(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
@@ -151,7 +154,7 @@ fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), destinati
     const changed = outcome.change != null or outcome.reset;
     try actions.applyOutcome(self, cx, view.document, 2, &outcome, .typing);
     if (outcome.request_project_search) try actions.execute(self, cx, .project_search, e);
-    if (changed) try @import("services/git.zig").start(self, cx, .refresh);
+    if (changed) try services_git.start(self, cx, .refresh);
     if (outcome.handled) {
         e.preventDefault();
         e.stopPropagation();
@@ -159,7 +162,7 @@ fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), destinati
     }
 }
 
-pub fn command(self: *Shell, cx: *ui.Context(Shell), which: @import("commands.zig").Command) !bool {
+pub fn command(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !bool {
     if (!active(self)) return false;
     const id = self.git.editing.active.?;
     const record = try self.workspace.get(id);
@@ -178,7 +181,7 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: @import("commands.zi
         var outcome = try view.editor.execute(&record.doc, command_value);
         try actions.applyOutcome(self, cx, id, 2, &outcome, if (which == .undo) .undo else if (which == .redo) .redo else .project_edit);
     }
-    try @import("services/git.zig").start(self, cx, .refresh);
+    try services_git.start(self, cx, .refresh);
     cx.notify();
     return true;
 }

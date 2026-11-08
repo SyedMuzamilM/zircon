@@ -1,11 +1,37 @@
 //! Window-owned workspace state. Input adapters only borrow this entity during
 //! dispatch; canvases receive retained immutable text snapshots through Editor.
 const std = @import("std");
+const editor = @import("zircon_editor");
+const zircon_extensions = @import("zircon_extensions");
+const zircon_text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const workspace = @import("zircon_workspace");
-const editor = @import("zircon_editor");
-const command = @import("commands.zig");
 const actions = @import("actions.zig");
+const command = @import("commands.zig");
+const errors = @import("errors.zig");
+const key_bindings_module = @import("key_bindings.zig");
+const panes = @import("panes.zig");
+const projects = @import("projects.zig");
+const recent_module = @import("recent.zig");
+const services_agents = @import("services/agents.zig");
+const buffer_find = @import("services/buffer_find.zig");
+const services_catalog = @import("services/catalog.zig");
+const services_extensions = @import("services/extensions.zig");
+const services_git = @import("services/git.zig");
+const services_icons = @import("services/icons.zig");
+const services_language = @import("services/language.zig");
+const services_recovery = @import("services/recovery.zig");
+const services_search = @import("services/search.zig");
+const model = @import("settings/model.zig");
+const settings_store = @import("settings/store.zig");
+const terminal_module = @import("terminal.zig");
+const theme_module = @import("theme.zig");
+const view_module = @import("view.zig");
+const components = @import("views/components.zig");
+const views_git_diff = @import("views/git_diff.zig");
+const views_image = @import("views/image.zig");
+const views_markdown = @import("views/markdown.zig");
+const views_search = @import("views/search.zig");
 pub const Command = command.Command;
 pub const Tab = struct { document: workspace.DocumentId, editor: editor.Editor, primary: bool = true, secondary: bool = false, language_path: ?[]u8 = null, language_name: ?[]u8 = null, secondary_state: ?editor.Editor = null };
 pub const Pane = struct { document: workspace.DocumentId, editor: editor.Editor };
@@ -41,10 +67,10 @@ pub const Shell = struct {
     menu_open: bool = false,
     popup: enum { none, recent, language, servers, editor } = .none,
     popup_anchor: ui.Rect = .{},
-    recent: @import("recent.zig").Recent = .{},
+    recent: recent_module.Recent = .{},
     language_stopped: bool = false,
-    layout_setting: @import("settings/store.zig").PanelLayout = .classic,
-    terminal: @import("terminal.zig").Model = .{},
+    layout_setting: settings_store.PanelLayout = .classic,
+    terminal: terminal_module.Model = .{},
     image_zoom: f32 = 1,
     image_scroll: ui.Point = .{},
 
@@ -52,10 +78,10 @@ pub const Shell = struct {
     inline_blame_enabled: bool = true,
     system_dark: bool = true,
     follows_system: bool = false,
-    key_bindings: @import("key_bindings.zig").Overrides = .{},
+    key_bindings: key_bindings_module.Overrides = .{},
     split_vertical: bool = false,
     split_reverse: bool = false,
-    open_kind: @import("projects.zig").Kind = .local_folder,
+    open_kind: projects.Kind = .local_folder,
     cloning: bool = false,
     search_focus_request: u64 = 0,
     tool_tabs: ToolTabs = .{},
@@ -73,34 +99,34 @@ pub const Shell = struct {
     allow_close: bool = false,
     window: ?ui.WindowHandle = null,
     fields: ?Fields = null,
-    extensions: ?@import("zircon_extensions").Registry = null,
-    extension_snapshot: ?@import("zircon_extensions").Snapshot = null,
+    extensions: ?zircon_extensions.Registry = null,
+    extension_snapshot: ?zircon_extensions.Snapshot = null,
     active_icon_theme: []u8 = &.{},
-    icons: @import("services/icons.zig").Cache = .{},
-    settings: ?ui.Entity(@import("settings/model.zig").Settings) = null,
+    icons: services_icons.Cache = .{},
+    settings: ?ui.Entity(model.Settings) = null,
     settings_window: ?ui.WindowHandle = null,
-    colors: @import("theme.zig").Palette = .{},
+    colors: theme_module.Palette = .{},
     editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
-    git: @import("services/git.zig").Model = .{},
-    recovery: ?@import("services/recovery.zig").Model = null,
-    search: @import("services/search.zig").Model = .{},
-    find: @import("services/buffer_find.zig").Model = .{},
-    catalog: @import("services/catalog.zig").Model = .{},
+    git: services_git.Model = .{},
+    recovery: ?services_recovery.Model = null,
+    search: services_search.Model = .{},
+    find: buffer_find.Model = .{},
+    catalog: services_catalog.Model = .{},
     extension_host_path: ?[]const u8 = null,
-    language: @import("services/language.zig").Model = .{},
-    agents: @import("services/agents.zig").Model = .{},
+    language: services_language.Model = .{},
+    agents: services_agents.Model = .{},
     agent_mode: bool = false,
     agent_editor: bool = true,
     left_panel: enum { project, git_changes, git_history } = .project,
     panel: enum { editor, git_diff, extensions, search, image, markdown } = .editor,
-    image: ?@import("views/image.zig").Asset = null,
-    preview: ?struct { document: workspace.DocumentId, view: @import("views/markdown.zig").Preview } = null,
+    image: ?views_image.Asset = null,
+    preview: ?struct { document: workspace.DocumentId, view: views_markdown.Preview } = null,
     status: []u8 = &.{},
     status_is_error: bool = false,
     status_origin: union(enum) { general, syntax: workspace.DocumentId } = .general,
     status_sequence: u64 = 0,
     dragging: enum { none, sidebar, split } = .none,
-    tab_drag: ?@import("panes.zig").Session = null,
+    tab_drag: ?panes.Session = null,
     pub fn init(a: std.mem.Allocator, io: std.Io, root_path: []const u8, initial: ?[]const u8) !Shell {
         var self: Shell = .{ .allocator = a, .workspace = try workspace.Workspace.init(a, io, root_path) };
         errdefer self.deinit(a);
@@ -109,7 +135,7 @@ pub const Shell = struct {
         return self;
     }
     pub fn deinit(self: *Shell, _: std.mem.Allocator) void {
-        @import("panes.zig").cancel(self);
+        panes.cancel(self);
         self.recent.deinit(self.allocator);
         self.terminal.deinit(self.allocator);
         for (self.tabs.items) |*tab| {
@@ -148,7 +174,7 @@ pub const Shell = struct {
         self.icons.deinit(self.allocator);
         self.workspace.deinit();
     }
-    pub fn publishDocumentChange(self: *Shell, id: workspace.DocumentId, origin: workspace.ChangeOrigin, change: @import("zircon_text").Change) void {
+    pub fn publishDocumentChange(self: *Shell, id: workspace.DocumentId, origin: workspace.ChangeOrigin, change: zircon_text.Change) void {
         self.document_changes.push(workspace.DocumentChange.take(id, origin, change));
     }
     pub fn publishDocumentReset(self: *Shell, id: workspace.DocumentId, origin: workspace.ChangeOrigin, before: u64) void {
@@ -172,15 +198,15 @@ pub const Shell = struct {
         self.document_changes.clear();
         cx.notify();
     }
-    pub const configureAgents = @import("services/agents.zig").configure;
+    pub const configureAgents = services_agents.configure;
     pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
-        return @import("view.zig").render(self, b);
+        return view_module.render(self, b);
     }
     pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) !void {
         try actions.bootstrap(self, cx, window);
     }
     pub fn loadSettings(self: *Shell, cx: *ui.Context(Shell), path: ?[]const u8) !void {
-        const Settings = @import("settings/model.zig").Settings;
+        const Settings = model.Settings;
         var value = try Settings.init(self.allocator, self.workspace.io, path);
         self.settings = cx.app.createEntity(Settings, value) catch |err| {
             value.deinit(self.allocator);
@@ -189,7 +215,7 @@ pub const Shell = struct {
     }
     /// Restores an unlocked session and enables asynchronous checkpoints.
     pub fn initRecovery(self: *Shell, cx: *ui.Context(Shell), home: []const u8) !void {
-        @import("services/recovery.zig").init(self, home) catch |err| {
+        services_recovery.init(self, home) catch |err| {
             self.recovery = .{ .home = try self.allocator.dupe(u8, home), .store = null, .last_error = err };
             try self.reportError(err);
             cx.notify();
@@ -198,7 +224,7 @@ pub const Shell = struct {
         cx.notify();
     }
     pub fn loadExtensions(self: *Shell, cx: *ui.Context(Shell), home: []const u8) !void {
-        var registry = try @import("zircon_extensions").Registry.init(self.allocator, self.workspace.io, home);
+        var registry = try zircon_extensions.Registry.init(self.allocator, self.workspace.io, home);
         var old_registry = self.extensions;
         var old_snapshot = self.extension_snapshot;
         self.extension_snapshot = registry.snapshot();
@@ -215,11 +241,11 @@ pub const Shell = struct {
         if (old_registry) |*old| old.deinit();
         cx.notify();
     }
-    pub fn copyExtensions(self: *const Shell, output: *?@import("zircon_extensions").Snapshot) void {
+    pub fn copyExtensions(self: *const Shell, output: *?zircon_extensions.Snapshot) void {
         output.* = if (self.extension_snapshot) |snapshot| snapshot.clone() else null;
     }
-    pub fn onSettings(self: *Shell, cx: *ui.Context(Shell), settings: ui.Entity(@import("settings/model.zig").Settings)) !void {
-        const preferences = @import("settings/model.zig");
+    pub fn onSettings(self: *Shell, cx: *ui.Context(Shell), settings: ui.Entity(model.Settings)) !void {
+        const preferences = model;
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         var values: preferences.Values = undefined;
@@ -229,7 +255,7 @@ pub const Shell = struct {
         if (self.layout_setting != values.panel_layout) {
             self.agent_mode = values.panel_layout == .agentic;
             self.layout_setting = values.panel_layout;
-            if (self.agent_mode) try @import("services/agents.zig").ensure(self);
+            if (self.agent_mode) try services_agents.ensure(self);
         }
         if (values.project_panel_width != self.project_default_width) {
             self.sidebar_width = values.project_panel_width;
@@ -257,10 +283,10 @@ pub const Shell = struct {
         }
         const icon_theme = try self.allocator.dupe(u8, values.icon_theme);
         errdefer self.allocator.free(icon_theme);
-        var icons: @import("services/icons.zig").Cache = .{};
+        var icons: services_icons.Cache = .{};
         errdefer icons.deinit(self.allocator);
         if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(values.icon_theme)) |contribution| {
-            icons = try @import("services/icons.zig").Cache.init(self.allocator, contribution);
+            icons = try services_icons.Cache.init(self.allocator, contribution);
         };
         for (self.tabs.items) |tab| _ = try self.workspace.getConst(tab.document);
         if (self.secondary) |pane| _ = try self.workspace.getConst(pane.document);
@@ -271,8 +297,8 @@ pub const Shell = struct {
             self.system_dark = surface.systemDark();
         };
         self.follows_system = follows_system;
-        const light = @import("theme.zig").isLight(values.theme, self.system_dark);
-        self.colors = if (light) @import("theme.zig").Palette.light else .{};
+        const light = theme_module.isLight(values.theme, self.system_dark);
+        self.colors = if (light) theme_module.Palette.light else .{};
         for (self.tabs.items) |*tab| {
             tab.editor.soft_wrap = values.soft_wrap;
             tab.editor.wrap_cache.revision = null;
@@ -308,7 +334,7 @@ pub const Shell = struct {
         self.icons.deinit(self.allocator);
         self.icons = icons;
         self.editor_options.theme = if (light) editor.Theme.light else .{};
-        @import("services/extensions.zig").applyTheme(self, values.theme);
+        services_extensions.applyTheme(self, values.theme);
         if (self.window) |handle| if ((try cx.app.window(handle)).surface) |surface| {
             const background = self.colors.document;
             const dark = background.r * 0.2126 + background.g * 0.7152 + background.b * 0.0722 < 0.5;
@@ -317,7 +343,7 @@ pub const Shell = struct {
         if (self.preview) |*preview| preview.view.colors = self.previewColors();
         for (self.tabs.items) |*tab| {
             const record = self.workspace.getConst(tab.document) catch unreachable;
-            @import("services/extensions.zig").applyLanguage(self, &tab.editor, self.languagePath(tab.document, record.path orelse ""));
+            services_extensions.applyLanguage(self, &tab.editor, self.languagePath(tab.document, record.path orelse ""));
             tab.editor.syntax_cache.clear();
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
@@ -326,7 +352,7 @@ pub const Shell = struct {
         }
         if (self.secondary) |*pane| {
             const record = self.workspace.getConst(pane.document) catch unreachable;
-            @import("services/extensions.zig").applyLanguage(self, &pane.editor, self.languagePath(pane.document, record.path orelse ""));
+            services_extensions.applyLanguage(self, &pane.editor, self.languagePath(pane.document, record.path orelse ""));
             pane.editor.syntax_cache.clear();
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
@@ -340,7 +366,7 @@ pub const Shell = struct {
     pub fn styleInputs(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.agents.composer) |*compose| compose.editor.theme = self.editor_options.theme;
         for (self.agents.sessions.items) |session| session.preview.colors = self.previewColors();
-        const appearance = @import("views/components.zig").inputAppearance(self.colors);
+        const appearance = components.inputAppearance(self.colors);
         if (self.fields) |fields| inline for (.{ "find_query", "agent_query", "extension_query", "query", "project_query", "replacement", "path", "destination", "commit" }) |name| try cx.update(@field(fields, name), ui.controls.TextInput.setAppearance, .{appearance});
     }
     pub fn panelWidth(self: *const Shell) f32 {
@@ -368,9 +394,9 @@ pub const Shell = struct {
         state.show_line_numbers = options.line_numbers;
         state.show_git_gutters = options.git_gutters;
         state.theme = options.theme;
-        @import("services/extensions.zig").applyLanguage(self, state, path);
+        services_extensions.applyLanguage(self, state, path);
     }
-    pub fn previewColors(self: *const Shell) @import("views/markdown.zig").Colors {
+    pub fn previewColors(self: *const Shell) views_markdown.Colors {
         return .{ .background = self.colors.document, .text = self.colors.text, .muted = self.colors.muted, .accent = self.colors.accent, .code = self.colors.sidebar, .border = self.colors.line, .tokens = self.editor_options.theme.tokens };
     }
     pub fn openPath(self: *Shell, path: []const u8) !void {
@@ -459,7 +485,7 @@ pub const Shell = struct {
         self.editor_focus_request +%= 1;
         cx.notify();
     }
-    pub fn onOpenKind(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), kind: @import("projects.zig").Kind) void {
+    pub fn onOpenKind(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), kind: projects.Kind) void {
         self.open_kind = kind;
         cx.notify();
     }
@@ -532,7 +558,7 @@ pub const Shell = struct {
     pub fn onTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: u32) !void {
         const index = target & 0x7fffffff;
         if (target & 0x80000000 != 0) {
-            if (index < self.tabs.items.len) try @import("panes.zig").selectSecondary(self, index);
+            if (index < self.tabs.items.len) try panes.selectSecondary(self, index);
             cx.notify();
             return;
         }
@@ -542,7 +568,7 @@ pub const Shell = struct {
             self.active_pane = .primary;
             if (self.panel != .markdown) self.panel = .editor;
             self.editor_focus_request +%= 1;
-            @import("services/git.zig").start(self, cx, .refresh) catch |err| try self.reportError(err);
+            services_git.start(self, cx, .refresh) catch |err| try self.reportError(err);
         }
         cx.notify();
     }
@@ -550,12 +576,12 @@ pub const Shell = struct {
         const index = target & 0x7fffffff;
         if (index >= self.tabs.items.len) return;
         if (target & 0x80000000 != 0 and self.tabs.items[index].primary) {
-            @import("panes.zig").closeSecondaryTab(self, index);
+            panes.closeSecondaryTab(self, index);
             cx.notify();
             return;
         }
         if (target & 0x80000000 == 0 and self.tabs.items[index].secondary) {
-            @import("panes.zig").closePrimaryTab(self, index);
+            panes.closePrimaryTab(self, index);
             cx.notify();
             return;
         }
@@ -577,11 +603,11 @@ pub const Shell = struct {
     pub fn onDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: u8) !void {
         try actions.drag(self, e, cx, kind);
     }
-    pub fn onTabDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), target: @import("panes.zig").DragTarget) !void {
-        try @import("panes.zig").tabInput(self, e, cx, target);
+    pub fn onTabDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), target: panes.DragTarget) !void {
+        try panes.tabInput(self, e, cx, target);
     }
     pub fn onTreeDrag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), index: u32) !void {
-        try @import("panes.zig").treeInput(self, e, cx, index);
+        try panes.treeInput(self, e, cx, index);
     }
     pub fn onTreeInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         if (e.data == .scroll) {
@@ -601,14 +627,14 @@ pub const Shell = struct {
             self.showTool(.git_diff);
             self.rememberPanel();
             if (self.git.combined and self.git.diff != null) {
-                try @import("services/git.zig").ensureEditable(self);
-                if (@import("views/git_diff.zig").fileOffset(self.git.diff.?, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
+                try services_git.ensureEditable(self);
+                if (views_git_diff.fileOffset(self.git.diff.?, path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
                     self.git.diff_scroll.offset = offset;
                     cx.notify();
                     return;
                 }
             }
-            @import("services/git.zig").start(self, cx, if (self.git.combined) blk: {
+            services_git.start(self, cx, if (self.git.combined) blk: {
                 std.heap.page_allocator.free(self.git.reveal_path);
                 self.git.reveal_path = try std.heap.page_allocator.dupe(u8, path);
                 break :blk .all_diff;
@@ -624,7 +650,7 @@ pub const Shell = struct {
         try self.git.openHistoryTab(oid, if (self.active_pane == .secondary) 1 else 0);
         self.showTool(.git_diff);
         self.rememberPanel();
-        if (self.git.diff == null) @import("services/git.zig").start(self, cx, .{ .history = self.git.selected_commit }) catch |err| try self.reportError(err);
+        if (self.git.diff == null) services_git.start(self, cx, .{ .history = self.git.selected_commit }) catch |err| try self.reportError(err);
         cx.notify();
     }
     pub fn onGitHistoryTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
@@ -632,7 +658,7 @@ pub const Shell = struct {
         try self.git.openHistoryTab(self.git.history_tabs.items[index].oid, if (self.active_pane == .secondary) 1 else 0);
         self.showTool(.git_diff);
         self.rememberPanel();
-        if (self.git.diff == null) @import("services/git.zig").start(self, cx, .{ .history = self.git.selected_commit }) catch |err| try self.reportError(err);
+        if (self.git.diff == null) services_git.start(self, cx, .{ .history = self.git.selected_commit }) catch |err| try self.reportError(err);
         cx.notify();
     }
     pub fn onCloseHistoryTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) void {
@@ -644,35 +670,35 @@ pub const Shell = struct {
     }
     pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
-        const height = if (self.git.diff) |diff| @import("views/git_diff.zig").contentHeight(diff, self.editor_options.font_size * self.editor_options.line_height) else 0;
+        const height = if (self.git.diff) |diff| views_git_diff.contentHeight(diff, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
         cx.notify();
     }
-    pub fn onSearchResult(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), payload: @import("views/search.zig").Target) !void {
+    pub fn onSearchResult(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), payload: views_search.Target) !void {
         if (self.search.results == null or self.search.results.?.generation != payload.generation) return;
-        @import("services/search.zig").activate(self, cx, payload.group, payload.match) catch |err| {
+        services_search.activate(self, cx, payload.group, payload.match) catch |err| {
             try self.reportError(err);
             cx.notify();
         };
     }
     pub fn onFindQuery(self: *Shell, cx: *ui.Context(Shell), _: ui.Entity(ui.controls.TextInput)) !void {
-        if (self.find.visible) try @import("services/buffer_find.zig").changed(self, cx);
+        if (self.find.visible) try buffer_find.changed(self, cx);
     }
     pub fn pollLanguage(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.window) |handle| _ = cx.app.window(handle) catch |err| switch (err) {
             error.WindowNotFound => return,
             else => return err,
         };
-        try @import("services/recovery.zig").poll(self, cx);
-        try @import("terminal.zig").poll(self, cx);
-        try @import("services/buffer_find.zig").poll(self, cx);
-        try @import("services/agents.zig").poll(self, cx);
-        try @import("services/language.zig").poll(self, cx);
-        try @import("services/git.zig").pollBlame(self, cx);
+        try services_recovery.poll(self, cx);
+        try terminal_module.poll(self, cx);
+        try buffer_find.poll(self, cx);
+        try services_agents.poll(self, cx);
+        try services_language.poll(self, cx);
+        try services_git.pollBlame(self, cx);
         if (self.git.repository) {
             const current: ?workspace.DocumentId = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else null;
-            if (!std.meta.eql(current, self.git.active_document)) try @import("services/git.zig").start(self, cx, .refresh);
+            if (!std.meta.eql(current, self.git.active_document)) try services_git.start(self, cx, .refresh);
         }
     }
     pub fn onPreview(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
@@ -701,16 +727,16 @@ pub const Shell = struct {
         if (outcome.handled) cx.notify();
     }
     pub fn onCompletion(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
-        @import("services/language.zig").accept(self, cx, index) catch |err| try self.reportError(err);
+        services_language.accept(self, cx, index) catch |err| try self.reportError(err);
         cx.notify();
     }
     pub fn onDiagnostic(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
-        @import("services/language.zig").selectDiagnostic(self, cx, index) catch |err| try self.reportError(err);
+        services_language.selectDiagnostic(self, cx, index) catch |err| try self.reportError(err);
         cx.notify();
     }
     pub fn onSearchScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
         if (e.data != .scroll) return;
-        const height = if (self.search.results) |results| @import("views/search.zig").contentHeight(results, self.editor_options.font_size * self.editor_options.line_height) else 0;
+        const height = if (self.search.results) |results| views_search.contentHeight(results, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.search.scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();
         cx.notify();
@@ -728,7 +754,7 @@ pub const Shell = struct {
             else => false,
         };
         if (!should_start) return;
-        @import("services/search.zig").start(self, cx) catch |err| try self.reportError(err);
+        services_search.start(self, cx) catch |err| try self.reportError(err);
         if (e.data == .key_down and e.data.key_down.key == .enter) {
             e.preventDefault();
             e.stopPropagation();
@@ -737,7 +763,7 @@ pub const Shell = struct {
     }
 
     pub fn reportError(self: *Shell, err: anyerror) !void {
-        try self.setStatus(try self.allocator.dupe(u8, @import("errors.zig").message(err)));
+        try self.setStatus(try self.allocator.dupe(u8, errors.message(err)));
         self.status_is_error = true;
     }
     pub fn setStatus(self: *Shell, owned: []u8) !void {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const git = @import("zircon_git");
 const t = std.testing;
 fn run(root: []const u8, args: []const []const u8) ![]u8 {
@@ -205,7 +206,7 @@ test "failed commit hook leaves index and worktree available for retry" {
     defer repo.deinit();
     try temp.dir.writeFile(t.io, .{ .sub_path = "file.txt", .data = "retain" });
     try repo.stage(&.{"file.txt"});
-    const hook = try temp.dir.createFile(t.io, ".git/hooks/pre-commit", .{ .permissions = if (comptime @import("builtin").os.tag == .windows) std.Io.File.Permissions.default_file else std.Io.File.Permissions.fromMode(0o755) });
+    const hook = try temp.dir.createFile(t.io, ".git/hooks/pre-commit", .{ .permissions = if (comptime builtin.os.tag == .windows) std.Io.File.Permissions.default_file else std.Io.File.Permissions.fromMode(0o755) });
     try hook.writeStreamingAll(t.io, "#!/bin/sh\nprintf 'fixture hook rejected\\n' >&2\nexit 1\n");
     hook.close(t.io);
     try t.expectError(error.GitCommandFailed, repo.commit("Rejected commit"));
@@ -448,7 +449,7 @@ test "unborn counts use current bytes for staged additions and binary files" {
 }
 
 test "rename line counts preserve unusual target paths and untracked symlinks count link text" {
-    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var temp = t.tmpDir(.{});
     defer temp.cleanup();
     const root = try init(&temp);

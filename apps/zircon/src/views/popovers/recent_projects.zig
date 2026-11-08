@@ -1,13 +1,16 @@
 //! Search and reopen locally remembered workspaces.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("../../shell.zig").Shell;
-const v = @import("../components.zig");
+const actions = @import("../../actions.zig");
+const projects = @import("../../projects.zig");
+const shell = @import("../../shell.zig");
 const view = @import("../../view.zig");
+const v = @import("../components.zig");
 const panel = @import("panel.zig");
+const Shell = shell.Shell;
 fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
     if (index >= self.recent.entries.items.len) return;
-    _ = @import("../../projects.zig").open(self, cx, self.recent.entries.items[index], .local_folder) catch |err| {
+    _ = projects.open(self, cx, self.recent.entries.items[index], .local_folder) catch |err| {
         try self.reportError(err);
         cx.notify();
         return;
@@ -23,7 +26,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     try panel.query(self, b, &rows);
     var options: std.ArrayList(ui.Element) = .empty;
     for (self.recent.entries.items, 0..) |entry, i| if (view.matches(query, entry)) {
-        try options.append(b.allocator(), try b.button(.{ .label = entry, .children = &.{ try v.icon(b, .folder, c.muted, 14), try b.column(.{ .gap = 3, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try v.text(b, std.fs.path.basename(entry), c.text, 13), try v.text(b, entry, c.muted, 11) }) }, .on_click = b.onClickWith(choose, @as(u32, @intCast(i))), .style = .{ .direction = .row, .height = .{ .px = 46 }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 10 }, .background = if (options.items.len == self.overlay_index) c.selected else null, .hover_background = c.hover } }));
+        try options.append(b.allocator(), try b.fluent().button(.{ .label = entry, .children = &.{ try v.icon(b, .folder, c.muted, 14), try b.fluent().div().gap_px(3).min_w(.{ .px = 0 }).overflow_hidden().flex_col().children(.{ v.text(b, std.fs.path.basename(entry), c.text, 13), v.text(b, entry, c.muted, 11) }).build() }, .on_click = b.onClickWith(choose, @as(u32, @intCast(i))), .style = .{ .direction = .row, .height = .{ .px = 46 }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 10 }, .background = if (options.items.len == self.overlay_index) c.selected else null, .hover_background = c.hover } }).build());
     };
     if (options.items.len == 0) try options.append(b.allocator(), try v.text(b, "No matches", c.muted, 13));
     const visible = try panel.options(self, b, &rows, options.items, 46);
@@ -36,7 +39,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
     if (key != .up and key != .down and key != .enter) return false;
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const query = try @import("../../actions.zig").field(cx, self.fields.?.query, arena.allocator());
+    const query = try actions.field(cx, self.fields.?.query, arena.allocator());
     var indices: std.ArrayList(u32) = .empty;
     for (self.recent.entries.items, 0..) |entry, i| if (view.matches(query, entry)) try indices.append(arena.allocator(), @intCast(i));
     if (indices.items.len > 0) {

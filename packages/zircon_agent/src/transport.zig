@@ -2,6 +2,7 @@
 //! callers own protocol state and poll messages on their application thread.
 const std = @import("std");
 const builtin = @import("builtin");
+const lines = @import("lines.zig");
 const transport_allocator = std.heap.page_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Message = struct {
@@ -185,7 +186,7 @@ fn writerMain(self: *Client) void {
     }
 }
 fn readMain(self: *Client) void {
-    var decoder = @import("lines.zig").Decoder.init(transport_allocator);
+    var decoder = lines.Decoder.init(transport_allocator);
     defer decoder.deinit();
     var buffer: [8192]u8 = undefined;
     defer {

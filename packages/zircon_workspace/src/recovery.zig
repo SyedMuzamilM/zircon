@@ -2,8 +2,8 @@
 //! publish, exclude and discard. Immutable text is published before its index.
 //! File sync is used, but this module does not promise power-loss durability.
 const std = @import("std");
-const persistence = @import("persistence.zig");
 const permissions = @import("permissions.zig");
+const persistence = @import("persistence.zig");
 const DiskStamp = persistence.DiskStamp;
 const max_index_bytes = 8 * 1024 * 1024;
 const max_documents = 2048;

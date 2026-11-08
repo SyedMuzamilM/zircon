@@ -1,6 +1,9 @@
 //! Typed event payloads and dispatcher-owned propagation/default controls.
+const std = @import("std");
 const g = @import("../layout/geometry.zig");
-pub const Input = @import("../platform/interface.zig").Input;
+const measure = @import("../layout/measure.zig");
+const interface = @import("../platform/interface.zig");
+pub const Input = interface.Input;
 pub const Click = struct { position: g.Point = .{}, button: enum { primary, secondary, middle } = .primary };
 pub const Phase = enum { capture, target, bubble };
 pub fn Event(comptime T: type) type {
@@ -13,16 +16,16 @@ pub fn Event(comptime T: type) type {
         focus_requested: bool = false,
         capture_requested: bool = false,
         release_requested: bool = false,
-        _surface: ?@import("../platform/interface.zig").Surface = null,
+        _surface: ?interface.Surface = null,
         _window_size: ?g.Size = null,
-        pub fn textMetrics(e: *const @This()) !@import("../layout/measure.zig").Measurer {
+        pub fn textMetrics(e: *const @This()) !measure.Measurer {
             return (e._surface orelse return error.NoWindow).measurer();
         }
         pub fn windowSize(e: *const @This()) !g.Size {
             if (e._window_size) |size| return size;
             return (e._surface orelse return error.NoWindow).size();
         }
-        pub fn readClipboard(e: *const @This(), allocator: @import("std").mem.Allocator) ![]u8 {
+        pub fn readClipboard(e: *const @This(), allocator: std.mem.Allocator) ![]u8 {
             const s = e._surface orelse return error.NoWindow;
             return s.ops.clipboard_read(s.context, allocator);
         }

@@ -182,3 +182,58 @@ fn allocationCase(a: std.mem.Allocator) !void {
 test "fluent allocation errors propagate without leaking draft resources" {
     try t.checkAllAllocationFailures(t.allocator, allocationCase, .{});
 }
+
+const EntityInput = struct {
+    field: ?ui.Entity(ui.controls.TextInput) = null,
+    request: u64 = 1,
+    captures: u32 = 0,
+    pub fn render(self: *const EntityInput, b: *ui.Ui) !ui.Element {
+        const f = b.fluent();
+        return f.column().gap_px(4).children(.{
+            f.view(self.field.?).id(.named("fluent-field")).h_px(32)
+                .focusable().autofocus().request_focus(self.request)
+                .on_capture(b.onInput(capture)),
+            f.button(.{ .label = "Other" }).h_px(32),
+        }).build();
+    }
+    fn setup(self: *EntityInput, cx: *ui.Context(EntityInput)) !void {
+        self.field = try cx.createChild(ui.controls.TextInput, try ui.controls.TextInput.init(t.allocator, ""));
+        cx.notify();
+    }
+    fn capture(self: *EntityInput, _: *ui.Event(ui.Input), _: *ui.Context(EntityInput)) void {
+        self.captures += 1;
+    }
+    fn refocus(self: *EntityInput, cx: *ui.Context(EntityInput)) void {
+        self.request += 1;
+        cx.notify();
+    }
+    fn input(self: *const EntityInput) ui.Entity(ui.controls.TextInput) {
+        return self.field.?;
+    }
+    fn count(self: *const EntityInput) u32 {
+        return self.captures;
+    }
+};
+
+test "fluent entity view keeps text editing when capture and focus requests are added" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(EntityInput, .{ .visible = false, .width = 300, .height = 100 }, .{});
+    const owner = try app.windowEntity(EntityInput, h);
+    try app.update(owner, EntityInput.setup, .{});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "a" });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .key_down = .{ .key = .tab } });
+    _ = try app.step(0);
+    try app.update(owner, EntityInput.refocus, .{});
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .text = "b" });
+    _ = try app.step(0);
+    const field = try app.read(owner, EntityInput.input, .{});
+    var bytes: []u8 = undefined;
+    try app.read(field, ui.controls.TextInput.copy, .{ t.allocator, &bytes });
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings("ab", bytes);
+    try t.expect(try app.read(owner, EntityInput.count, .{}) >= 2);
+}

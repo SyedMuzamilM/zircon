@@ -1,6 +1,7 @@
 //! Document-revision-bound decorations. Inline blocks participate in vertical
 //! geometry instead of covering source text; input uses the same row mapping.
 const std = @import("std");
+const zircon_ui = @import("zircon_ui");
 pub const GitChange = struct {
     kind: enum { added, modified, deleted },
     start: usize,
@@ -20,7 +21,7 @@ pub fn insertedRows(changes: []const GitChange, before: usize) usize {
 pub fn changeY(change: GitChange, height: f32, changes: []const GitChange) f32 {
     return rowY(change.start, height, changes) - if (change.expanded) @as(f32, @floatFromInt(change.old_count)) * height else 0;
 }
-pub fn marker(change: GitChange, changes: []const GitChange, height: f32, bounds: @import("zircon_ui").Rect, scroll: f32) @import("zircon_ui").Rect {
+pub fn marker(change: GitChange, changes: []const GitChange, height: f32, bounds: zircon_ui.Rect, scroll: f32) zircon_ui.Rect {
     const rows = change.end -| change.start;
     const old_rows = if (change.expanded) change.old_count else 0;
     return .{ .x = bounds.x, .y = bounds.y + changeY(change, height, changes) - scroll - if (rows + old_rows == 0) @as(f32, 2) else 0, .width = 6, .height = if (rows + old_rows == 0) 4 else @as(f32, @floatFromInt(rows + old_rows)) * height };
@@ -79,7 +80,7 @@ pub fn sourceRow(y: f32, height: f32, changes: []const GitChange) usize {
     return @intFromFloat(@floor(@max(0, position) / height));
 }
 
-pub fn contains(rect: @import("zircon_ui").Rect, point: @import("zircon_ui").Point) bool {
+pub fn contains(rect: zircon_ui.Rect, point: zircon_ui.Point) bool {
     return point.x >= rect.x and point.x < rect.x + rect.width and point.y >= rect.y and point.y < rect.y + rect.height;
 }
 

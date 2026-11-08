@@ -1,9 +1,9 @@
 //! AppKit owns an independent bitmap copy. No Image view or allocator escapes
 //! the call, and the application retains the resulting NSImage after creation.
+
 const std = @import("std");
 const images = @import("../../graphics/images.zig");
 const objc = @import("objc.zig");
-
 /// Returns one owned NSImage reference. The caller releases it after assigning
 /// applicationIconImage, or when a later native window preparation fails.
 pub fn create(view: images.View) !objc.Id {

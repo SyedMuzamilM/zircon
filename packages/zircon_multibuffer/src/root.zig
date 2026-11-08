@@ -1,8 +1,8 @@
 //! Source-backed editable excerpts for Git, search and diagnostics views.
+
 const std = @import("std");
 const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
-
 pub const SourceId = workspace.DocumentId;
 pub const Bias = enum { before, after };
 pub const Anchor = struct { source: SourceId, offset: usize, bias: Bias = .after };

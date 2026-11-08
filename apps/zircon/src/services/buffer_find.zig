@@ -1,10 +1,14 @@
 //! Revision-bound buffer search. Matching and regex expansion run in the worker.
 const std = @import("std");
-const ui = @import("zircon_ui");
+const zircon_editor = @import("zircon_editor");
 const text = @import("zircon_text");
+const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
-const Shell = @import("../shell.zig").Shell;
+const actions = @import("../actions.zig");
+const commands = @import("../commands.zig");
+const shell = @import("../shell.zig");
 const host = @import("extension_host.zig");
+const Shell = shell.Shell;
 pub const Model = struct {
     visible: bool = false,
     replace: bool = false,
@@ -21,7 +25,7 @@ pub const Model = struct {
     changed_at: i96 = 0,
     focus: u64 = 0,
     focus_replacement: bool = false,
-    queued: ?@import("../commands.zig").Command = null,
+    queued: ?commands.Command = null,
     result: ?std.json.Parsed(host.SearchResult) = null,
     error_text: []u8 = &.{},
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
@@ -30,7 +34,7 @@ pub const Model = struct {
     }
 };
 pub fn open(self: *Shell, cx: *ui.Context(Shell), replace: bool) !void {
-    const current = try @import("../actions.zig").active(self);
+    const current = try actions.active(self);
     if (target(self)) |previous| {
         previous.editor.search_visible = false;
     } else |_| {}
@@ -81,7 +85,7 @@ pub fn close(self: *Shell, cx: *ui.Context(Shell)) void {
     self.editor_focus_request +%= 1;
     cx.notify();
 }
-fn target(self: *Shell) !struct { id: ws.DocumentId, editor: *@import("zircon_editor").Editor } {
+fn target(self: *Shell) !struct { id: ws.DocumentId, editor: *zircon_editor.Editor } {
     if (self.find.document) |id| {
         if (self.find.pane == 1) {
             if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) return .{ .id = id, .editor = &pane.editor };
@@ -188,7 +192,7 @@ fn completed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
     }
     cx.notify();
 }
-pub fn action(self: *Shell, cx: *ui.Context(Shell), which: @import("../commands.zig").Command) !void {
+pub fn action(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !void {
     if (self.find.busy or self.find.waiting) {
         self.find.queued = which;
         return;
@@ -214,7 +218,7 @@ pub fn action(self: *Shell, cx: *ui.Context(Shell), which: @import("../commands.
         };
         if (edits.items.len > 0) {
             var outcome = try current.editor.applyEdits(&record.doc, edits.items, 0);
-            try @import("../actions.zig").applyOutcome(self, cx, current.id, self.find.pane, &outcome, .project_edit);
+            try actions.applyOutcome(self, cx, current.id, self.find.pane, &outcome, .project_edit);
             try changed(self, cx);
             return;
         }
@@ -243,6 +247,6 @@ pub fn action(self: *Shell, cx: *ui.Context(Shell), which: @import("../commands.
         current.editor.vim.cursor = found.start;
         current.editor.vim.mode = .normal;
     }
-    try @import("../actions.zig").prepareEditor(self, cx, current.editor, snapshot, if (self.find.pane == 1) "secondary-editor" else "primary-editor");
+    try actions.prepareEditor(self, cx, current.editor, snapshot, if (self.find.pane == 1) "secondary-editor" else "primary-editor");
     cx.notify();
 }

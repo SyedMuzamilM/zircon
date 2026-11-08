@@ -1,7 +1,9 @@
 //! Typed styling for a documented flex subset, not a CSS string parser.
 const std = @import("std");
-pub const Insets = @import("../layout/geometry.zig").Insets;
-pub const Color = @import("../layout/geometry.zig").Color;
+const geometry = @import("../layout/geometry.zig");
+const text_style = @import("../text/style.zig");
+pub const Insets = geometry.Insets;
+pub const Color = geometry.Color;
 pub const Length = union(enum) {
     auto,
     px: f32,
@@ -39,7 +41,7 @@ pub const Style = struct {
     radius: f32 = 0,
     opacity: f32 = 1,
     overflow: enum { visible, hidden } = .visible,
-    text: @import("../text/style.zig").TextStyle = .{},
+    text: text_style.TextStyle = .{},
     pub fn validate(style: Style) !void {
         try style.text.validate();
         inline for (.{ "width", "height", "min_width", "min_height", "max_width", "max_height" }) |field| switch (@field(style, field)) {

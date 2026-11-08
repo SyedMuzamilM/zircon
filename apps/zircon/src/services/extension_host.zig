@@ -1,12 +1,17 @@
 //! Owned process requests keep registry/network/grammar work off the UI thread.
 const std = @import("std");
+const builtin = @import("builtin");
+const zircon_editor = @import("zircon_editor");
 const ui = @import("zircon_ui");
-const Shell = @import("../shell.zig").Shell;
+const zircon_workspace = @import("zircon_workspace");
+const shell = @import("../shell.zig");
+const handoff = @import("handoff.zig");
+const Shell = shell.Shell;
 const a = std.heap.page_allocator;
-pub const Stamp = struct { generation: u64 = 0, epoch: u64 = 0, index: usize = 0, document: ?@import("zircon_workspace").DocumentId = null, revision: u64 = 0 };
+pub const Stamp = struct { generation: u64 = 0, epoch: u64 = 0, index: usize = 0, document: ?zircon_workspace.DocumentId = null, revision: u64 = 0 };
 pub const SearchMatch = struct { start: usize, end: usize, replacement: []const u8 };
 pub const SearchResult = struct { matches: []const SearchMatch, truncated: bool };
-pub const Highlights = struct { spans: []const @import("zircon_editor").syntax.Span, bytes: usize };
+pub const Highlights = struct { spans: []const zircon_editor.syntax.Span, bytes: usize };
 pub const Result = struct {
     highlights: ?std.json.Parsed(Highlights) = null,
     search: ?std.json.Parsed(SearchResult) = null,
@@ -21,7 +26,7 @@ pub const Result = struct {
         a.free(self.stderr);
     }
 };
-pub const Box = @import("handoff.zig").Handoff(Result);
+pub const Box = handoff.Handoff(Result);
 const Job = struct {
     pub const Output = *Box;
     io: std.Io,
@@ -98,7 +103,7 @@ pub fn executable(self: *Shell) ![]u8 {
     defer a.free(exe);
     const sibling = try std.fs.path.join(a, &.{ std.fs.path.dirname(exe) orelse ".", "zircon-extension-host" });
     if (std.Io.Dir.cwd().statFile(self.workspace.io, sibling, .{})) |_| return sibling else |_| a.free(sibling);
-    if (@import("builtin").is_test) return std.Io.Dir.cwd().realPathFileAlloc(self.workspace.io, "tools/zed-extension-host/target/release/zircon-extension-host", a);
+    if (builtin.is_test) return std.Io.Dir.cwd().realPathFileAlloc(self.workspace.io, "tools/zed-extension-host/target/release/zircon-extension-host", a);
     return error.ExtensionHostUnavailable;
 }
 pub fn start(self: *Shell, cx: *ui.Context(Shell), args: []const []const u8, input: ?[]const u8, stamp: Stamp, comptime callback: anytype) !void {

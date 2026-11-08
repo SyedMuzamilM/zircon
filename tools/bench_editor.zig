@@ -1,9 +1,9 @@
 //! Release baseline of real Shell dispatch through native frame submission.
 //! It does not measure physical input or display scanout. Fixtures are caller-owned.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
 const git = @import("zircon_git");
+const ui = @import("zircon_ui");
 const Shell = zircon.Shell;
 const Counts = struct {
     git_commands: u64 = 0,

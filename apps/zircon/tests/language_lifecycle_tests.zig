@@ -1,6 +1,7 @@
 const std = @import("std");
-const ui = @import("zircon_ui");
+const builtin = @import("builtin");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 
 const Identity = struct { client: usize, diagnostics: usize, generation: u64 };
@@ -197,7 +198,7 @@ fn waitJobs(app: *ui.App, count: usize) !void {
 }
 
 test "same revision language changes reject delayed grammar failures and highlights" {
-    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
@@ -228,7 +229,7 @@ test "same revision language changes reject delayed grammar failures and highlig
     });
     const worker_file = try tmp.dir.openFile(t.io, "worker.py", .{});
     defer worker_file.close(t.io);
-    try worker_file.setPermissions(t.io, if (comptime @import("builtin").os.tag == .windows) .default_file else .fromMode(0o755));
+    try worker_file.setPermissions(t.io, if (comptime builtin.os.tag == .windows) .default_file else .fromMode(0o755));
     try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.grammar-lifecycle/extension.json", .data =
         \\{"schema_version":1,"id":"org.zircon.grammar-lifecycle","name":"Grammar lifecycle","version":"1.0.0","contributes":{"languages":[{"id":"first","name":"First","extensions":["first"],"grammar":{"builtin":true,"name":"first","wasm":"","highlights":""}},{"id":"second","name":"Second","extensions":["second"],"grammar":{"builtin":true,"name":"second","wasm":"","highlights":""}}]}}
     });
@@ -276,7 +277,7 @@ const ResolverOps = struct {
     }
 };
 test "retired resolver callbacks cannot restart reused slots or strand another document" {
-    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
@@ -306,7 +307,7 @@ test "retired resolver callbacks cannot restart reused slots or strand another d
     });
     const worker_file = try tmp.dir.openFile(t.io, "worker.py", .{});
     defer worker_file.close(t.io);
-    try worker_file.setPermissions(t.io, if (comptime @import("builtin").os.tag == .windows) .default_file else .fromMode(0o755));
+    try worker_file.setPermissions(t.io, if (comptime builtin.os.tag == .windows) .default_file else .fromMode(0o755));
     try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.resolver-lifecycle/extension.json", .data =
         \\{"schema_version":1,"id":"org.zircon.resolver-lifecycle","name":"Resolver lifecycle","version":"1.0.0","contributes":{"language_servers":[{"id":"fixture","languages":["zig","rust"],"command":"@zircon-builtin","zed_server":"fixture"}]}}
     });

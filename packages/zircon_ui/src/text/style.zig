@@ -1,6 +1,7 @@
 //! Font settings shared by layout, painting and native shaping adapters.
 const std = @import("std");
-const Color = @import("../layout/geometry.zig").Color;
+const geometry = @import("../layout/geometry.zig");
+const Color = geometry.Color;
 pub const TextStyle = struct {
     size: f32 = 14,
     mono: bool = false,

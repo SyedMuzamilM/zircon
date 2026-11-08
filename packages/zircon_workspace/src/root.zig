@@ -3,13 +3,13 @@
 //! close. This package has no UI or native-window dependency.
 const std = @import("std");
 const text = @import("zircon_text");
+pub const permissions = @import("permissions.zig");
 const persistence = @import("persistence.zig");
+pub const recovery = @import("recovery.zig");
 const tree = @import("tree.zig");
 pub const Entry = tree.Entry;
 pub const deinitEntries = tree.deinitEntries;
 pub const DiskStamp = persistence.DiskStamp;
-pub const recovery = @import("recovery.zig");
-pub const permissions = @import("permissions.zig");
 pub const max_file_bytes = persistence.max_file_bytes;
 pub const DocumentId = struct { workspace: u64, slot: u32, generation: u32 };
 var next_workspace = std.atomic.Value(u64).init(1);

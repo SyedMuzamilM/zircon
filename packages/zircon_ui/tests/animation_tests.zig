@@ -1,5 +1,6 @@
 const std = @import("std");
-const animation = @import("zircon_ui").animation;
+const zircon_ui = @import("zircon_ui");
+const animation = zircon_ui.animation;
 const t = std.testing;
 const Timeline = animation.Timeline;
 const Transition = animation.Transition;

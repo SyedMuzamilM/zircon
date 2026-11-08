@@ -2,9 +2,10 @@
 //! Destruction preflights borrows before touching an ownership subtree. Destructors
 //! run child-first and may free their own resources, but cannot reenter this store.
 const std = @import("std");
+const borrow_module = @import("borrow.zig");
 const entity = @import("entity.zig");
 const scope = @import("scope.zig");
-const Borrow = @import("borrow.zig").Borrow;
+const Borrow = borrow_module.Borrow;
 const Allocator = std.mem.Allocator;
 const VTable = struct { destroy: *const fn (*anyopaque, Allocator) void };
 const Slot = struct {

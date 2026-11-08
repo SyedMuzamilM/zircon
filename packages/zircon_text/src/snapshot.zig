@@ -3,6 +3,7 @@
 //! while that owner retains the snapshot until the worker has joined.
 const std = @import("std");
 const rope = @import("rope.zig");
+const search = @import("search.zig");
 const types = @import("types.zig");
 pub const Snapshot = struct {
     allocator: std.mem.Allocator,
@@ -124,7 +125,7 @@ pub const Snapshot = struct {
     /// Literal search streams chunks. Insensitive search folds ASCII only.
     /// Scratch for long needles uses page_allocator, safe for read-only workers.
     pub fn find(self: Snapshot, needle: []const u8, from: usize, direction: types.Direction, case_sensitive: bool) !?types.Range {
-        return @import("search.zig").find(self, needle, from, direction, case_sensitive);
+        return search.find(self, needle, from, direction, case_sensitive);
     }
     pub fn debugValidate(self: Snapshot) !rope.Stats {
         std.debug.assert(self.owner == std.Thread.getCurrentId());

@@ -1,5 +1,6 @@
 //! NUL-separated Git reference records own all borrowed strings in one arena.
 const std = @import("std");
+const history = @import("history.zig");
 pub const Branch = struct { name: []const u8, oid: []const u8, subject: []const u8, author: []const u8, upstream: []const u8, tracking: []const u8, remote: bool };
 pub const Stash = struct { reference: []const u8, oid: []const u8, subject: []const u8 };
 pub const References = struct {
@@ -26,7 +27,7 @@ pub fn parse(a: std.mem.Allocator, branch_bytes: []const u8, remote_bytes: []con
         const author = fields.next() orelse return error.InvalidGitReferences;
         const upstream = fields.next() orelse return error.InvalidGitReferences;
         const tracking = fields.next() orelse return error.InvalidGitReferences;
-        if (!@import("history.zig").validOid(oid)) return error.InvalidGitReferences;
+        if (!history.validOid(oid)) return error.InvalidGitReferences;
         const remote = std.mem.startsWith(u8, ref, "refs/remotes/");
         if (remote and std.mem.endsWith(u8, ref, "/HEAD")) continue;
         const prefix: usize = if (remote) 13 else 11;
@@ -43,7 +44,7 @@ pub fn parse(a: std.mem.Allocator, branch_bytes: []const u8, remote_bytes: []con
         if (ref.len == 0) continue;
         const oid = fields.next() orelse return error.InvalidGitReferences;
         const subject = fields.next() orelse return error.InvalidGitReferences;
-        if (!@import("history.zig").validOid(oid)) return error.InvalidGitReferences;
+        if (!history.validOid(oid)) return error.InvalidGitReferences;
         try stashes.append(al, .{ .reference = ref, .oid = oid, .subject = subject });
     }
     return .{ .arena = arena, .branches = branches.items, .remotes = remotes.items, .stashes = stashes.items };

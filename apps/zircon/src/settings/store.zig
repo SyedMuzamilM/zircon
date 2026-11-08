@@ -1,16 +1,19 @@
 //! One persisted settings identity shared by editor/settings windows. Candidate
 //! validation and atomic disk publication precede the effective-state swap.
 const std = @import("std");
-const typography = @import("zircon_ui").typography;
+const zircon_editor = @import("zircon_editor");
+const zircon_ui = @import("zircon_ui");
+const key_bindings_module = @import("../key_bindings.zig");
+const typography = zircon_ui.typography;
 pub const TerminalDock = enum { bottom, right };
 pub const PanelLayout = enum { classic, agentic };
 pub const Values = struct {
     terminal_dock: TerminalDock = .bottom,
     panel_layout: PanelLayout = .classic,
-    key_bindings: @import("../key_bindings.zig").Overrides = .{},
+    key_bindings: key_bindings_module.Overrides = .{},
     vim_mode: bool = false,
-    soft_wrap: @import("zircon_editor").wrap.Mode = .none,
-    vim_bindings: @import("zircon_editor").vim.Bindings = .{},
+    soft_wrap: zircon_editor.wrap.Mode = .none,
+    vim_bindings: zircon_editor.vim.Bindings = .{},
     font_size: f32 = 14,
     editor_font_name: typography.FontName = .{},
     interface_font_name: typography.FontName = .{},
@@ -39,7 +42,7 @@ pub const Values = struct {
     theme: []const u8 = "zircon.dark",
     icon_theme: []const u8 = "zircon.default",
 };
-pub const Patch = union(enum) { terminal_dock: TerminalDock, panel_layout: PanelLayout, indent_guides: bool, active_line: bool, fold_controls: bool, project_file_icons: bool, project_folder_icons: bool, project_panel_width: f32, project_entry_spacing: f32, tooltips: bool, tooltip_delay: f32, search_case_sensitive: bool, search_whole_word: bool, agent_editor: bool, soft_wrap: @import("zircon_editor").wrap.Mode, editor_font_name: typography.FontName, interface_font_name: typography.FontName, vim_mode: bool, font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
+pub const Patch = union(enum) { terminal_dock: TerminalDock, panel_layout: PanelLayout, indent_guides: bool, active_line: bool, fold_controls: bool, project_file_icons: bool, project_folder_icons: bool, project_panel_width: f32, project_entry_spacing: f32, tooltips: bool, tooltip_delay: f32, search_case_sensitive: bool, search_whole_word: bool, agent_editor: bool, soft_wrap: zircon_editor.wrap.Mode, editor_font_name: typography.FontName, interface_font_name: typography.FontName, vim_mode: bool, font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
 pub const Store = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -126,7 +129,7 @@ fn read(value: std.json.Value) Values {
     }
     if (value.object.get("terminal_dock")) |v| result.terminal_dock = parseEnum(TerminalDock, v) orelse .bottom;
     if (value.object.get("panel_layout")) |v| result.panel_layout = parseEnum(PanelLayout, v) orelse .classic;
-    if (value.object.get("soft_wrap")) |v| result.soft_wrap = parseEnum(@import("zircon_editor").wrap.Mode, v) orelse .none;
+    if (value.object.get("soft_wrap")) |v| result.soft_wrap = parseEnum(zircon_editor.wrap.Mode, v) orelse .none;
     if (value.object.get("tab_width")) |v| if (v == .integer and v.integer >= 1 and v.integer <= 16) {
         result.tab_width = @intCast(v.integer);
     };
@@ -136,7 +139,7 @@ fn read(value: std.json.Value) Values {
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
         if (v == .string) @field(result, key) = v.string;
     };
-    if (value.object.get("key_bindings")) |v| result.key_bindings = @import("../key_bindings.zig").parse(v) catch unreachable;
+    if (value.object.get("key_bindings")) |v| result.key_bindings = key_bindings_module.parse(v) catch unreachable;
     if (value.object.get("vim_bindings")) |bindings| result.vim_bindings = parseVimBindings(bindings) catch .{};
     return result;
 }
@@ -147,9 +150,9 @@ fn number(value: std.json.Value) ?f32 {
         else => null,
     };
 }
-fn parseVimBindings(value: std.json.Value) !@import("zircon_editor").vim.Bindings {
+fn parseVimBindings(value: std.json.Value) !zircon_editor.vim.Bindings {
     if (value != .object or value.object.count() > 64) return error.InvalidKeyBindings;
-    var result: @import("zircon_editor").vim.Bindings = .{};
+    var result: zircon_editor.vim.Bindings = .{};
     var entries = value.object.iterator();
     while (entries.next()) |entry| {
         if (entry.key_ptr.len != 1 or entry.key_ptr.*[0] < 32 or entry.key_ptr.*[0] >= 127 or entry.value_ptr.* != .string or entry.value_ptr.string.len != 1 or entry.value_ptr.string[0] < 32 or entry.value_ptr.string[0] >= 127) return error.InvalidKeyBindings;
@@ -167,7 +170,7 @@ fn validate(value: std.json.Value) !void {
         _ = try parseVimBindings(bindings);
     };
     if (value != .object) return error.InvalidSettings;
-    if (value.object.get("key_bindings")) |v| _ = try @import("../key_bindings.zig").parse(v);
+    if (value.object.get("key_bindings")) |v| _ = try key_bindings_module.parse(v);
     if (value.object.get("schema_version")) |v| if (v != .integer or v.integer != 1) return error.UnsupportedSettingsVersion;
     if (value.object.get("font_size")) |v| {
         const n = number(v) orelse return error.InvalidSettings;
@@ -191,7 +194,7 @@ fn validate(value: std.json.Value) !void {
     if (value.object.get("ui_font_family")) |v| if (v == .string) {
         _ = try typography.FontName.init(v.string);
     } else return error.InvalidSettings;
-    if (value.object.get("soft_wrap")) |v| if (parseEnum(@import("zircon_editor").wrap.Mode, v) == null) return error.InvalidSettings;
+    if (value.object.get("soft_wrap")) |v| if (parseEnum(zircon_editor.wrap.Mode, v) == null) return error.InvalidSettings;
     if (value.object.get("tab_width")) |v| if (v != .integer or v.integer < 1 or v.integer > 16) return error.InvalidSettings;
     inline for (.{ "vim_mode", "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures", "indent_guides", "active_line", "fold_controls", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {

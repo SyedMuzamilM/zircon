@@ -1,10 +1,15 @@
 //! Captured buffers override disk search. Results carry source revisions and
 //! generations; navigation refuses stale offsets instead of editing old text.
 const std = @import("std");
-const ui = @import("zircon_ui");
-const text = @import("zircon_text");
 const search = @import("zircon_search");
-const Shell = @import("../shell.zig").Shell;
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const zircon_workspace = @import("zircon_workspace");
+const actions = @import("../actions.zig");
+const panes = @import("../panes.zig");
+const shell = @import("../shell.zig");
+const handoff = @import("handoff.zig");
+const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 pub const Model = struct {
     results: ?search.Results = null,
@@ -22,7 +27,7 @@ const Result = struct {
         self.value.deinit();
     }
 };
-const Box = @import("handoff.zig").Handoff(Result);
+const Box = handoff.Handoff(Result);
 const Job = struct {
     pub const Output = *Box;
     io: std.Io,
@@ -136,7 +141,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     self.search.task = null;
     cx.notify();
 }
-pub fn id(document: @import("zircon_workspace").DocumentId) u64 {
+pub fn id(document: zircon_workspace.DocumentId) u64 {
     return (@as(u64, document.generation) << 32) | document.slot;
 }
 pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_index: usize) !void {
@@ -151,7 +156,7 @@ pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_
                 var snapshot = try self.workspace.snapshot(tab.document);
                 defer snapshot.deinit();
                 if (!group.isCurrentBuffer(source.document_id, snapshot)) return error.StaleSearchResult;
-                if (self.active_pane == .secondary and self.secondary != null) try @import("../panes.zig").selectSecondary(self, index) else {
+                if (self.active_pane == .secondary and self.secondary != null) try panes.selectSecondary(self, index) else {
                     self.active = index;
                     self.tabs.items[index].primary = true;
                 }
@@ -172,7 +177,7 @@ pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_
             try self.openPath(source.path);
         },
     }
-    const current = try @import("../actions.zig").active(self);
+    const current = try actions.active(self);
     var snapshot = try self.workspace.snapshot(current.id);
     defer snapshot.deinit();
     try current.editor.setSelection(snapshot, group.matches[match_index].range);

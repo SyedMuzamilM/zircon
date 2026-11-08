@@ -2,8 +2,9 @@
 //! editable worktree comparison and its staging toolbar.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("../shell.zig").Shell;
+const shell = @import("../shell.zig");
 const v = @import("components.zig");
+const Shell = shell.Shell;
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     var rows: std.ArrayList(ui.Element) = .empty;
@@ -27,5 +28,5 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         try rows.append(b.allocator(), try v.text(b, line[0..@min(line.len, 1000)], c.text, 12));
         count += 1;
     }
-    return b.key(.{ .string = "commit-details" }, try b.column(.{ .flex_shrink = 0, .gap = 6, .padding = ui.Insets.all(14), .background = c.sidebar, .overflow = .hidden }, rows.items));
+    return b.fluent().div().shrink_0().gap_px(6).padding(ui.Insets.all(14)).background(c.sidebar).overflow_hidden().flex_col().children(rows.items).id(.{ .string = "commit-details" }).build();
 }

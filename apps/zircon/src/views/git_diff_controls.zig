@@ -1,12 +1,15 @@
 //! Diff controls address a file/hunk in the installed patch generation. Source
 //! navigation resolves against the discovered repository, including subfolders.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const git = @import("zircon_git");
-const Shell = @import("../shell.zig").Shell;
-const Command = @import("../commands.zig").Command;
+const ui = @import("zircon_ui");
+const commands = @import("../commands.zig");
 const layout = @import("../models/diff_layout.zig");
+const services_git = @import("../services/git.zig");
+const shell = @import("../shell.zig");
 const v = @import("components.zig");
+const Shell = shell.Shell;
+const Command = commands.Command;
 const a = std.heap.page_allocator;
 pub const Target = struct { file: usize, generation: u64 };
 fn resolve(self: *const Shell, target: Target) ?layout.File {
@@ -41,7 +44,7 @@ fn stage(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: T
     if (self.git.selected_commit.len > 0) return;
     const entry = statusFor(self, file.path) orelse return;
     try selectFile(self, file);
-    try @import("../services/git.zig").start(self, cx, if (entry.staged and !entry.unstaged) .{ .unstage = file.path } else .{ .stage = file.path });
+    try services_git.start(self, cx, if (entry.staged and !entry.unstaged) .{ .unstage = file.path } else .{ .stage = file.path });
 }
 fn statusFor(self: *const Shell, path: []const u8) ?git.Entry {
     if (self.git.status) |status| for (status.entries) |entry| if (std.mem.eql(u8, entry.path, path)) return entry;
@@ -54,12 +57,12 @@ pub fn header(self: *const Shell, b: *ui.Ui, file: layout.File, index: usize) !u
     const active = std.mem.eql(u8, self.git.selected_path, file.path);
     const entry = if (self.git.selected_commit.len == 0) statusFor(self, file.path) else null;
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (collapsed) "Expand" else "Collapse", file.path }), .children = &.{try v.icon(b, if (collapsed) .chevron_right else .chevron_down, c.muted, 14)}, .on_click = b.onClickWith(toggle, target), .style = v.iconButtonStyle(c, false) }));
-    if (entry) |value| try children.append(b.allocator(), try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (value.staged and !value.unstaged) "Unstage" else "Stage", file.path }), .tooltip = "Stage saved file changes", .children = &.{try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16)}, .on_click = if (self.git.busy) null else try b.onClickWith(stage, target), .style = v.iconButtonStyle(c, false) }));
-    try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13), try b.styled(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12), .{ .flex_grow = 1, .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }), try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{file.added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{file.deleted}), c.deleted, 12) });
-    if (active or self.git.diff_view.hover_file == index) try children.append(b.allocator(), try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Open File {s}", .{file.path}), .children = &.{try v.text(b, "Open File", c.text, 12)}, .on_click = b.onClickWith(open, target), .style = v.buttonStyle(c, false) }));
-    const inner = try b.row(.{ .height = .{ .px = 36 }, .padding = .{ .left = 7, .right = 10 }, .align_items = .center, .gap = 8, .radius = v.metrics.control_radius, .background = if (active) c.selected else c.sidebar, .overflow = .hidden }, children.items);
-    return b.key(.{ .string = try std.fmt.allocPrint(b.allocator(), "diff-file:{s}", .{file.path}) }, try b.column(.{ .height = .{ .px = layout.file_height }, .padding = .{ .top = 5, .bottom = 5, .left = 6, .right = 6 }, .flex_shrink = 0 }, &.{inner}));
+    try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (collapsed) "Expand" else "Collapse", file.path }), .children = &.{try v.icon(b, if (collapsed) .chevron_right else .chevron_down, c.muted, 14)}, .on_click = b.onClickWith(toggle, target), .style = v.iconButtonStyle(c, false) }).build());
+    if (entry) |value| try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ if (value.staged and !value.unstaged) "Unstage" else "Stage", file.path }), .tooltip = "Stage saved file changes", .children = &.{try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16)}, .on_click = if (self.git.busy) null else try b.onClickWith(stage, target), .style = v.iconButtonStyle(c, false) }).build());
+    try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13), try b.fluent().adopt(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12)).style(.{ .flex_grow = 1, .flex_shrink = 1, .min_width = .{ .px = 0 }, .text = .{ .size = 12, .color = c.muted }, .overflow = .hidden }).build(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{file.added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{file.deleted}), c.deleted, 12) });
+    if (active or self.git.diff_view.hover_file == index) try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Open File {s}", .{file.path}), .children = &.{try v.text(b, "Open File", c.text, 12)}, .on_click = b.onClickWith(open, target), .style = v.buttonStyle(c, false) }).build());
+    const inner = try b.fluent().div().h(.{ .px = 36 }).padding(.{ .left = 7, .right = 10 }).items_center().gap_px(8).rounded_px(v.metrics.control_radius).background(if (active) c.selected else c.sidebar).overflow_hidden().flex().children(children.items).build();
+    return b.fluent().div().h(.{ .px = layout.file_height }).padding(.{ .top = 5, .bottom = 5, .left = 6, .right = 6 }).shrink_0().flex_col().children(.{inner}).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "diff-file:{s}", .{file.path}) }).build();
 }
 pub fn command(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
     const projection = self.git.projection orelse return;

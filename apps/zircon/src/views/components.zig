@@ -2,8 +2,12 @@
 //! shared SVG assets; actions keep their readable labels for keyboard/tests.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("../shell.zig").Shell;
-pub const Palette = @import("../theme.zig").Palette;
+const commands_module = @import("../commands.zig");
+const shell = @import("../shell.zig");
+const theme_module = @import("../theme.zig");
+const image_module = @import("image.zig");
+const Shell = shell.Shell;
+pub const Palette = theme_module.Palette;
 pub const Icon = ui.controls.icons.Name;
 pub const metrics = struct {
     pub const control_radius = ui.controls.metrics.control_radius;
@@ -20,13 +24,13 @@ pub const metrics = struct {
     pub const inset: f32 = 12;
 };
 pub fn text(b: *ui.Ui, bytes: []const u8, color: ui.Color, size: f32) !ui.Element {
-    return b.styled(b.text(bytes), .{ .text = .{ .size = size, .color = color }, .overflow = .hidden, .flex_shrink = 0 });
+    return b.fluent().text(bytes).style(.{ .text = .{ .size = size, .color = color }, .overflow = .hidden, .flex_shrink = 0 }).build();
 }
 pub fn icon(b: *ui.Ui, name: Icon, color: ui.Color, size: f32) !ui.Element {
     return ui.controls.icons.element(b, name, color, size);
 }
-pub fn iconButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, name: Icon, selected: bool) !ui.Element {
-    return b.button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = b.onClickWith(Shell.onCommand, action), .style = iconButtonStyle(c, selected) });
+pub fn iconButton(b: *ui.Ui, c: Palette, action: commands_module.Command, label: []const u8, name: Icon, selected: bool) !ui.Element {
+    return b.fluent().button(.{ .label = label, .tooltip = label, .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try icon(b, name, if (selected) c.accent else c.muted, 16)}, .on_click = b.onClickWith(Shell.onCommand, action), .style = iconButtonStyle(c, selected) }).build();
 }
 pub fn iconButtonStyle(c: Palette, selected: bool) ui.Style {
     return .{ .width = .{ .px = 24 }, .height = .{ .px = metrics.icon_control }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .radius = metrics.control_radius, .background = if (selected) c.selected else null, .hover_background = c.hover };
@@ -37,7 +41,7 @@ pub fn buttonStyle(c: Palette, primary: bool) ui.Style {
 pub fn inputAppearance(c: Palette) ui.controls.TextInput.Appearance {
     return .{ .background = c.document, .border = c.line, .foreground = c.text, .placeholder = c.muted, .selection = c.selection, .caret = c.accent, .focus_border = c.accent };
 }
-pub fn actionButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, primary: bool) !ui.Element {
+pub fn actionButton(b: *ui.Ui, c: Palette, action: commands_module.Command, label: []const u8, primary: bool) !ui.Element {
     const glyph: ?Icon = switch (action) {
         .open_path => .folder_open,
         .new_file, .install_bundled_extension => .plus,
@@ -56,16 +60,16 @@ pub fn actionButton(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Co
     const color = if (primary) c.on_primary else c.text;
     if (glyph) |name| try children.append(b.allocator(), try icon(b, name, color, 14));
     try children.append(b.allocator(), try text(b, label, color, 12));
-    return b.button(.{ .label = label, .children = children.items, .on_click = b.onClickWith(Shell.onCommand, action), .style = buttonStyle(c, primary) });
+    return b.fluent().button(.{ .label = label, .children = children.items, .on_click = b.onClickWith(Shell.onCommand, action), .style = buttonStyle(c, primary) }).build();
 }
 pub fn rule(b: *ui.Ui, c: Palette) !ui.Element {
-    return b.div(.{ .height = .{ .px = 1 }, .flex_shrink = 0, .background = c.line }, &.{});
+    return b.fluent().div().h(.{ .px = 1 }).shrink_0().background(c.line).children(.{}).build();
 }
 pub fn fileIcon(path: []const u8) Icon {
     const ext = std.fs.path.extension(path);
     if (std.ascii.eqlIgnoreCase(ext, ".zig")) return .zig;
     if (std.ascii.eqlIgnoreCase(ext, ".md")) return .markdown;
-    if (@import("image.zig").supported(path)) return .image;
+    if (image_module.supported(path)) return .image;
     for ([_][]const u8{ ".rs", ".json", ".js", ".ts", ".tsx", ".c", ".h", ".py", ".toml", ".zon" }) |candidate| if (std.ascii.eqlIgnoreCase(ext, candidate)) return .code;
     return .file;
 }
@@ -77,7 +81,7 @@ pub fn fileColor(c: Palette, path: []const u8) ui.Color {
     return c.muted;
 }
 
-pub fn menuRow(b: *ui.Ui, c: Palette, action: @import("../commands.zig").Command, label: []const u8, shortcut: []const u8, selected: bool) !ui.Element {
+pub fn menuRow(b: *ui.Ui, c: Palette, action: commands_module.Command, label: []const u8, shortcut: []const u8, selected: bool) !ui.Element {
     const f = b.fluent();
     return f.button(.{ .label = label }).id(.{ .number = @backingInt(action) })
         .flex().h_px(30).shrink_0().items_center().gap_px(20).px_px(10)
@@ -101,10 +105,7 @@ pub fn popoverBounds(viewport: ui.Size, anchor: ui.Rect, requested: ui.Size) ui.
 }
 
 pub fn floatingPanel(b: *ui.Ui, c: Palette, size: ui.Size, padding: ui.Insets, gap: f32, children: []const ui.Element) !ui.Element {
-    return b.stack(.{ .width = .{ .px = size.width }, .height = .{ .px = size.height }, .flex_shrink = 0 }, &.{
-        try b.custom(PanelSurface, .{ .colors = c }, .{ .flex_grow = 1 }),
-        try b.column(.{ .padding = padding, .gap = gap, .overflow = .hidden }, children),
-    });
+    return b.fluent().div().w(.{ .px = size.width }).h(.{ .px = size.height }).shrink_0().stack().children(.{ b.custom(PanelSurface, .{ .colors = c }, .{ .flex_grow = 1 }), b.fluent().div().padding(padding).gap_px(gap).overflow_hidden().flex_col().children(children) }).build();
 }
 const PanelSurface = struct {
     colors: Palette,
@@ -125,7 +126,7 @@ const PanelSurface = struct {
 pub fn fileGlyph(self: *const Shell, b: *ui.Ui, path: []const u8, directory: bool, expanded: bool, size: f32) !ui.Element {
     if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(self.active_icon_theme)) |theme| switch (theme.resolve(path, directory)) {
         .symbol => |symbol| return text(b, symbol, if (directory) self.colors.folder else fileColor(self.colors, path), size),
-        .png => |asset| if (self.icons.find(asset.path)) |image| return @import("image.zig").element(b, image, .{ .width = .{ .px = size }, .height = .{ .px = size }, .flex_shrink = 0 }),
+        .png => |asset| if (self.icons.find(asset.path)) |image| return image_module.element(b, image, .{ .width = .{ .px = size }, .height = .{ .px = size }, .flex_shrink = 0 }),
     };
     return icon(b, if (directory) (if (expanded) .folder_open else .folder) else fileIcon(path), if (directory) self.colors.muted else fileColor(self.colors, path), size);
 }

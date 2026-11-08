@@ -1,8 +1,8 @@
 //! Reproduces the synchronous AppKit focus notification sent while an action
 //! opens a child window. It must not reborrow the still-running shell action.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 const native = ui.testing.native;
 const objc = native.objc;

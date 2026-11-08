@@ -3,7 +3,9 @@ const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const display = @import("display.zig");
-const Editor = @import("editor.zig").Editor;
+const editor = @import("editor.zig");
+const selections_module = @import("selections.zig");
+const Editor = editor.Editor;
 fn line(a: std.mem.Allocator, self: *Editor, s: text.Snapshot, row: usize) !display.Line {
     const range = try s.lineRange(row);
     if (range.end - range.start > 64 * 1024) return display.Line.build(a, "", self.tab_width);
@@ -33,7 +35,7 @@ pub fn block(self: *Editor, s: text.Snapshot, event: *ui.Event(ui.Input)) !void 
     const cursor_line = try line(arena.allocator(), self, s, cursor.line);
     const left_x = anchor_line.caret(metrics, style, anchor.byte_column);
     const right_x = self.preferred_x orelse cursor_line.caret(metrics, style, cursor.byte_column);
-    var selections: std.ArrayList(@import("selections.zig").Selection) = .empty;
+    var selections: std.ArrayList(selections_module.Selection) = .empty;
     errdefer selections.deinit(self.allocator);
     var row = @min(anchor.line, cursor.line);
     while (row <= @max(anchor.line, cursor.line)) : (row += 1) {

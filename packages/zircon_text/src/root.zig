@@ -1,10 +1,13 @@
 //! UI-independent UTF-8 text storage, snapshots, history and literal search.
-pub const Range = @import("types.zig").Range;
-pub const Edit = @import("types.zig").Edit;
-pub const Point = @import("types.zig").Point;
-pub const Affinity = @import("types.zig").Affinity;
-pub const Direction = @import("types.zig").Direction;
-pub const Document = @import("document.zig").Document;
-pub const Change = @import("document.zig").Change;
-pub const Mapping = @import("document.zig").Mapping;
-pub const Snapshot = @import("snapshot.zig").Snapshot;
+const document = @import("document.zig");
+const snapshot = @import("snapshot.zig");
+const types = @import("types.zig");
+pub const Range = types.Range;
+pub const Edit = types.Edit;
+pub const Point = types.Point;
+pub const Affinity = types.Affinity;
+pub const Direction = types.Direction;
+pub const Document = document.Document;
+pub const Change = document.Change;
+pub const Mapping = document.Mapping;
+pub const Snapshot = snapshot.Snapshot;

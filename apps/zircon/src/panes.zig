@@ -1,7 +1,12 @@
+//! Source-pane placement, per-pane editor state and drag/drop sessions.
+//! Moving a tab transfers presentation state while retaining document identity.
 const std = @import("std");
+const zircon_editor = @import("zircon_editor");
 const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
-const Shell = @import("shell.zig").Shell;
+const shell = @import("shell.zig");
+const components = @import("views/components.zig");
+const Shell = shell.Shell;
 pub const DragTarget = struct { document: ws.DocumentId, pane: u8 };
 pub const Session = struct {
     source: union(enum) { tab: ws.DocumentId, file: []u8 },
@@ -26,7 +31,7 @@ pub fn selectSecondary(self: *Shell, index: usize) !void {
         self.editor_focus_request +%= 1;
         return;
     };
-    var next = if (self.tabs.items[index].secondary_state) |state| state else try @import("zircon_editor").Editor.init(self.allocator);
+    var next = if (self.tabs.items[index].secondary_state) |state| state else try zircon_editor.Editor.init(self.allocator);
     self.tabs.items[index].secondary_state = null;
     errdefer next.deinit();
     const record = try self.workspace.getConst(id);
@@ -174,7 +179,7 @@ pub fn destination(self: *const Shell, frame: anytype, point: ui.Point) ?Drop {
         if ((point.x < bounds.x or point.y < bounds.y or point.x >= bounds.x + bounds.width or point.y >= bounds.y + bounds.height)) continue;
         const x = (point.x - bounds.x) / @max(1, bounds.width);
         const y = (point.y - bounds.y) / @max(1, bounds.height);
-        const strip = point.y < bounds.y + @import("views/components.zig").metrics.tabs;
+        const strip = point.y < bounds.y + components.metrics.tabs;
         var edge: Drop = .{ .pane = if (secondary) 1 else 0, .bounds = bounds, .strip = strip };
         if (!strip) {
             const horizontal = @min(x, 1 - x);

@@ -2,11 +2,13 @@
 //! Supports padding, margins, gap, grow/shrink with min/max freezing and alignment.
 //! Text measurement is injected. CSS wrapping/grid/baseline alignment are not claimed.
 const std = @import("std");
-const geometry = @import("geometry.zig");
-const tree = @import("../ui/tree.zig");
+const ui_custom = @import("../ui/custom.zig");
 const elements = @import("../ui/element.zig");
 const styles = @import("../ui/style.zig");
-const Measurer = @import("measure.zig").Measurer;
+const tree = @import("../ui/tree.zig");
+const geometry = @import("geometry.zig");
+const measure_module = @import("measure.zig");
+const Measurer = measure_module.Measurer;
 pub const Constraints = struct { viewport: geometry.Size, rem: f32 = 16 };
 pub const Layout = struct {
     allocator: std.mem.Allocator,
@@ -79,7 +81,7 @@ const Engine = struct {
         var natural: geometry.Size = .{ .width = 0, .height = 0 };
         switch (node.kind) {
             .custom => |custom| {
-                var cx: @import("../ui/custom.zig").LayoutCx = .{ .allocator = e.frame_allocator, .available = content, .measurer = e.measure };
+                var cx: ui_custom.LayoutCx = .{ .allocator = e.frame_allocator, .available = content, .measurer = e.measure };
                 natural = try custom.measure(custom.object, &cx);
             },
             .text => |text| natural = try e.measure.text(e.measure.context, text, style.text),

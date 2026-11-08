@@ -1,3 +1,5 @@
+//! Bounded recent-project history persisted beside the settings file.
+//! Entries own canonical absolute paths and exclude the currently open project.
 const std = @import("std");
 pub const Recent = struct {
     path: ?[]u8 = null,

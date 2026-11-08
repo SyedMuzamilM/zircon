@@ -1,12 +1,15 @@
 //! Git decorations have independent targets: the thin change strip expands
 //! source hunks; author metadata opens a hover card without moving source rows.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const editing = @import("zircon_editor");
 const text = @import("zircon_text");
-const Shell = @import("shell.zig").Shell;
+const ui = @import("zircon_ui");
+const zircon_workspace = @import("zircon_workspace");
+const git = @import("services/git.zig");
+const shell = @import("shell.zig");
+const Shell = shell.Shell;
 const annotations = editing.annotations;
-pub fn handle(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, document: *const text.Document, id: @import("zircon_workspace").DocumentId, e: *ui.Event(ui.Input)) !bool {
+pub fn handle(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, document: *const text.Document, id: zircon_workspace.DocumentId, e: *ui.Event(ui.Input)) !bool {
     var snapshot = document.snapshot();
     defer snapshot.deinit();
     const pointer: ?ui.Point = switch (e.data) {
@@ -51,7 +54,7 @@ pub fn handle(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, docu
         state.blame_hovered = on_label or on_card;
         if (state.blame_hovered and !was_hovered) {
             state.blame_message_scroll = 0;
-            if (blame.message.len > 0 or blame.uncommitted) blame.expanded = true else try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = blame.line + 1, .document = id } });
+            if (blame.message.len > 0 or blame.uncommitted) blame.expanded = true else try git.start(self, cx, .{ .blame = .{ .line = blame.line + 1, .document = id } });
             cx.notify();
         } else if (!state.blame_hovered and !state.blame_pinned and blame.expanded) {
             blame.expanded = false;
@@ -80,7 +83,7 @@ pub fn handle(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, docu
         if (on_label) {
             state.blame_pinned = true;
             state.blame_hovered = true;
-            if (blame.message.len > 0 or blame.uncommitted) blame.expanded = true else try @import("services/git.zig").start(self, cx, .{ .blame = .{ .line = blame.line + 1, .document = id } });
+            if (blame.message.len > 0 or blame.uncommitted) blame.expanded = true else try git.start(self, cx, .{ .blame = .{ .line = blame.line + 1, .document = id } });
             e.preventDefault();
             cx.notify();
             return true;

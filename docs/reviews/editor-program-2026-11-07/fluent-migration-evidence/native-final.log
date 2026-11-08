@@ -1,0 +1,16 @@
+    Finished `release` profile [optimized] target(s) in 0.54s
+Build Summary: 12/12 steps succeeded; 123/123 tests passed
+test-native-fresh success
++- run test 1 pass (1 total) 1s MaxRSS:122M
+   +- compile test debug native success 21s MaxRSS:566M
+   |  +- options cached
+   +- run test 86 pass (86 total) 29s MaxRSS:546M
+      +- compile test debug native success 23s MaxRSS:660M
+      |  +- options (reused)
+      +- run cargo success 607ms
+      +- run test 27 pass (27 total) 1s MaxRSS:113M
+         +- compile test debug native success 12s MaxRSS:295M
+         |  +- options cached
+         +- run test 9 pass (9 total) 1s MaxRSS:111M
+            +- compile test debug native success 7s MaxRSS:222M
+               +- options (reused)

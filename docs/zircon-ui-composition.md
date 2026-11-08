@@ -1,14 +1,19 @@
 # Compact UI composition
 
-Use ordinary eager builders with tuples of elements or element results. The container propagates child errors, so static composition needs one outer fallible return. This render function comes from the [compiled headless counter](../examples/counter/main.zig).
+Use `b.fluent()` for application and reusable-control composition. Factories create frame-owned nodes immediately; chains add typed styles, children, entity views and handlers. Finish the root or a dynamic-list item with `.build()`.
+
+The application, settings, popovers, terminal chrome, text-input control and examples use this API. Low-level constructors remain inside the framework, custom-element ownership boundaries and API-contract tests.
+
+This render function comes from the [compiled headless counter](../examples/counter/main.zig).
 
 <!-- example: examples/counter/main.zig#render -->
 ```zig
 pub fn render(self: *const Counter, builder: *ui.Ui) !ui.Element {
-    return builder.column(.{ .gap = 12, .padding = .all(24) }, .{
-        builder.textFmt("Count: {d}", .{self.count}),
-        builder.button(.{ .key = .named("increment"), .label = "Increment", .on_click = builder.onClick(increment) }),
-    });
+    const f = builder.fluent();
+    return f.column().gap_px(12).p(6)
+        .child(f.textFmt("Count: {d}", .{self.count}))
+        .child(f.button(.{ .label = "Increment" }).id(.named("increment")).on_click(builder.onClick(increment)))
+        .build();
 }
 ```
 
@@ -54,7 +59,21 @@ Styles validate when the element builds. Last field update wins, so `.gap_px(-1)
 | `text_size`, `text_color` | Text style fields, using logical pixel size and typed color. |
 | `id`, `on_click`, `on_input` | Stable copied keys and existing typed handlers. Click binding requires a button. Button options retain tooltip, focus and capture support. |
 
-The editor's common menu rows and dynamic project list use this API. Application theme and feature state stay above the framework; the chain has no `Shell`, extension or product-palette dependency.
+All editor views use this API. Application theme and feature state stay above the framework; the chain has no `Shell`, extension or product-palette dependency.
+
+## Entity views, focus and capture
+
+`f.view(entity)` renders a child entity through its normal const borrow and records its frame dependency. Decorate it with `.id(key)`, `.focusable()`, `.autofocus()` and `.request_focus(generation)`. A generation change requests focus after the frame commits. Autofocus takes effect when a logical control first enters the tree.
+
+`.on_capture(handler)` adds capture handling while preserving the child view's input handler. `.listeners(.{ .on_input = ..., .on_capture = ..., .focusable = ... })` updates only specified values. A failed handler resolves before changes are installed. `.modal()` traps focus and pointer routing in its subtree; `.drag_region()` marks native draggable content.
+
+`f.row()`, `f.column()` and `f.stack()` create the corresponding containers. `.items(alignment)`, `.justify(alignment)`, `.direction(direction)`, `.grow_by(factor)` and `.shrink_by(factor)` cover values beyond the common shortcuts. `.min_w`, `.max_w`, `.min_h` and `.max_h` accept typed lengths. `.margin` and `.text_style` accept typed insets and text styles. `.background` and `.hover_background` accept optional colors. `.refine(.{ ... })` updates named style fields; `.style(value)` replaces the full style.
+
+## Source conventions and migration
+
+Imports belong in the file's module declarations. Module comments describe ownership and responsibilities; public contracts explain lifetimes, failure behavior and units where callers need them.
+
+`python3 tools/migrate_fluent.py apps/zircon/src packages/zircon_ui/src/controls packages/zircon_editor/src examples` migrates composition calls while preserving literals and comments. `python3 tools/hoist_zig_imports.py <source directories>` hoists nested literal imports and reuses module aliases. Both accept `--check`, and `zig build check` runs those checks against application/framework/tool sources, tests and examples. Migration tests cover nested syntax, comment terminators, alias collisions and repeatability.
 
 ## Children and errors
 

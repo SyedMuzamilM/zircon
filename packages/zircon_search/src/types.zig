@@ -1,6 +1,7 @@
 //! Search inputs borrow immutable snapshots. Results own all strings/context.
 const std = @import("std");
 const text = @import("zircon_text");
+const files_module = @import("files.zig");
 pub const Query = struct { text: []const u8, case_sensitive: bool = true, whole_word: bool = false };
 pub const Buffer = struct { document_id: u64, path: ?[]const u8 = null, title: []const u8, snapshot: text.Snapshot };
 pub const Limits = struct {
@@ -43,7 +44,7 @@ pub const Group = struct {
     }
     pub fn isCurrentDisk(self: Group, io: std.Io) !bool {
         if (self.source != .disk) return false;
-        return @import("files.zig").isCurrent(io, self.source.disk.path, self.source.disk.stamp);
+        return files_module.isCurrent(io, self.source.disk.path, self.source.disk.stamp);
     }
     pub fn path(self: Group) ?[]const u8 {
         return switch (self.source) {

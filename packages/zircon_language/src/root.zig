@@ -1,17 +1,20 @@
 //! UI-independent stdio language-server client. No server is reported ready
 //! until it answers initialize and the initialized notification is enqueued.
-pub const Client = @import("client.zig").Client;
-pub const Config = @import("client.zig").Config;
-pub const Wake = @import("client.zig").Wake;
-pub const Status = @import("client.zig").Status;
-pub const SynchronizationOptions = @import("synchronization.zig").Options;
-pub const Position = @import("model.zig").Position;
-pub const Range = @import("model.zig").Range;
-pub const Diagnostic = @import("model.zig").Diagnostic;
-pub const Completion = @import("model.zig").Completion;
-pub const Message = @import("model.zig").Message;
-pub const deinitMessages = @import("model.zig").deinitMessages;
-pub const positionAt = @import("model.zig").positionAt;
-pub const offsetAt = @import("model.zig").offsetAt;
-pub const fileUri = @import("model.zig").fileUri;
+const client = @import("client.zig");
 pub const framing = @import("framing.zig");
+const model = @import("model.zig");
+const synchronization = @import("synchronization.zig");
+pub const Client = client.Client;
+pub const Config = client.Config;
+pub const Wake = client.Wake;
+pub const Status = client.Status;
+pub const SynchronizationOptions = synchronization.Options;
+pub const Position = model.Position;
+pub const Range = model.Range;
+pub const Diagnostic = model.Diagnostic;
+pub const Completion = model.Completion;
+pub const Message = model.Message;
+pub const deinitMessages = model.deinitMessages;
+pub const positionAt = model.positionAt;
+pub const offsetAt = model.offsetAt;
+pub const fileUri = model.fileUri;

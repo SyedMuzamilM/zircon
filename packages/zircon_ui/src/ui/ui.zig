@@ -1,14 +1,19 @@
 //! Frame-local declarative builder. Copies every borrowed text/children slice.
 const std = @import("std");
-const tree = @import("tree.zig");
-const elements = @import("element.zig");
-const styles = @import("style.zig");
-const adapter = @import("adapter.zig");
+const animation_timeline = @import("../animation/timeline.zig");
 const runtime = @import("../app/app.zig");
 const identity = @import("../entity/entity.zig");
+const event = @import("../event/event.zig");
+const geometry = @import("../layout/geometry.zig");
+const adapter = @import("adapter.zig");
+const custom_module = @import("custom.zig");
+const elements = @import("element.zig");
+const fluent_module = @import("fluent.zig");
+const styles = @import("style.zig");
+const tree = @import("tree.zig");
 pub const Button = struct {
     key: ?elements.Key = null,
-    tooltip_colors: ?[3]@import("../layout/geometry.zig").Color = null,
+    tooltip_colors: ?[3]geometry.Color = null,
     tooltip: ?[]const u8 = null,
     label: []const u8,
     on_click: ?anyerror!adapter.ClickHandler = null,
@@ -22,7 +27,7 @@ pub const Button = struct {
 pub const Ui = struct {
     frame: *tree.Frame,
     owner: identity.Token,
-    pub fn fluent(ui: *Ui) @import("fluent.zig").Fluent {
+    pub fn fluent(ui: *Ui) fluent_module.Fluent {
         return .{ .ui = ui.*, .epoch = ui.frame.epoch };
     }
     /// Renders another entity through a const borrow and records its version in
@@ -72,10 +77,10 @@ pub const Ui = struct {
     pub fn onInput(ui: *Ui, comptime callback: anytype) adapter.InputHandler {
         return adapter.input(ui.owner, callback);
     }
-    pub fn onClickWith(ui: *Ui, comptime callback: anytype, value: adapter.CallbackPayload(@import("../event/event.zig").Click, @TypeOf(callback))) !adapter.ClickHandler {
+    pub fn onClickWith(ui: *Ui, comptime callback: anytype, value: adapter.CallbackPayload(event.Click, @TypeOf(callback))) !adapter.ClickHandler {
         return adapter.clickWith(ui.allocator(), ui.owner, value, callback);
     }
-    pub fn onInputWith(ui: *Ui, comptime callback: anytype, value: adapter.CallbackPayload(@import("../event/event.zig").Input, @TypeOf(callback))) !adapter.InputHandler {
+    pub fn onInputWith(ui: *Ui, comptime callback: anytype, value: adapter.CallbackPayload(event.Input, @TypeOf(callback))) !adapter.InputHandler {
         return adapter.inputWith(ui.allocator(), ui.owner, value, callback);
     }
     pub const Listeners = struct { on_input: ?anyerror!adapter.InputHandler = null, on_capture: ?anyerror!adapter.InputHandler = null, focusable: ?bool = null };
@@ -120,7 +125,7 @@ pub const Ui = struct {
         // leaves it with the caller; after creation there is no fallible step.
         try ui.frame.nodes.ensureUnusedCapacity(ui.allocator(), 1);
         try ui.frame.cleanups.ensureUnusedCapacity(ui.allocator(), 1);
-        const custom_value = try @import("custom.zig").create(T, ui.frame.allocator(), value);
+        const custom_value = try custom_module.create(T, ui.frame.allocator(), value);
         ui.frame.cleanups.appendAssumeCapacity(.{ .object = custom_value.object, .destroy = custom_value.destroy });
         ui.frame.nodes.appendAssumeCapacity(.{ .style = style, .kind = .{ .custom = custom_value } });
         return .{ .index = @intCast(ui.frame.nodes.items.len - 1), .frame_epoch = ui.frame.epoch };
@@ -128,7 +133,7 @@ pub const Ui = struct {
     pub fn allocator(ui: *const Ui) std.mem.Allocator {
         return ui.frame.allocator();
     }
-    pub fn viewport(ui: *const Ui) @import("../layout/geometry.zig").Size {
+    pub fn viewport(ui: *const Ui) geometry.Size {
         return ui.frame.viewport;
     }
     /// Schedule one frame relative to the current frame clock. A discarded
@@ -143,24 +148,24 @@ pub const Ui = struct {
         ui.frame.nodes.items[element.index].drag_region = true;
         return element;
     }
-    pub fn animate(ui: *Ui, key_value: u64, target: f32, transition: @import("../animation/timeline.zig").Transition) !f32 {
+    pub fn animate(ui: *Ui, key_value: u64, target: f32, transition: animation_timeline.Transition) !f32 {
         const timeline = ui.frame.timeline orelse return target;
         const track = (@as(u128, ui.owner.slot) << 96) | (@as(u128, ui.owner.generation) << 64) | key_value;
         return timeline.sample(track, target, transition, ui.frame.time);
     }
-    pub fn animateColor(ui: *Ui, key_value: u64, target: styles.Color, transition: @import("../animation/timeline.zig").Transition) !styles.Color {
+    pub fn animateColor(ui: *Ui, key_value: u64, target: styles.Color, transition: animation_timeline.Transition) !styles.Color {
         if (key_value > std.math.maxInt(u64) / 4) return error.InvalidAnimationKey;
         return .{ .r = std.math.clamp(try ui.animate(key_value * 4, target.r, transition), 0, 1), .g = std.math.clamp(try ui.animate(key_value * 4 + 1, target.g, transition), 0, 1), .b = std.math.clamp(try ui.animate(key_value * 4 + 2, target.b, transition), 0, 1), .a = std.math.clamp(try ui.animate(key_value * 4 + 3, target.a, transition), 0, 1) };
     }
     pub const Presence = struct { visible: bool, opacity: f32 };
     /// Keep the exiting element in the tree while its opacity approaches zero.
-    pub fn presence(ui: *Ui, key_value: u64, visible: bool, transition: @import("../animation/timeline.zig").Transition) !Presence {
+    pub fn presence(ui: *Ui, key_value: u64, visible: bool, transition: animation_timeline.Transition) !Presence {
         const opacity = std.math.clamp(try ui.animate(key_value, if (visible) 1 else 0, transition), 0, 1);
         return .{ .visible = visible or opacity > 0.001, .opacity = opacity };
     }
     /// Reserves four consecutive scalar keys, like animateColor. Width and
     /// height stay nonnegative when an underdamped spring overshoots its target.
-    pub fn animateRect(ui: *Ui, key_value: u64, target: @import("../layout/geometry.zig").Rect, transition: @import("../animation/timeline.zig").Transition) !@import("../layout/geometry.zig").Rect {
+    pub fn animateRect(ui: *Ui, key_value: u64, target: geometry.Rect, transition: animation_timeline.Transition) !geometry.Rect {
         if (key_value > std.math.maxInt(u64) / 4) return error.InvalidAnimationKey;
         if (target.width < 0 or target.height < 0) return error.InvalidAnimation;
         return .{ .x = try ui.animate(key_value * 4, target.x, transition), .y = try ui.animate(key_value * 4 + 1, target.y, transition), .width = @max(0, try ui.animate(key_value * 4 + 2, target.width, transition)), .height = @max(0, try ui.animate(key_value * 4 + 3, target.height, transition)) };

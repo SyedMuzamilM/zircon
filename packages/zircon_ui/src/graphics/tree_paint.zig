@@ -1,16 +1,21 @@
 //! Paints an arranged frame in tree order. Scene storage belongs to that same
 //! frame, so staging failure can discard layout and paint together.
-const tree = @import("../ui/tree.zig");
+const metrics = @import("../controls/metrics.zig");
 const flex = @import("../layout/flex.zig");
 const g = @import("../layout/geometry.zig");
-const Painter = @import("painter.zig").Painter;
-pub fn paint(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: @import("../layout/measure.zig").Measurer) !void {
+const measure = @import("../layout/measure.zig");
+const text_style = @import("../text/style.zig");
+const ui_custom = @import("../ui/custom.zig");
+const tree = @import("../ui/tree.zig");
+const painter_module = @import("painter.zig");
+const Painter = painter_module.Painter;
+pub fn paint(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer) !void {
     const root = frame.root orelse return error.NoFrameRoot;
     if (layout.frame_epoch != frame.epoch) return error.InvalidFrame;
     try node(frame, layout, painter, root.index, 1, 0, measurer);
     try tooltip(frame, layout, painter, measurer);
 }
-fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: @import("../layout/measure.zig").Measurer) anyerror!void {
+fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer) anyerror!void {
     if (depth > 128) return error.PaintDepthExceeded;
     const value = frame.nodes.items[index];
     const bounds = layout.bounds[index];
@@ -34,7 +39,7 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             const previous_opacity = painter.opacity;
             painter.opacity = opacity;
             defer painter.opacity = previous_opacity;
-            var cx: @import("../ui/custom.zig").PaintCx = .{ .painter = painter, .measurer = measurer, .focused = frame.focused_node == index, .text_input = &frame.text_input, .time = frame.time, .next_deadline = &frame.next_deadline };
+            var cx: ui_custom.PaintCx = .{ .painter = painter, .measurer = measurer, .focused = frame.focused_node == index, .text_input = &frame.text_input, .time = frame.time, .next_deadline = &frame.next_deadline };
             try custom.paint(custom.object, &cx, bounds);
         },
         .container => {},
@@ -61,7 +66,7 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
     for (value.children) |child| try node(frame, layout, painter, child, opacity, depth + 1, measurer);
 }
 
-fn tooltip(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: @import("../layout/measure.zig").Measurer) !void {
+fn tooltip(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer) !void {
     if (!frame.tooltips_enabled) return;
     var hovered = frame.hovered_node;
     while (hovered) |index| : (hovered = frame.nodes.items[index].parent) if (frame.nodes.items[index].tooltip) |label| {
@@ -71,7 +76,7 @@ fn tooltip(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, me
             return;
         }
         const colors = frame.nodes.items[index].tooltip_colors orelse [3]g.Color{ g.Color.rgb(0x262b33), g.Color.rgb(0xf0f2f5), g.Color.rgb(0x5a6270) };
-        const style: @import("../text/style.zig").TextStyle = .{ .size = 12, .color = colors[1] };
+        const style: text_style.TextStyle = .{ .size = 12, .color = colors[1] };
         const size = try measurer.text(measurer.context, label, style);
         const anchor = layout.bounds[index];
         const width = @min(@max(0, frame.viewport.width - 12), size.width + 16);
@@ -80,7 +85,7 @@ fn tooltip(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, me
         const below = anchor.y + anchor.height + 6;
         const y = if (below + height <= frame.viewport.height - 6) below else @max(6, anchor.y - height - 6);
         const rect: g.Rect = .{ .x = x, .y = y, .width = @max(0, width), .height = height };
-        const radius = @import("../controls/metrics.zig").popover_radius;
+        const radius = metrics.popover_radius;
         try painter.fillRect(.{ .bounds = rect, .radius = radius, .color = colors[2] });
         try painter.fillRect(.{ .bounds = .{ .x = x + 1, .y = y + 1, .width = @max(0, width - 2), .height = height - 2 }, .radius = radius - 1, .color = colors[0] });
         try painter.drawText(.{ .bounds = .{ .x = x + 8, .y = y + 6, .width = @max(0, width - 16), .height = size.height }, .text = label, .style = style });

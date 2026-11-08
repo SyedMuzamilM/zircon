@@ -1,10 +1,12 @@
 //! Resolves installed data contributions into effective editor behavior. The
 //! shell retains a registry generation while any editor profile borrows it.
 const std = @import("std");
-const ui = @import("zircon_ui");
-const ext = @import("zircon_extensions");
 const editor = @import("zircon_editor");
-const Shell = @import("../shell.zig").Shell;
+const ext = @import("zircon_extensions");
+const ui = @import("zircon_ui");
+const shell = @import("../shell.zig");
+const catalog = @import("catalog.zig");
+const Shell = shell.Shell;
 pub fn refresh(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.extensions) |*registry| {
         var next = registry.snapshot();
@@ -58,7 +60,7 @@ pub fn install(self: *Shell, cx: *ui.Context(Shell), path: []const u8) !void {
     defer self.allocator.free(manifest);
     _ = std.Io.Dir.cwd().statFile(self.workspace.io, manifest, .{}) catch |err| {
         if (err != error.FileNotFound) return err;
-        try @import("catalog.zig").importDev(self, cx, path);
+        try catalog.importDev(self, cx, path);
         return;
     };
     _ = try registry.install(path);

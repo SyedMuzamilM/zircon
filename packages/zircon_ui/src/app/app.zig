@@ -2,12 +2,19 @@
 //! notifications and deferred destruction settle when the outer transaction ends.
 const std = @import("std");
 const identities = @import("../entity/entity.zig");
-const Store = @import("../entity/store.zig").Store;
-const Scope = @import("../entity/scope.zig").Scope;
-const windows = @import("window.zig");
+const entity_scope = @import("../entity/scope.zig");
+const entity_store = @import("../entity/store.zig");
+const entity_value = @import("../entity/value.zig");
+const images = @import("../graphics/images.zig");
+const interface = @import("../platform/interface.zig");
+const text_typography = @import("../text/typography.zig");
+const owned_tasks = @import("owned_tasks.zig");
 const reactivity = @import("reactivity.zig");
 const task_module = @import("tasks.zig");
-const OwnedTasks = @import("owned_tasks.zig").OwnedTasks;
+const windows = @import("window.zig");
+const Store = entity_store.Store;
+const Scope = entity_scope.Scope;
+const OwnedTasks = owned_tasks.OwnedTasks;
 pub const Subscription = reactivity.Subscription;
 var next_id = std.atomic.Value(u32).init(1);
 const External = struct { owner: identities.Token, invoke: *const fn (*App, identities.Token) anyerror!void };
@@ -24,13 +31,13 @@ const State = struct {
     jobs: OwnedTasks,
     close_requests: std.ArrayList(windows.Handle) = .empty,
     external: std.ArrayList(External) = .empty,
-    typography: @import("../text/typography.zig").Typography = .{},
-    icon: ?@import("../graphics/images.zig").Image = null,
+    typography: text_typography.Typography = .{},
+    icon: ?images.Image = null,
 };
 pub const Options = struct {
     allocator: std.mem.Allocator,
     /// The application retains its own image reference until deinit.
-    icon: ?@import("../graphics/images.zig").Image = null,
+    icon: ?images.Image = null,
 };
 pub const App = struct {
     state: *State,
@@ -203,7 +210,7 @@ pub const App = struct {
         try app.check();
         return app.state.time;
     }
-    pub fn dispatch(app: *App, handle: windows.Handle, input: @import("../platform/interface.zig").Input) !void {
+    pub fn dispatch(app: *App, handle: windows.Handle, input: interface.Input) !void {
         try (try app.window(handle)).dispatch(input);
     }
     pub fn run(app: *App) !void {
@@ -268,7 +275,7 @@ pub const App = struct {
             w.dirty = true;
         };
     }
-    pub fn setTypography(app: *App, value: @import("../text/typography.zig").Typography) !void {
+    pub fn setTypography(app: *App, value: text_typography.Typography) !void {
         try app.check();
         try value.validate();
         if (std.meta.eql(value, app.state.typography)) return;
@@ -458,5 +465,5 @@ fn requireFirst(comptime F: type, comptime First: type) void {
     if (info.@"fn".param_types.len == 0 or info.@"fn".param_types[0] != First) @compileError("entity callback has incompatible self parameter");
 }
 fn requireSnapshot(comptime T: type) void {
-    if (@import("../entity/value.zig").containsPointer(T)) @compileError("read/update results cannot borrow pointers or slices; copy into a caller-owned output argument");
+    if (entity_value.containsPointer(T)) @compileError("read/update results cannot borrow pointers or slices; copy into a caller-owned output argument");
 }

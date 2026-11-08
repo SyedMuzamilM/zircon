@@ -1,7 +1,7 @@
 //! Native installed-provider smoke journey. It sends no model prompt.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const Shell = zircon.Shell;
 const Ops = struct {
     fn start(self: *Shell, cx: *ui.Context(Shell), provider: []const u8) !void {

@@ -1,5 +1,6 @@
 const std = @import("std");
-const tasks = @import("zircon_ui").tasks;
+const zircon_ui = @import("zircon_ui");
+const tasks = zircon_ui.tasks;
 const t = std.testing;
 const Log = struct {
     worker: ?std.Thread.Id = null,

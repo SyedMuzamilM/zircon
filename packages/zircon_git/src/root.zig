@@ -1,13 +1,17 @@
 //! Independent Git operations. The caller runs blocking queries in its worker
 //! and serializes mutations. Results own their data, never repository buffers.
 const std = @import("std");
-const process = @import("process.zig");
-pub const processStats = process.stats;
-const status_module = @import("status.zig");
+const builtin = @import("builtin");
+pub const buffer_diff = @import("buffer_diff.zig");
 const diff_module = @import("diff.zig");
-const numstat = @import("numstat.zig");
-pub const LineStats = numstat.LineStats;
 const history_module = @import("history.zig");
+const numstat = @import("numstat.zig");
+const parser_tests = @import("parser_tests.zig");
+const process = @import("process.zig");
+const references_module = @import("references.zig");
+const status_module = @import("status.zig");
+pub const processStats = process.stats;
+pub const LineStats = numstat.LineStats;
 pub const Status = status_module.Status;
 pub const Entry = status_module.Entry;
 pub const Change = status_module.Change;
@@ -16,13 +20,12 @@ pub const Hunk = diff_module.Hunk;
 pub const Line = diff_module.Line;
 pub const LineChange = diff_module.LineChange;
 pub const diffLines = diff_module.diffLines;
-pub const buffer_diff = @import("buffer_diff.zig");
 pub const Commit = history_module.Commit;
 pub const deinitHistory = history_module.deinitHistory;
 pub const Blame = history_module.Blame;
-pub const References = @import("references.zig").References;
-pub const Branch = @import("references.zig").Branch;
-pub const Stash = @import("references.zig").Stash;
+pub const References = references_module.References;
+pub const Branch = references_module.Branch;
+pub const Stash = references_module.Stash;
 pub const Network = union(enum) { fetch: []const u8, pull: bool, push: struct { remote: []const u8 = "", publish: bool = false, force_with_lease: bool = false } };
 pub const Baseline = enum { head, index };
 var temp_counter = std.atomic.Value(u64).init(1);
@@ -275,7 +278,7 @@ pub const Repository = struct {
             self.io.random(std.mem.asBytes(&nonce));
             const name = try std.fmt.allocPrint(a, "{s}/zircon-blame-{d}-{d}-{x}.tmp", .{ stripLineEnding(git_path), std.Thread.getCurrentId(), id, nonce });
             temporary = name;
-            const permissions = if (comptime @import("builtin").os.tag == .windows) std.Io.File.Permissions.default_file else std.Io.File.Permissions.fromMode(0o600);
+            const permissions = if (comptime builtin.os.tag == .windows) std.Io.File.Permissions.default_file else std.Io.File.Permissions.fromMode(0o600);
             const file = try std.Io.Dir.cwd().createFile(self.io, name, .{ .exclusive = true, .permissions = permissions });
             temporary_created = true;
             defer file.close(self.io);
@@ -294,7 +297,7 @@ pub const Repository = struct {
         defer a.free(remotes);
         const stashes = try self.command(a, &.{ "stash", "list", "--format=%gd%x00%H%x00%gs%x00" });
         defer a.free(stashes);
-        return @import("references.zig").parse(a, branches, remotes, stashes);
+        return references_module.parse(a, branches, remotes, stashes);
     }
     pub fn network(self: *Repository, request: Network) !void {
         const al = self.allocator;
@@ -377,8 +380,8 @@ pub fn validatePath(path: []const u8) !void {
 }
 
 test {
-    _ = @import("parser_tests.zig");
-    _ = @import("numstat.zig");
+    _ = parser_tests;
+    _ = numstat;
 }
 
 fn stripLineEnding(bytes: []const u8) []const u8 {

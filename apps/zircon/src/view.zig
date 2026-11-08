@@ -1,20 +1,37 @@
 //! Declarative application chrome. Every button invokes a real Shell command;
 //! editor drawing and editing remain in zircon_editor's custom canvas.
 const std = @import("std");
+const zircon_editor = @import("zircon_editor");
 const ui = @import("zircon_ui");
 const workspace = @import("zircon_workspace");
-const shell = @import("shell.zig");
-const Shell = shell.Shell;
 const catalogue = @import("commands.zig");
+const services_language = @import("services/language.zig");
+const recovery = @import("services/recovery.zig");
+const shell = @import("shell.zig");
+const terminal_module = @import("terminal.zig");
+const theme = @import("theme.zig");
+const agents = @import("views/agents.zig");
+const buffer_find = @import("views/buffer_find.zig");
+const chrome = @import("views/chrome.zig");
+const components = @import("views/components.zig");
+const views_extensions = @import("views/extensions.zig");
+const git_controls = @import("views/git_controls.zig");
+const views_git_diff = @import("views/git_diff.zig");
+const views_image = @import("views/image.zig");
+const views_open_project = @import("views/open_project.zig");
+const project = @import("views/project.zig");
+const views_search = @import("views/search.zig");
+const workspace_controls = @import("views/workspace_controls.zig");
+const Shell = shell.Shell;
 const Command = catalogue.Command;
-const Palette = @import("theme.zig").Palette;
-const toolbar_height = @import("views/components.zig").metrics.titlebar;
-const tab_height = @import("views/components.zig").metrics.tabs;
-const status_height = @import("views/components.zig").metrics.status;
+const Palette = theme.Palette;
+const toolbar_height = components.metrics.titlebar;
+const tab_height = components.metrics.tabs;
+const status_height = components.metrics.status;
 const result_limit = 12;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
-    try @import("services/recovery.zig").schedule(self, b);
+    try recovery.schedule(self, b);
     b.frame.tooltips_enabled = self.tooltips;
     b.frame.tooltip_delay = self.tooltip_delay / 1000;
     const colors = self.colors;
@@ -28,23 +45,23 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         try body_children.append(b.allocator(), try divider(b, colors, 0, false));
     }
     if (!self.agent_mode) try body_children.append(b.allocator(), try editorArea(self, b, editor_width));
-    const main = if (self.agent_mode) try @import("views/agents.zig").render(self, b) else try b.key(.{ .string = "main" }, try b.row(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, body_children.items));
-    const base = try b.key(.{ .string = "workspace" }, try b.column(.{ .background = colors.document, .overflow = .hidden }, &.{ try toolbar(self, b), main, try statusBar(self, b) }));
+    const main = if (self.agent_mode) try agents.render(self, b) else try b.fluent().div().grow().min_h(.{ .px = 0 }).overflow_hidden().flex().children(body_children.items).id(.{ .string = "main" }).build();
+    const base = try b.fluent().div().background(colors.document).overflow_hidden().flex_col().children(.{ toolbar(self, b), main, statusBar(self, b) }).id(.{ .string = "workspace" }).build();
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
-    if (self.terminal.sessions.items.len > 0) try layers.append(b.allocator(), try @import("terminal.zig").wakeElement(b));
-    if (self.find.waiting and !self.find.busy) try layers.append(b.allocator(), try @import("services/language.zig").syntaxWake(b));
-    if (self.language.syntax_waiting) try layers.append(b.allocator(), try @import("services/language.zig").syntaxWake(b));
-    if (self.git.menu != .none) try layers.append(b.allocator(), try @import("views/git_controls.zig").render(self, b));
-    if (self.split_menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").splitMenu(self, b));
-    if (self.popup != .none) try layers.append(b.allocator(), try @import("views/workspace_controls.zig").render(self, b));
-    if (self.menu_open) try layers.append(b.allocator(), try @import("views/chrome.zig").menu(self, b));
+    if (self.terminal.sessions.items.len > 0) try layers.append(b.allocator(), try terminal_module.wakeElement(b));
+    if (self.find.waiting and !self.find.busy) try layers.append(b.allocator(), try services_language.syntaxWake(b));
+    if (self.language.syntax_waiting) try layers.append(b.allocator(), try services_language.syntaxWake(b));
+    if (self.git.menu != .none) try layers.append(b.allocator(), try git_controls.render(self, b));
+    if (self.split_menu_open) try layers.append(b.allocator(), try chrome.splitMenu(self, b));
+    if (self.popup != .none) try layers.append(b.allocator(), try workspace_controls.render(self, b));
+    if (self.menu_open) try layers.append(b.allocator(), try chrome.menu(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlay(self, b));
     if (self.overlay == .none) if (self.language.completions) |message| {
         var choices: std.ArrayList(ui.Element) = .empty;
         const start = self.language.completion_index -| 7;
         for (message.data.completion.items[start..@min(start + 8, message.data.completion.items.len)], start..) |item, index| {
-            try choices.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = item.label, .on_click = b.onClickWith(Shell.onCompletion, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .top = 7 }, .background = if (index == self.language.completion_index) colors.selected else colors.panel, .text = .{ .size = 13, .mono = true, .color = colors.text }, .overflow = .hidden } })));
+            try choices.append(b.allocator(), try b.fluent().button(.{ .label = item.label, .on_click = b.onClickWith(Shell.onCompletion, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .top = 7 }, .background = if (index == self.language.completion_index) colors.selected else colors.panel, .text = .{ .size = 13, .mono = true, .color = colors.text }, .overflow = .hidden } }).id(.{ .number = @intCast(index) }).build());
         }
         if (choices.items.len == 0) try choices.append(b.allocator(), try label(b, colors, "No completions", colors.muted, 12));
         const requested: ui.Size = .{ .width = @min(420, viewport.width - 24), .height = @as(f32, @floatFromInt(@max(1, choices.items.len))) * 30 + 12 };
@@ -53,18 +70,18 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             if ((try app.window(handle)).frames.committed.text_input) |input| anchor = input.caret;
         };
         anchor.width = requested.width;
-        const placement = @import("views/components.zig").popoverBounds(viewport, anchor, requested);
-        const popup = try b.key(.{ .string = "completion-list" }, try @import("views/components.zig").floatingPanel(b, colors, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(6), 0, choices.items));
-        try layers.append(b.allocator(), try b.stack(.{ .padding = .{ .top = placement.y, .left = placement.x } }, &.{popup}));
+        const placement = components.popoverBounds(viewport, anchor, requested);
+        const popup = try b.fluent().adopt(try components.floatingPanel(b, colors, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(6), 0, choices.items)).id(.{ .string = "completion-list" }).build();
+        try layers.append(b.allocator(), try b.fluent().div().padding(.{ .top = placement.y, .left = placement.x }).stack().children(.{popup}).build());
     };
-    return b.listen(try b.key(.{ .string = "zircon" }, try b.stack(.{ .background = colors.document, .overflow = .hidden }, layers.items)), .{ .on_capture = b.onInput(Shell.onGlobal), .on_input = b.onInput(Shell.onRoot) });
+    return b.fluent().div().background(colors.document).overflow_hidden().stack().children(layers.items).id(.{ .string = "zircon" }).listeners(.{ .on_capture = b.onInput(Shell.onGlobal), .on_input = b.onInput(Shell.onRoot) }).build();
 }
 
 fn toolbar(self: *const Shell, b: *ui.Ui) !ui.Element {
-    return @import("views/chrome.zig").titlebar(self, b);
+    return chrome.titlebar(self, b);
 }
 fn sidebar(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Element {
-    return @import("views/project.zig").render(self, b, width, height);
+    return project.render(self, b, width, height);
 }
 
 pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
@@ -74,20 +91,20 @@ pub fn editorArea(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     const terminal_width = if (right) @max(100, width * self.terminal.ratio) else width;
     const terminal_height = if (right) available_height else @max(60, available_height * self.terminal.ratio);
     const source = try editorContent(self, b, if (right) @max(100, width - terminal_width - 5) else width);
-    const terminal = try @import("terminal.zig").render(self, b, terminal_width, terminal_height);
-    return b.div(.{ .direction = if (right) .row else .column, .flex_grow = 1, .min_width = .{ .px = 0 }, .min_height = .{ .px = 0 }, .overflow = .hidden }, &.{ source, try b.listen(try b.key(.{ .string = "terminal-divider" }, try b.div(.{ .width = if (right) .{ .px = 5 } else .auto, .height = if (right) .auto else .{ .px = 5 }, .flex_shrink = 0, .background = self.colors.line, .hover_background = self.colors.hover }, &.{})), .{ .on_input = b.onInput(@import("terminal.zig").onDivider) }), terminal });
+    const terminal = try terminal_module.render(self, b, terminal_width, terminal_height);
+    return b.fluent().div().direction(if (right) .row else .column).grow().min_w(.{ .px = 0 }).min_h(.{ .px = 0 }).overflow_hidden().children(&.{ source, try b.fluent().div().w(if (right) .{ .px = 5 } else .auto).h(if (right) .auto else .{ .px = 5 }).shrink_0().background(self.colors.line).hover_background(self.colors.hover).children(.{}).id(.{ .string = "terminal-divider" }).listeners(.{ .on_input = b.onInput(terminal_module.onDivider) }).build(), terminal }).build();
 }
 fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
     const colors = self.colors;
     if (self.panel != .editor and self.panel != .markdown and self.secondary == null) {
         const panel = switch (self.panel) {
-            .image => try @import("views/image.zig").render(self, b),
-            .extensions => try @import("views/extensions.zig").render(self, b),
-            .search => try @import("views/search.zig").render(self, b),
-            .git_diff => try @import("views/git_diff.zig").render(self, b),
+            .image => try views_image.render(self, b),
+            .extensions => try views_extensions.render(self, b),
+            .search => try views_search.render(self, b),
+            .git_diff => try views_git_diff.render(self, b),
             else => unreachable,
         };
-        return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, &.{ try tabs(self, b, width), panel }));
+        return b.fluent().div().grow().min_w(.{ .px = 0 }).background(colors.document).overflow_hidden().flex_col().children(.{ tabs(self, b, width), panel }).id(.{ .string = "editor-area" }).build();
     }
     var children: std.ArrayList(ui.Element) = .empty;
     if (self.tabs.items.len == 0) {
@@ -105,87 +122,87 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const primary_record = try self.workspace.getConst(tab.document);
         const primary_source = self.panel == .editor or self.panel == .markdown;
         var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0));
-        primary = try b.styled(primary, .{ .width = .{ .px = primary_width }, .flex_grow = 1, .min_height = .{ .px = 0 }, .min_width = .{ .px = 0 }, .overflow = .hidden });
-        if (primary_source) primary = try b.listen(try b.key(.{ .string = "primary-editor" }, primary), .{ .focusable = true, .on_input = b.onInputWith(Shell.onEditor, @as(u8, 0)) });
-        if (self.currentTool(0) == .git_diff) primary = try b.requestFocus(try b.listen(try b.key(.{ .string = "primary-tool" }, primary), .{ .focusable = true }), if (self.active_pane == .primary) self.editor_focus_request else 0);
-        if (primary_source) primary = try b.requestFocus(if (self.agent_mode) primary else try b.autofocus(primary), if (!self.agent_mode and self.active_pane == .primary) self.editor_focus_request else 0);
-        try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "primary-pane" }, try b.column(.{ .width = .{ .px = primary_width }, .height = primary_height, .flex_grow = if (!split_visible) 1 else 0, .flex_shrink = 0, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, primary_record, tab.document, &tab.editor, primary, 0, primary_width))), .{ .on_capture = b.onInputWith(Shell.onPaneInput, @as(u8, 0)) }));
+        primary = try b.fluent().adopt(primary).style(.{ .width = .{ .px = primary_width }, .flex_grow = 1, .min_height = .{ .px = 0 }, .min_width = .{ .px = 0 }, .overflow = .hidden }).build();
+        if (primary_source) primary = try b.fluent().adopt(primary).id(.{ .string = "primary-editor" }).listeners(.{ .focusable = true, .on_input = b.onInputWith(Shell.onEditor, @as(u8, 0)) }).build();
+        if (self.currentTool(0) == .git_diff) primary = try b.fluent().adopt(primary).id(.{ .string = "primary-tool" }).listeners(.{ .focusable = true }).request_focus(if (self.active_pane == .primary) self.editor_focus_request else 0).build();
+        if (primary_source) primary = try b.fluent().adopt(if (self.agent_mode) primary else try b.fluent().adopt(primary).autofocus().build()).request_focus(if (!self.agent_mode and self.active_pane == .primary) self.editor_focus_request else 0).build();
+        try panes.append(b.allocator(), try b.fluent().div().w(.{ .px = primary_width }).h(primary_height).grow_by(if (!split_visible) 1 else 0).shrink_0().min_w(.{ .px = 0 }).overflow_hidden().flex_col().children(try paneChildren(self, b, primary_record, tab.document, &tab.editor, primary, 0, primary_width)).id(.{ .string = "primary-pane" }).listeners(.{ .on_capture = b.onInputWith(Shell.onPaneInput, @as(u8, 0)) }).build());
         if (preview_visible) {
             try panes.append(b.allocator(), try divider(b, colors, 1, false));
-            const preview = try b.listen(try b.key(.{ .string = "markdown-preview" }, try self.preview.?.view.render(b)), .{ .focusable = true, .on_input = b.onInput(Shell.onPreview) });
-            try panes.append(b.allocator(), try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, &.{ try b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 12, .right = 8 }, .align_items = .center, .gap = 8, .background = colors.document }, &.{ try b.styled(try label(b, colors, "Markdown preview", colors.muted, 12), .{ .flex_grow = 1, .text = .{ .size = 12, .color = colors.muted } }), try commandButton(b, colors, .back_to_editor, "Close", false) }), preview }));
+            const preview = try b.fluent().adopt(try self.preview.?.view.render(b)).id(.{ .string = "markdown-preview" }).listeners(.{ .focusable = true, .on_input = b.onInput(Shell.onPreview) }).build();
+            try panes.append(b.allocator(), try b.fluent().div().grow().min_w(.{ .px = 0 }).overflow_hidden().flex_col().children(&.{ try b.fluent().div().h(.{ .px = 30 }).shrink_0().padding(.{ .left = 12, .right = 8 }).items_center().gap_px(8).background(colors.document).flex().children(.{ b.fluent().adopt(try label(b, colors, "Markdown preview", colors.muted, 12)).style(.{ .flex_grow = 1, .text = .{ .size = 12, .color = colors.muted } }), commandButton(b, colors, .back_to_editor, "Close", false) }).build(), preview }).build());
         } else if (self.secondary) |*secondary| {
             try panes.append(b.allocator(), try divider(b, colors, 1, vertical));
             const record = try self.workspace.getConst(secondary.document);
             const secondary_source = self.secondary_tool == null;
             var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool);
-            secondary_canvas = try b.styled(secondary_canvas, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
-            if (secondary_source) secondary_canvas = try b.listen(try b.key(.{ .string = "secondary-editor" }, secondary_canvas), .{ .focusable = true, .on_input = b.onInputWith(Shell.onEditor, @as(u8, 1)) });
-            if (self.secondary_tool == .git_diff) secondary_canvas = try b.requestFocus(try b.listen(try b.key(.{ .string = "secondary-tool" }, secondary_canvas), .{ .focusable = true }), if (self.active_pane == .secondary) self.editor_focus_request else 0);
-            if (secondary_source) secondary_canvas = try b.requestFocus(secondary_canvas, if (!self.agent_mode and self.active_pane == .secondary) self.editor_focus_request else 0);
-            try panes.append(b.allocator(), try b.listen(try b.key(.{ .string = "secondary-pane" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }, try paneChildren(self, b, record, secondary.document, &secondary.editor, secondary_canvas, 1, if (vertical) width else available - primary_width))), .{ .on_capture = b.onInputWith(Shell.onPaneInput, @as(u8, 1)) }));
+            secondary_canvas = try b.fluent().adopt(secondary_canvas).style(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }).build();
+            if (secondary_source) secondary_canvas = try b.fluent().adopt(secondary_canvas).id(.{ .string = "secondary-editor" }).listeners(.{ .focusable = true, .on_input = b.onInputWith(Shell.onEditor, @as(u8, 1)) }).build();
+            if (self.secondary_tool == .git_diff) secondary_canvas = try b.fluent().adopt(secondary_canvas).id(.{ .string = "secondary-tool" }).listeners(.{ .focusable = true }).request_focus(if (self.active_pane == .secondary) self.editor_focus_request else 0).build();
+            if (secondary_source) secondary_canvas = try b.fluent().adopt(secondary_canvas).request_focus(if (!self.agent_mode and self.active_pane == .secondary) self.editor_focus_request else 0).build();
+            try panes.append(b.allocator(), try b.fluent().div().grow().min_w(.{ .px = 0 }).overflow_hidden().flex_col().children(try paneChildren(self, b, record, secondary.document, &secondary.editor, secondary_canvas, 1, if (vertical) width else available - primary_width)).id(.{ .string = "secondary-pane" }).listeners(.{ .on_capture = b.onInputWith(Shell.onPaneInput, @as(u8, 1)) }).build());
         }
         if (self.secondary != null and self.split_reverse and !preview_visible) std.mem.swap(ui.Element, &panes.items[0], &panes.items[2]);
-        try children.append(b.allocator(), try b.key(.{ .string = "panes" }, try b.div(.{ .direction = if (vertical) .column else .row, .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden }, panes.items)));
+        try children.append(b.allocator(), try b.fluent().div().direction(if (vertical) .column else .row).grow().min_h(.{ .px = 0 }).overflow_hidden().children(panes.items).id(.{ .string = "panes" }).build());
         const active_id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else tab.document;
         for (self.language.documents.items) |document| if (std.meta.eql(document.id, active_id)) {
             const message = document.diagnostics orelse break;
             const record = try self.workspace.getConst(active_id);
             if (message.data.diagnostics.version != record.doc.revision()) break;
-            for (message.data.diagnostics.items[0..@min(4, message.data.diagnostics.items.len)], 0..) |diagnostic, index| try children.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s}  {d}:{d}  {s}", .{ switch (diagnostic.severity) {
+            for (message.data.diagnostics.items[0..@min(4, message.data.diagnostics.items.len)], 0..) |diagnostic, index| try children.append(b.allocator(), try b.fluent().button(.{ .label = try std.fmt.allocPrint(b.allocator(), "{s}  {d}:{d}  {s}", .{ switch (diagnostic.severity) {
                 .error_value => "Error",
                 .warning => "Warning",
                 .information => "Information",
                 .hint => "Hint",
-            }, diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }), .on_click = b.onClickWith(Shell.onDiagnostic, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 28 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 6 }, .background = colors.panel, .text = .{ .size = 12, .color = colors.warning }, .overflow = .hidden } })));
+            }, diagnostic.range.start.line + 1, diagnostic.range.start.character + 1, diagnostic.message }), .on_click = b.onClickWith(Shell.onDiagnostic, @as(u32, @intCast(index))), .style = .{ .height = .{ .px = 28 }, .flex_shrink = 0, .padding = .{ .left = 14, .top = 6 }, .background = colors.panel, .text = .{ .size = 12, .color = colors.warning }, .overflow = .hidden } }).id(.{ .number = @intCast(index) }).build());
             break;
         };
     }
-    return b.key(.{ .string = "editor-area" }, try b.column(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .background = colors.document, .overflow = .hidden }, children.items));
+    return b.fluent().div().grow().min_w(.{ .px = 0 }).background(colors.document).overflow_hidden().flex_col().children(children.items).id(.{ .string = "editor-area" }).build();
 }
 fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool) !ui.Element {
     if (tool) |which| return switch (which) {
-        .git_diff => @import("views/git_diff.zig").render(self, b),
-        .search => @import("views/search.zig").render(self, b),
-        .extensions => @import("views/extensions.zig").render(self, b),
+        .git_diff => views_git_diff.render(self, b),
+        .search => views_search.render(self, b),
+        .extensions => views_extensions.render(self, b),
     };
-    return @import("views/image.zig").render(self, b);
+    return views_image.render(self, b);
 }
-fn paneChildren(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const @import("zircon_editor").Editor, canvas: ui.Element, pane: u8, pane_width: f32) ![]const ui.Element {
+fn paneChildren(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const zircon_editor.Editor, canvas: ui.Element, pane: u8, pane_width: f32) ![]const ui.Element {
     var children: std.ArrayList(ui.Element) = .empty;
 
-    try children.append(b.allocator(), try @import("views/chrome.zig").tabsForPane(self, b, pane_width, pane));
+    try children.append(b.allocator(), try chrome.tabsForPane(self, b, pane_width, pane));
     const source = self.currentTool(pane) == null and (pane == 1 or self.panel == .editor or self.panel == .markdown);
     if (source) try children.append(b.allocator(), try fileHeading(self, b, record, document, state));
-    if (source and self.find.visible and self.find.pane == pane and self.find.document != null and std.meta.eql(self.find.document.?, document)) try children.append(b.allocator(), try @import("views/buffer_find.zig").render(self, b));
+    if (source and self.find.visible and self.find.pane == pane and self.find.document != null and std.meta.eql(self.find.document.?, document)) try children.append(b.allocator(), try buffer_find.render(self, b));
     try children.append(b.allocator(), canvas);
     return children.toOwnedSlice(b.allocator());
 }
-fn fileHeading(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const @import("zircon_editor").Editor) !ui.Element {
-    return @import("views/chrome.zig").fileHeader(self, b, record, document, state);
+fn fileHeading(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const zircon_editor.Editor) !ui.Element {
+    return chrome.fileHeader(self, b, record, document, state);
 }
 fn tabs(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
-    return @import("views/chrome.zig").tabs(self, b, width);
+    return chrome.tabs(self, b, width);
 }
 
 fn emptyEditor(b: *ui.Ui, colors: Palette) !ui.Element {
-    return b.column(.{ .flex_grow = 1, .padding = ui.Insets.all(36), .gap = 16, .justify_content = .center, .align_items = .center }, &.{
+    return b.fluent().div().grow().padding(ui.Insets.all(36)).gap_px(16).justify_center().items_center().flex_col().children(&.{
         try label(b, colors, "Open a file to begin", colors.text, 20),
         try label(b, colors, "Choose a project file or create a new document.", colors.muted, 13),
-        try b.row(.{ .gap = 10, .height = .{ .px = 32 }, .justify_content = .center }, &.{ try commandButton(b, colors, .open_path, "Open file…", true), try commandButton(b, colors, .new_file, "New file", false) }),
-    });
+        try b.fluent().div().gap_px(10).h(.{ .px = 32 }).justify_center().flex().children(.{ commandButton(b, colors, .open_path, "Open file…", true), commandButton(b, colors, .new_file, "New file", false) }).build(),
+    }).build();
 }
 
 fn divider(b: *ui.Ui, colors: Palette, kind: u8, horizontal: bool) !ui.Element {
-    return b.listen(try b.key(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }, try b.div(.{ .cursor = if (horizontal) .resize_vertical else .resize_horizontal, .direction = if (horizontal) .column else .row, .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.document, .hover_background = colors.hover, .padding = if (horizontal) .{ .top = 2, .bottom = 2 } else .{ .left = 2, .right = 2 } }, &.{try b.div(.{ .width = if (horizontal) .auto else .{ .px = 1 }, .height = if (horizontal) .{ .px = 1 } else .auto, .flex_grow = 1, .background = colors.line }, &.{})})), .{ .on_input = b.onInputWith(Shell.onDrag, kind) });
+    return b.fluent().div().style(.{ .cursor = if (horizontal) .resize_vertical else .resize_horizontal, .direction = if (horizontal) .column else .row, .width = if (horizontal) .auto else .{ .px = 5 }, .height = if (horizontal) .{ .px = 5 } else .auto, .flex_shrink = 0, .background = colors.document, .hover_background = colors.hover, .padding = if (horizontal) .{ .top = 2, .bottom = 2 } else .{ .left = 2, .right = 2 } }).children(&.{try b.fluent().div().w(if (horizontal) .auto else .{ .px = 1 }).h(if (horizontal) .{ .px = 1 } else .auto).grow().background(colors.line).children(.{}).build()}).id(.{ .string = if (kind == 0) "sidebar-divider" else "pane-divider" }).listeners(.{ .on_input = b.onInputWith(Shell.onDrag, kind) }).build();
 }
 
 fn statusBar(self: *const Shell, b: *ui.Ui) !ui.Element {
-    return @import("views/chrome.zig").statusbar(self, b);
+    return chrome.statusbar(self, b);
 }
 
 fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
-    if (self.overlay == .open_project) return @import("views/open_project.zig").render(self, b);
+    if (self.overlay == .open_project) return views_open_project.render(self, b);
     const colors = self.colors;
     const fields = self.fields.?;
     const width = @min(if (self.overlay == .palette or self.overlay == .quick_open) @as(f32, 560) else 580, @max(0, b.viewport().width - 48));
@@ -204,16 +221,13 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
         .none => unreachable,
     };
     const picker = self.overlay == .palette or self.overlay == .quick_open;
-    const title_row = try b.row(.{ .height = .{ .px = 26 }, .align_items = .center, .gap = 12 }, &.{
-        try b.styled(try label(b, colors, title, colors.text, 15), .{ .flex_grow = 1, .text = .{ .size = 15, .color = colors.text } }),
-        try commandButton(b, colors, .dismiss, "Esc", false),
-    });
+    const title_row = try b.fluent().div().h(.{ .px = 26 }).items_center().gap_px(12).flex().children(.{ b.fluent().adopt(try label(b, colors, title, colors.text, 15)).style(.{ .flex_grow = 1, .text = .{ .size = 15, .color = colors.text } }), commandButton(b, colors, .dismiss, "Esc", false) }).build();
     if (!picker) try children.append(b.allocator(), title_row);
     switch (self.overlay) {
         .open_project => unreachable,
         .palette, .quick_open => {
-            try children.append(b.allocator(), try b.styled(try inputField(b, fields.query, "query", true), .{ .height = .{ .px = 38 }, .flex_shrink = 0 }));
-            try children.append(b.allocator(), try @import("views/components.zig").rule(b, colors));
+            try children.append(b.allocator(), try b.fluent().adopt(try inputField(b, fields.query, "query", true)).style(.{ .height = .{ .px = 38 }, .flex_shrink = 0 }).build());
+            try children.append(b.allocator(), try components.rule(b, colors));
             const query = try fieldText(b, fields.query);
             if (self.overlay == .palette) {
                 const filtered = try filteredCommands(b, query);
@@ -221,7 +235,7 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
                 const start = resultStart(filtered.len, self.overlay_index, limit);
                 for (filtered[start..@min(start + limit, filtered.len)], start..) |index, visible| {
                     const entry = catalogue.commands[index];
-                    try children.append(b.allocator(), try @import("views/components.zig").menuRow(b, colors, entry.command, entry.label, try self.key_bindings.shortcut(b.allocator(), entry.command), visible == self.overlay_index));
+                    try children.append(b.allocator(), try components.menuRow(b, colors, entry.command, entry.label, try self.key_bindings.shortcut(b.allocator(), entry.command), visible == self.overlay_index));
                 }
                 if (filtered.len == 0) try children.append(b.allocator(), try label(b, colors, "No matching commands.", colors.muted, 12));
             } else {
@@ -229,13 +243,13 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
                 const limit = resultCapacity(self, b);
                 const start = resultStart(filtered.len, self.overlay_index, limit);
                 for (filtered[start..@min(start + limit, filtered.len)], start..) |index, visible| {
-                    const row = try b.button(.{ .label = self.file_index.items[index].label, .on_click = b.onClickWith(Shell.onFile, @as(u32, @intCast(index))), .style = resultStyle(colors, visible == self.overlay_index) });
-                    try children.append(b.allocator(), try b.key(.{ .number = @intCast(index) }, row));
+                    const row = try b.fluent().button(.{ .label = self.file_index.items[index].label, .on_click = b.onClickWith(Shell.onFile, @as(u32, @intCast(index))), .style = resultStyle(colors, visible == self.overlay_index) }).build();
+                    try children.append(b.allocator(), try b.fluent().adopt(row).id(.{ .number = @intCast(index) }).build());
                 }
                 if (filtered.len == 0) try children.append(b.allocator(), try label(b, colors, if (self.indexing) "Indexing files…" else "No matching files. Open a file by path with ⌘O.", colors.muted, 12));
             }
-            try children.append(b.allocator(), try @import("views/components.zig").rule(b, colors));
-            try children.append(b.allocator(), try b.row(.{ .height = .{ .px = 24 }, .flex_shrink = 0, .align_items = .center, .gap = 10, .padding = .{ .left = 10, .right = 8 } }, &.{ try label(b, colors, "↑ ↓ to navigate", colors.muted, 11), try b.div(.{ .flex_grow = 1 }, &.{}), try label(b, colors, "↵ Confirm", colors.muted, 11), try label(b, colors, "esc Close", colors.muted, 11) }));
+            try children.append(b.allocator(), try components.rule(b, colors));
+            try children.append(b.allocator(), try b.fluent().div().h(.{ .px = 24 }).shrink_0().items_center().gap_px(10).padding(.{ .left = 10, .right = 8 }).flex().children(&.{ try label(b, colors, "↑ ↓ to navigate", colors.muted, 11), try b.fluent().div().grow().children(.{}).build(), try label(b, colors, "↵ Confirm", colors.muted, 11), try label(b, colors, "esc Close", colors.muted, 11) }).build());
         },
         .open_path, .save_as, .extension_path => {
             try children.appendSlice(b.allocator(), &.{
@@ -246,7 +260,7 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
         },
         .project_search => {
             const input = try inputField(b, fields.project_query, "query", true);
-            try children.appendSlice(b.allocator(), &.{ try b.listen(input, .{ .on_input = b.onInput(Shell.onSearchQuery) }), try commandButton(b, colors, .run_project_search, "Search", true) });
+            try children.appendSlice(b.allocator(), &.{ try b.fluent().adopt(input).listeners(.{ .on_input = b.onInput(Shell.onSearchQuery) }).build(), try commandButton(b, colors, .run_project_search, "Search", true) });
         },
         .find, .replace => {
             try children.append(b.allocator(), try inputField(b, fields.query, "query", true));
@@ -267,9 +281,9 @@ fn overlay(self: *const Shell, b: *ui.Ui) !ui.Element {
     }
     if (self.status.len > 0 and self.status_is_error) try children.append(b.allocator(), try label(b, colors, self.status, colors.warning, 12));
     const panel_height = @min(try overlayHeight(self, b), @max(120, b.viewport().height - 100));
-    const panel = try b.key(.{ .string = "dialog" }, try @import("views/components.zig").floatingPanel(b, colors, .{ .width = width, .height = panel_height }, ui.Insets.all(if (picker) 6 else 12), if (picker) 0 else 8, children.items));
+    const panel = try b.fluent().adopt(try components.floatingPanel(b, colors, .{ .width = width, .height = panel_height }, ui.Insets.all(if (picker) 6 else 12), if (picker) 0 else 8, children.items)).id(.{ .string = "dialog" }).build();
     const shade: ui.Color = .{ .r = 0, .g = 0, .b = 0, .a = if (picker) 0 else 0.2 };
-    return b.modal(try b.listen(try b.key(.{ .string = @tagName(self.overlay) }, try b.stack(.{ .padding = .{ .top = @min(@as(f32, 78), b.viewport().height * 0.13), .bottom = 20 }, .align_items = .center, .justify_content = .start, .background = shade, .overflow = .hidden }, &.{panel})), .{ .on_input = b.onInput(Shell.onOverlayInput) }));
+    return b.fluent().div().padding(.{ .top = @min(@as(f32, 78), b.viewport().height * 0.13), .bottom = 20 }).items_center().justify(.start).background(shade).overflow_hidden().stack().children(.{panel}).id(.{ .string = @tagName(self.overlay) }).listeners(.{ .on_input = b.onInput(Shell.onOverlayInput) }).modal().build();
 }
 
 fn overlayHeight(self: *const Shell, b: *ui.Ui) !f32 {
@@ -314,20 +328,20 @@ fn pendingTitle(self: *const Shell, b: *ui.Ui) ![]const u8 {
 }
 
 fn label(b: *ui.Ui, _: Palette, value: []const u8, color: ui.Color, size: f32) !ui.Element {
-    return b.styled(try b.text(value), .{ .text = .{ .size = size, .color = color } });
+    return b.fluent().text(value).style(.{ .text = .{ .size = size, .color = color } }).build();
 }
 pub fn commandButton(b: *ui.Ui, colors: Palette, action: Command, text: []const u8, primary: bool) !ui.Element {
-    return @import("views/components.zig").actionButton(b, colors, action, text, primary);
+    return components.actionButton(b, colors, action, text, primary);
 }
 fn resultStyle(colors: Palette, selected: bool) ui.Style {
-    return .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 10, .right = 10, .top = 7 }, .radius = @import("views/components.zig").metrics.control_radius, .background = if (selected) colors.selected else colors.panel, .hover_background = colors.hover, .text = .{ .size = 12, .color = colors.text }, .overflow = .hidden };
+    return .{ .height = .{ .px = 30 }, .flex_shrink = 0, .padding = .{ .left = 10, .right = 10, .top = 7 }, .radius = components.metrics.control_radius, .background = if (selected) colors.selected else colors.panel, .hover_background = colors.hover, .text = .{ .size = 12, .color = colors.text }, .overflow = .hidden };
 }
 fn footer(b: *ui.Ui, children: []const ui.Element) !ui.Element {
-    return b.row(.{ .height = .{ .px = 30 }, .gap = 8, .justify_content = .end }, children);
+    return b.fluent().div().h(.{ .px = 30 }).gap_px(8).justify(.end).flex().children(children).build();
 }
 fn inputField(b: *ui.Ui, handle: ui.Entity(ui.controls.TextInput), key: []const u8, focus: bool) !ui.Element {
-    const element = try b.key(.{ .string = key }, try b.view(handle));
-    return if (focus) b.autofocus(element) else element;
+    const element = try b.fluent().view(handle).id(.{ .string = key }).build();
+    return if (focus) b.fluent().adopt(element).autofocus().build() else element;
 }
 pub fn fieldText(b: *ui.Ui, handle: ui.Entity(ui.controls.TextInput)) ![]u8 {
     var bytes: []u8 = undefined;

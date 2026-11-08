@@ -1,9 +1,9 @@
 //! Connects worker ownership to generational entities. Workers see only the job;
 //! completion resolves the owner anew on the UI thread and borrows its output.
 const std = @import("std");
-const tasks = @import("tasks.zig");
-const runtime = @import("app.zig");
 const identities = @import("../entity/entity.zig");
+const runtime = @import("app.zig");
+const tasks = @import("tasks.zig");
 const OwnerTask = struct { owner: identities.Token, handle: tasks.Handle };
 pub const OwnedTasks = struct {
     queue: tasks.Queue,

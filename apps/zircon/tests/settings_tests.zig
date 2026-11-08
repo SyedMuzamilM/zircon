@@ -1,6 +1,6 @@
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 test "settings update persists atomically retains unknown keys and refuses invalid values" {
     var tmp = t.tmpDir(.{});

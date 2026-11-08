@@ -1,10 +1,14 @@
 //! Language discovery, document rebinding and searchable selection.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("../../shell.zig").Shell;
-const v = @import("../components.zig");
+const actions = @import("../../actions.zig");
+const services_extensions = @import("../../services/extensions.zig");
+const services_language = @import("../../services/language.zig");
+const shell = @import("../../shell.zig");
 const view = @import("../../view.zig");
+const v = @import("../components.zig");
 const panel = @import("panel.zig");
+const Shell = shell.Shell;
 pub const Choice = struct { name: []const u8, path: []const u8 };
 const defaults = [_]Choice{
     .{ .name = "Plain Text", .path = "plain.txt" }, .{ .name = "Zig", .path = "file.zig" },
@@ -31,32 +35,32 @@ pub fn choices(self: *const Shell, a: std.mem.Allocator, query: []const u8) ![]C
 fn onChoice(self: *Shell, event: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const query = try @import("../../actions.zig").field(cx, self.fields.?.query, arena.allocator());
+    const query = try actions.field(cx, self.fields.?.query, arena.allocator());
     const items = try choices(self, arena.allocator(), query);
     if (index < items.len) try choose(self, event, cx, items[index]);
 }
 pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choice: Choice) !void {
-    const current = try @import("../../actions.zig").active(self);
+    const current = try actions.active(self);
     const path = try self.allocator.dupe(u8, choice.path);
     errdefer self.allocator.free(path);
     const name = try self.allocator.dupe(u8, choice.name);
     errdefer self.allocator.free(name);
-    try @import("../../services/language.zig").invalidateDocument(self, current.id);
+    try services_language.invalidateDocument(self, current.id);
     for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, current.id)) {
         if (tab.language_path) |old| self.allocator.free(old);
         if (tab.language_name) |old| self.allocator.free(old);
         tab.language_path = path;
         tab.language_name = name;
-        @import("../../services/extensions.zig").applyLanguage(self, &tab.editor, path);
+        services_extensions.applyLanguage(self, &tab.editor, path);
         tab.editor.syntax_cache.clear();
         tab.editor.grammar_revision = null;
         if (tab.secondary_state) |*state| {
-            @import("../../services/extensions.zig").applyLanguage(self, state, path);
+            services_extensions.applyLanguage(self, state, path);
             state.syntax_cache.clear();
             state.grammar_revision = null;
         }
         if (self.secondary) |*pane| if (std.meta.eql(pane.document, current.id)) {
-            @import("../../services/extensions.zig").applyLanguage(self, &pane.editor, path);
+            services_extensions.applyLanguage(self, &pane.editor, path);
             pane.editor.syntax_cache.clear();
             pane.editor.grammar_revision = null;
         };
@@ -78,7 +82,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
         const selected_name = self.languageName(id);
         const selected = if (selected_name) |name| std.mem.eql(u8, name, choice.name) else std.mem.eql(u8, std.fs.path.extension((try self.workspace.getConst(id)).path orelse ""), std.fs.path.extension(choice.path));
-        try options.append(b.allocator(), try b.button(.{ .label = choice.name, .children = &.{ try v.fileGlyph(self, b, choice.path, false, false, 14), try v.text(b, choice.name, c.text, 13), try b.div(.{ .flex_grow = 1 }, &.{}), try v.text(b, if (selected) "Current" else "", c.muted, 11) }, .on_click = b.onClickWith(onChoice, @as(u32, @intCast(i))), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 10, .right = 10 }, .background = if (i == @min(self.overlay_index, items.len -| 1)) c.selected else null, .hover_background = c.hover } }));
+        try options.append(b.allocator(), try b.fluent().button(.{ .label = choice.name, .children = &.{ try v.fileGlyph(self, b, choice.path, false, false, 14), try v.text(b, choice.name, c.text, 13), try b.fluent().div().grow().children(.{}).build(), try v.text(b, if (selected) "Current" else "", c.muted, 11) }, .on_click = b.onClickWith(onChoice, @as(u32, @intCast(i))), .style = .{ .direction = .row, .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .gap = 8, .padding = .{ .left = 10, .right = 10 }, .background = if (i == @min(self.overlay_index, items.len -| 1)) c.selected else null, .hover_background = c.hover } }).build());
     }
     if (options.items.len == 0) try options.append(b.allocator(), try v.text(b, "No matches", c.muted, 13));
     const visible = try panel.options(self, b, &rows, options.items, 30);
@@ -89,7 +93,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
     if (key != .up and key != .down and key != .enter) return false;
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
-    const query = try @import("../../actions.zig").field(cx, self.fields.?.query, arena.allocator());
+    const query = try actions.field(cx, self.fields.?.query, arena.allocator());
     const items = try choices(self, arena.allocator(), query);
     if (items.len > 0) {
         self.overlay_index = @min(self.overlay_index, items.len - 1);

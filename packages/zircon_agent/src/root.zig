@@ -1,10 +1,11 @@
 //! Agent conversations over native Codex app-server or Agent Client Protocol.
-pub const transport = @import("transport.zig");
+const conversation = @import("conversation.zig");
 pub const lines = @import("lines.zig");
-pub const Conversation = @import("conversation.zig").Conversation;
-pub const Protocol = @import("conversation.zig").Protocol;
-pub const field = @import("conversation.zig").field;
-pub const string = @import("conversation.zig").string;
+pub const transport = @import("transport.zig");
+pub const Conversation = conversation.Conversation;
+pub const Protocol = conversation.Protocol;
+pub const field = conversation.field;
+pub const string = conversation.string;
 
-pub const conversation_role = @import("conversation.zig").Role;
-pub const Model = @import("conversation.zig").Model;
+pub const conversation_role = conversation.Role;
+pub const Model = conversation.Model;

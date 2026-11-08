@@ -1,12 +1,13 @@
 //! Verifies that a child receives declared handles without leaking unrelated
 //! pipes created concurrently by another service. Run through tools/zig.
 const std = @import("std");
+const builtin = @import("builtin");
 extern "c" fn pipe(*[2]c_int) c_int;
 extern "c" fn close(c_int) c_int;
 extern "c" fn fcntl(c_int, c_int, ...) c_int;
 
 pub fn main(init: std.process.Init) !void {
-    if (@import("builtin").os.tag != .macos) return error.RequiresMacOS;
+    if (builtin.os.tag != .macos) return error.RequiresMacOS;
     var ends: [2]c_int = undefined;
     if (pipe(&ends) != 0) return error.PipeFailed;
     defer _ = close(ends[0]);

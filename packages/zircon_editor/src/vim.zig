@@ -3,8 +3,14 @@
 const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
-const Editor = @import("editor.zig").Editor;
-const Outcome = @import("editor.zig").Outcome;
+const commands = @import("commands.zig");
+const editor = @import("editor.zig");
+const navigation = @import("navigation.zig");
+const vim_geometry = @import("vim_geometry.zig");
+const vim_paste = @import("vim_paste.zig");
+const vim_repeat = @import("vim_repeat.zig");
+const Editor = editor.Editor;
+const Outcome = editor.Outcome;
 pub const Mode = enum { normal, insert, visual, visual_line, visual_block };
 const Operator = enum { delete, change, yank, indent, outdent };
 pub const Remap = struct { from: u8, to: u8 };
@@ -31,7 +37,7 @@ pub const State = struct {
     linewise: bool = false,
     blockwise: bool = false,
     bindings: Bindings = .{},
-    recording: @import("vim_repeat.zig").Recording = .{},
+    recording: vim_repeat.Recording = .{},
     search_backward: bool = false,
     pub fn deinit(self: *State, a: std.mem.Allocator) void {
         a.free(self.register);
@@ -89,7 +95,7 @@ fn select(self: *Editor, s: text.Snapshot, event: *ui.Event(ui.Input)) !void {
         const last = (try s.pointAt(@max(v.anchor, v.cursor))).line;
         self.selections.single(.{ .anchor = try s.lineStart(first), .head = (try s.lineRangeIncludingEnding(last)).end });
     } else if (v.mode == .visual_block) {
-        try @import("vim_geometry.zig").block(self, s, event);
+        try vim_geometry.block(self, s, event);
     } else {
         self.selections.single(.{ .anchor = @min(v.anchor, v.cursor), .head = try s.nextBoundary(@max(v.anchor, v.cursor)) });
     }
@@ -109,7 +115,7 @@ fn enterNormal(self: *Editor, document: *text.Document, from_insert: bool, event
         const range = try s.lineRange((try s.pointAt(v.cursor)).line);
         if (v.cursor > range.start) v.cursor = try s.previousBoundary(v.cursor);
     }
-    try @import("vim_repeat.zig").finish(self, s);
+    try vim_repeat.finish(self, s);
     self.preferred_x = null;
     v.mode = .normal;
     v.reset();
@@ -246,7 +252,7 @@ fn replay(self: *Editor, doc: *text.Document, event: *ui.Event(ui.Input)) !Outco
     doc.breakHistoryGroup();
     return result;
 }
-fn history(self: *Editor, doc: *text.Document, command: @import("commands.zig").Command, event: *ui.Event(ui.Input)) !Outcome {
+fn history(self: *Editor, doc: *text.Document, command: commands.Command, event: *ui.Event(ui.Input)) !Outcome {
     const result = try self.execute(doc, command);
     self.preferred_x = null;
     self.vim.cursor = self.primary().range().start;
@@ -323,7 +329,7 @@ fn motion(self: *Editor, s: text.Snapshot, key: u8, count: usize, event: *ui.Eve
                     row = line;
                 }
             }
-            return try @import("vim_geometry.zig").vertical(self, s, at, row, event);
+            return try vim_geometry.vertical(self, s, at, row, event);
         },
         '+', '-' => {
             const row = if (key == '+') @min(s.lineCount() - 1, point.line +| count) else point.line -| count;
@@ -618,7 +624,7 @@ fn token(self: *Editor, doc: *text.Document, key: u8, event: *ui.Event(ui.Input)
         },
         'n', 'N', '*', '#' => {
             if (key == '*' or key == '#') {
-                const range = try @import("navigation.zig").wordRange(s, old);
+                const range = try navigation.wordRange(s, old);
                 const query = try s.copy(self.allocator, range);
                 defer self.allocator.free(query);
                 v.search_backward = key == '#';
@@ -692,7 +698,7 @@ fn token(self: *Editor, doc: *text.Document, key: u8, event: *ui.Event(ui.Input)
         'p', 'P' => {
             if (v.blockwise and v.register.len > 0) {
                 const start = if (v.visual()) self.primary().range().start else old;
-                const result = try @import("vim_paste.zig").block(self, doc, key == 'P', count, event);
+                const result = try vim_paste.block(self, doc, key == 'P', count, event);
                 v.mode = .normal;
                 v.cursor = start;
                 v.reset();

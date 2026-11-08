@@ -2,10 +2,12 @@
 //! glyph atlas, shaped text cache and three leased instance buffers. Applications
 //! submit platform-neutral scenes and never handle Objective-C or GPU objects.
 const std = @import("std");
+const geometry = @import("../../layout/geometry.zig");
 const objc = @import("../../platform/macos/objc.zig");
 const text_mod = @import("../../text/shaping.zig");
+const text_typography = @import("../../text/typography.zig");
+const images_module = @import("../images.zig");
 const scene = @import("../scene.zig");
-const geometry = @import("../../layout/geometry.zig");
 const Allocator = std.mem.Allocator;
 const Id = objc.Id;
 const CFRef = text_mod.CFRef;
@@ -119,7 +121,7 @@ pub const Renderer = struct {
         try r.batches.ensureUnusedCapacity(r.allocator, 1);
         r.batches.appendAssumeCapacity(.{ .start = start, .count = count, .texture = objc.retain(texture) });
     }
-    fn imageTexture(r: *Renderer, view: @import("../images.zig").View) !Id {
+    fn imageTexture(r: *Renderer, view: images_module.View) !Id {
         r.image_clock +%= 1;
         if (r.images.getPtr(view.id)) |cached| {
             if (cached.width != view.width or cached.height != view.height) return error.InvalidScene;
@@ -313,7 +315,7 @@ pub fn snapshot(r: *Renderer, frame: scene.Frame, size: Size, path: []const u8) 
 pub fn stats(r: *Renderer) Stats {
     return rendererStats(r);
 }
-pub fn setTypography(r: *Renderer, value: @import("../../text/typography.zig").Typography) void {
+pub fn setTypography(r: *Renderer, value: text_typography.Typography) void {
     if (std.meta.eql(r.text.typography, value)) return;
     r.clearGlyphs();
     r.text.setTypography(value);

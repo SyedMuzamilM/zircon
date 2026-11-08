@@ -6,3 +6,5 @@ zig-pkg/
 artifacts/
 
 /tools/zed-extension-host/target/
+
+__pycache__/

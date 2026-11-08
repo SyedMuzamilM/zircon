@@ -1,4 +1,5 @@
 //! Semantic chrome colors resolved independently from editor token classes.
+const std_module = @import("std");
 const ui = @import("zircon_ui");
 pub const Palette = struct {
     document: ui.Color = ui.Color.rgb(0x282c33),
@@ -34,6 +35,6 @@ pub const Palette = struct {
 };
 
 pub fn isLight(id: []const u8, system_dark: bool) bool {
-    const std = @import("std");
+    const std = std_module;
     return std.mem.eql(u8, id, "zircon.light") or (std.mem.eql(u8, id, "zircon.system") and !system_dark);
 }

@@ -4,7 +4,7 @@ Zircon UI is our Zig UI framework in [`packages/zircon_ui`](../packages/zircon_u
 
 The package owns windows, entity lifetimes, input dispatch, layout, text measurement, and rendering. The Zircon editor in [`apps/zircon`](../apps/zircon/src/main.zig) is an application built with it. Editor documents, Git, language servers, extensions, and Markdown belong to separate packages.
 
-This reference describes the working tree on November 7, 2026. The package declares version `0.1.0` and requires Zig `0.17.1`. The [original specification](specification/framework-api-v0.1.md) records the intended design. Its examples are not the current API contract.
+This reference describes the working tree on November 8, 2026. The package declares version `0.1.0` and requires Zig `0.17.1`. The [original specification](specification/framework-api-v0.1.md) records the intended design. Its examples are not the current API contract.
 
 [Build an app with Zircon UI](zircon-ui-usage.md) contains setup, a complete counter, and commands to run it.
 
@@ -68,6 +68,8 @@ Children are destroyed before their owners. Destructors cannot reenter the app. 
 Implementation: [`entity/entity.zig`](../packages/zircon_ui/src/entity/entity.zig), [`entity/store.zig`](../packages/zircon_ui/src/entity/store.zig), and [`entity/scope.zig`](../packages/zircon_ui/src/entity/scope.zig). Examples: [entity tests](../packages/zircon_ui/tests/entity_tests.zig).
 
 ## Views and elements
+
+Application views use `const f = b.fluent();` and return chains ending in `.build()`. See [fluent composition](zircon-ui-composition.md) for styling, child entities, focus, capture, modal controls and ownership. The eager operations below are the underlying framework primitives and custom-element construction API.
 
 A view implements this contract:
 

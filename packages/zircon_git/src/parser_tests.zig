@@ -1,7 +1,8 @@
+//! Fixtures for numbered Git patches, status records, blame and bounded line diffs.
 const std = @import("std");
-const status = @import("status.zig");
 const diff = @import("diff.zig");
 const history = @import("history.zig");
+const status = @import("status.zig");
 const t = std.testing;
 test "history hunks retain separate file headings including spaces and deletions" {
     var patch = try diff.parse(t.allocator, "diff --git a/first file.zig b/first file.zig\n--- a/first file.zig\n+++ b/first file.zig\n@@ -1 +1 @@\n-old\n+new\n" ++

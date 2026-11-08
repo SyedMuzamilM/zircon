@@ -1,7 +1,8 @@
 //! Isolated macOS text tests. The GPU-free framework tests do not import these.
 const std = @import("std");
-const text = @import("native").text;
-const objc = @import("native").objc;
+const native = @import("native");
+const text = native.text;
+const objc = native.objc;
 const t = std.testing;
 extern "c" fn CTFontCopyPostScriptName(text.CTFontRef) text.CFStringRef;
 test "bundled regular faces resolve without a system fallback" {
@@ -12,7 +13,7 @@ test "bundled regular faces resolve without a system fallback" {
     inline for (.{ true, false }) |mono| {
         const name = CTFontCopyPostScriptName(try system.font(14, mono));
         defer text.CFRelease(name);
-        const actual = @import("native").objc.fromString(@constCast(name));
+        const actual = native.objc.fromString(@constCast(name));
         try t.expectEqualStrings(if (mono) "Lilex-Regular" else "IBMPlexSans", actual);
     }
 }

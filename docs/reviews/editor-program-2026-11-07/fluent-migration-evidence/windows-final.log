@@ -1,0 +1,18 @@
+Build Summary: 15/15 steps succeeded
+test-build success
++- compile test debug x86_64-windows-gnu success 11s MaxRSS:228M
++- compile test debug x86_64-windows-gnu success 11s MaxRSS:237M
++- compile test debug x86_64-windows-gnu success 3s MaxRSS:329M
++- compile test debug x86_64-windows-gnu success 13s MaxRSS:273M
++- compile test debug x86_64-windows-gnu success 4s MaxRSS:341M
++- compile test debug x86_64-windows-gnu success 10s MaxRSS:204M
++- compile test debug x86_64-windows-gnu success 11s MaxRSS:208M
++- compile test debug x86_64-windows-gnu success 8s MaxRSS:468M
+|  +- options cached
++- compile test debug x86_64-windows-gnu success 10s MaxRSS:204M
++- compile test debug x86_64-windows-gnu success 3s MaxRSS:371M
++- compile test debug x86_64-windows-gnu success 11s MaxRSS:200M
++- compile test debug x86_64-windows-gnu success 6s MaxRSS:395M
+|  +- options (reused)
++- compile test debug x86_64-windows-gnu success 19s MaxRSS:803M
+   +- options (reused)

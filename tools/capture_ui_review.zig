@@ -1,7 +1,7 @@
 //! Deterministic native review screens. Does not edit user preferences or files.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const Shell = zircon.Shell;
 const Ops = struct {
     fn command(self: *Shell, cx: *ui.Context(Shell), which: zircon.Command) !void {

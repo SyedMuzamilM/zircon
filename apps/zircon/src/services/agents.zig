@@ -1,11 +1,15 @@
 //! Native agent workspace. Provider CLIs retain their own credentials and tools.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const agent = @import("zircon_agent");
-const text = @import("zircon_text");
 const editor = @import("zircon_editor");
-const Shell = @import("../shell.zig").Shell;
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const zircon_workspace = @import("zircon_workspace");
+const actions = @import("../actions.zig");
+const shell = @import("../shell.zig");
 const md = @import("../views/markdown.zig");
+const git_module = @import("git.zig");
+const Shell = shell.Shell;
 pub const Provider = struct { name: []const u8, protocol: agent.Protocol, command: []const u8, args: []const []const u8 = &.{}, env: std.json.Value = .null, env_from: std.json.Value = .null, secret_env: std.json.Value = .null };
 const Config = struct { providers: []const Provider };
 pub const defaults =
@@ -272,8 +276,8 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         }
         if ((changed or pending) and session.conversation.state != .running and session.conversation.state != .permission) try persist(self, session);
         if ((old == .running or old == .permission) and session.conversation.state == .ready) {
-            if (self.git.repository) try @import("git.zig").start(self, cx, .refresh);
-            try @import("../actions.zig").refreshTree(self);
+            if (self.git.repository) try git_module.start(self, cx, .refresh);
+            try actions.refreshTree(self);
             for (self.tabs.items) |*tab| if (try self.workspace.reloadClean(tab.document)) {
                 var source = try self.workspace.snapshot(tab.document);
                 defer source.deinit();
@@ -299,7 +303,7 @@ fn persist(self: *Shell, session: *Session) !void {
     for (entries, session.conversation.entries.items) |*out, entry| out.* = .{ .role = entry.role, .text = entry.text.items };
     const bytes = try std.json.Stringify.valueAlloc(arena.allocator(), .{ .project = self.workspace.root_path, .provider = session.provider, .title = session.title, .session_id = session.conversation.session, .model = session.conversation.model, .entries = entries }, .{ .whitespace = .indent_2 });
     const temp = try std.mem.concat(arena.allocator(), u8, &.{ session.path.?, ".tmp" });
-    try std.Io.Dir.cwd().writeFile(self.workspace.io, .{ .sub_path = temp, .data = bytes, .flags = .{ .permissions = @import("zircon_workspace").permissions.file(0o600) } });
+    try std.Io.Dir.cwd().writeFile(self.workspace.io, .{ .sub_path = temp, .data = bytes, .flags = .{ .permissions = zircon_workspace.permissions.file(0o600) } });
     try std.Io.Dir.cwd().rename(temp, std.Io.Dir.cwd(), session.path.?, self.workspace.io);
     session.saved = session.conversation.revision;
 }
@@ -372,7 +376,7 @@ fn loadHistory(self: *Shell) !void {
         }
     };
     std.mem.sort([]u8, names.items, {}, Order.less);
-    const Saved = struct { project: []const u8, provider: []const u8, title: []const u8, session_id: []const u8, model: []const u8, entries: []const struct { role: @import("zircon_agent").conversation_role, text: []const u8 } };
+    const Saved = struct { project: []const u8, provider: []const u8, title: []const u8, session_id: []const u8, model: []const u8, entries: []const struct { role: agent.conversation_role, text: []const u8 } };
     for (names.items[0..@min(20, names.items.len)]) |name| {
         const bytes = dir.readFileAlloc(self.workspace.io, name, a, .limited(8 * 1024 * 1024)) catch continue;
         defer a.free(bytes);

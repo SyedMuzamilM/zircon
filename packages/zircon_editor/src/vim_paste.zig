@@ -2,8 +2,10 @@
 const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
-const Editor = @import("editor.zig").Editor;
-const Outcome = @import("editor.zig").Outcome;
+const editor = @import("editor.zig");
+const vim_geometry = @import("vim_geometry.zig");
+const Editor = editor.Editor;
+const Outcome = editor.Outcome;
 pub fn block(self: *Editor, doc: *text.Document, before: bool, count: usize, event: *ui.Event(ui.Input)) !Outcome {
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
@@ -35,7 +37,7 @@ pub fn block(self: *Editor, doc: *text.Document, before: bool, count: usize, eve
                 try bytes.appendNTimes(a, ' ', col);
             }
             for (0..count) |_| try bytes.appendSlice(a, part);
-            const at = if (row < s.lineCount()) try @import("vim_geometry.zig").vertical(self, s, base, row, event) else s.byteLen();
+            const at = if (row < s.lineCount()) try vim_geometry.vertical(self, s, base, row, event) else s.byteLen();
             if (edits.items.len > 0 and edits.items[edits.items.len - 1].range.start == at) {
                 const last = &edits.items[edits.items.len - 1];
                 last.text = try std.mem.concat(a, u8, &.{ last.text, bytes.items });

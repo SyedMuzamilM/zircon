@@ -1,10 +1,11 @@
 //! Custom elements keep all phase storage in their frame arena. Entity state is
 //! copied/read during render; custom phases never retain a borrowed entity.
 const std = @import("std");
+const graphics_painter = @import("../graphics/painter.zig");
 const g = @import("../layout/geometry.zig");
 const measure = @import("../layout/measure.zig");
-const Painter = @import("../graphics/painter.zig").Painter;
 const platform = @import("../platform/interface.zig");
+const Painter = graphics_painter.Painter;
 pub const LayoutCx = struct { allocator: std.mem.Allocator, available: g.Size, measurer: measure.Measurer };
 pub const PrepaintCx = struct {
     allocator: std.mem.Allocator,

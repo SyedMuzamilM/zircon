@@ -1,3 +1,5 @@
+//! Bounded newline framing for streamed agent protocol messages.
+//! Returned lines borrow decoder storage until the next feed or deinit.
 const std = @import("std");
 pub const Decoder = struct {
     allocator: std.mem.Allocator,

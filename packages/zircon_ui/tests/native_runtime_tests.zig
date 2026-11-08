@@ -1,7 +1,7 @@
 //! The public App path, driven by real AppKit input, not direct handler calls.
 const std = @import("std");
-const ui = @import("native").ui;
 const native = @import("native");
+const ui = native.ui;
 const objc = native.objc;
 const Counter = struct {
     count: u32 = 0,

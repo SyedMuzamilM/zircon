@@ -1,3 +1,5 @@
+//! Owned ACP/Codex conversation state above the process transport.
+//! Protocol events update transcripts, provider choices and permission requests.
 const std = @import("std");
 const wire = @import("transport.zig");
 pub const Protocol = enum { acp, codex };

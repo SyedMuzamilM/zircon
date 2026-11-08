@@ -58,3 +58,8 @@ The synthesis selects element chains because the user requires GPUI-style child 
 The implementation deviates from the element candidate by finalizing children during `child`, rather than retaining draft references until root build. This removes the proposed iterative graph finalizer and cycle-state protocol. It also uses the pure-style candidate's final validation, so an invalid intermediate scalar may be replaced before build. These choices preserve the agreed shared lifetime, error and parent-attachment contracts with fewer states.
 
 The native counter, common editor menu rows and dynamic project tree use the chain. [The public guide](../zircon-ui-composition.md) documents all current utility methods, copied-chain semantics, units, conditional updates, theme values and custom ownership. Its native counter excerpt is checked against compiled source. The existing raw constructors remain the eager primitives and allow incremental adoption; both APIs use the same nodes, styles, handlers and frame commit.
+
+
+## Application-wide adoption, November 8
+
+The user's requested default is now fluent composition throughout the application and reusable UI controls. Entity views, focus requests, capture handlers, modal/drag metadata and the remaining typed style values were added from actual caller requirements. Production composition migrated to chains; nested literal imports moved to module declarations. `check` guards both source conventions and tests the migration tools. The raw builder remains the framework implementation and the explicit custom-element ownership boundary.

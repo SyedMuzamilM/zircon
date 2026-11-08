@@ -350,4 +350,4 @@ Append a dated note when claiming or completing work. Use task IDs so ownership 
 
 - [ ] Native application menu bar and library menus share typed actions, shortcuts, enabled/checked state, focus, teardown and platform ownership. Integrate the editor's File, Edit, View, Window and Help actions where supported.
 - [ ] Application and window icons support owned image assets and correct native/distribution resources on macOS, Linux and Windows.
-- [ ] A documented GPUI-style fluent API provides typed Tailwind-like styling while retaining the eager frame lifetime and rollback guarantees. Verify against real editor views and compiling examples.
+- [x] A documented GPUI-style fluent API provides typed Tailwind-like styling while retaining the eager frame lifetime and rollback guarantees. Application views and controls use fluent composition; imports are kept in file headers. [Migration evidence](reviews/editor-program-2026-11-07/fluent-migration-evidence/README.md) records portable/native checks and compiling examples.

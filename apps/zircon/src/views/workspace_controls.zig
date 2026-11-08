@@ -1,8 +1,11 @@
 //! Workspace-popover dispatch. Each feature owns its rows and interactions.
 const ui = @import("zircon_ui");
-const Shell = @import("../shell.zig").Shell;
+const shell = @import("../shell.zig");
+const editor_options = @import("popovers/editor_options.zig");
 const language = @import("popovers/language_picker.zig");
+const language_servers = @import("popovers/language_servers.zig");
 const recent = @import("popovers/recent_projects.zig");
+const Shell = shell.Shell;
 pub const Choice = language.Choice;
 pub const choices = language.choices;
 pub const choose = language.choose;
@@ -27,8 +30,8 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     return switch (self.popup) {
         .language => language.render(self, b),
         .recent => recent.render(self, b),
-        .servers => @import("popovers/language_servers.zig").render(self, b),
-        .editor => @import("popovers/editor_options.zig").render(self, b),
+        .servers => language_servers.render(self, b),
+        .editor => editor_options.render(self, b),
         .none => unreachable,
     };
 }

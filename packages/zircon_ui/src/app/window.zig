@@ -1,27 +1,35 @@
 //! Stable window ownership and a single tree/layout/scene transaction. Both
 //! native and in-memory adapters drive this runtime and its committed handlers.
 const std = @import("std");
-const runtime = @import("app.zig");
+const zircon_options = @import("zircon_options");
+const animation_timeline = @import("../animation/timeline.zig");
 const entity = @import("../entity/entity.zig");
+const entity_scope = @import("../entity/scope.zig");
+const events = @import("../event/event.zig");
+const graphics_painter = @import("../graphics/painter.zig");
+const tree_paint = @import("../graphics/tree_paint.zig");
+const flex = @import("../layout/flex.zig");
+const g = @import("../layout/geometry.zig");
+const headless = @import("../platform/headless.zig");
+const platform = @import("../platform/interface.zig");
+const macos_window = @import("../platform/macos/window.zig");
+const adapter = @import("../ui/adapter.zig");
+const element = @import("../ui/element.zig");
 const tree = @import("../ui/tree.zig");
 const builder = @import("../ui/ui.zig");
-const adapter = @import("../ui/adapter.zig");
-const events = @import("../event/event.zig");
-const platform = @import("../platform/interface.zig");
-const g = @import("../layout/geometry.zig");
-const flex = @import("../layout/flex.zig");
-const Painter = @import("../graphics/painter.zig").Painter;
-const native_enabled = @import("zircon_options").native;
-const backend = if (native_enabled) @import("../platform/macos/window.zig") else @import("../platform/headless.zig");
+const runtime = @import("app.zig");
+const Painter = graphics_painter.Painter;
+const native_enabled = zircon_options.native;
+const backend = if (native_enabled) macos_window else headless;
 pub const Handle = struct { app_id: u32, slot: u32, generation: u32 = 1 };
 pub const Options = platform.WindowOptions;
 pub const Window = struct {
     parent: ?Handle = null,
     app: runtime.App,
     allocator: std.mem.Allocator,
-    scope: @import("../entity/scope.zig").Scope,
+    scope: entity_scope.Scope,
     root: entity.Token,
-    render_root: *const fn (*runtime.App, entity.Token, *tree.Frame) anyerror!@import("../ui/element.zig").Element,
+    render_root: *const fn (*runtime.App, entity.Token, *tree.Frame) anyerror!element.Element,
     frames: tree.Frames,
     surface: ?platform.Surface = null,
     dimensions: g.Size,
@@ -39,7 +47,7 @@ pub const Window = struct {
     pending_native_focus: ?bool = null,
     pending_native_blur: bool = false,
     frame_count: u64 = 0,
-    animations: @import("../animation/timeline.zig").Timeline,
+    animations: animation_timeline.Timeline,
     time: f64 = 0,
     animating: bool = false,
     deadline: ?f64 = null,
@@ -52,7 +60,7 @@ pub const Window = struct {
         const scope = try owner.createScope();
         errdefer owner.destroyScope(scope) catch {};
         const Render = struct {
-            fn call(target: *runtime.App, token: entity.Token, frame: *tree.Frame) !@import("../ui/element.zig").Element {
+            fn call(target: *runtime.App, token: entity.Token, frame: *tree.Frame) !element.Element {
                 return builder.render(target, entity.typed(T, token), frame);
             }
         };
@@ -112,7 +120,7 @@ pub const Window = struct {
         }
         staging.focused_node = if (w.active) next_focus else null;
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
-        try @import("../graphics/tree_paint.zig").paint(staging, &layout, &painter, metrics);
+        try tree_paint.paint(staging, &layout, &painter, metrics);
         staging.scene = try painter.finish(w.background);
         if (!try surface.present(staging.scene)) {
             staging.discard();

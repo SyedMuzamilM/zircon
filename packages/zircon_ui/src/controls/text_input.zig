@@ -3,14 +3,19 @@
 //! ranges. Selection positions are UTF-8 byte boundaries, never native UTF-16.
 const std = @import("std");
 const runtime = @import("../app/app.zig");
-const Ui = @import("../ui/ui.zig").Ui;
-const Element = @import("../ui/element.zig").Element;
-const custom = @import("../ui/custom.zig");
 const events = @import("../event/event.zig");
-const p = @import("../platform/interface.zig");
 const g = @import("../layout/geometry.zig");
-const TextStyle = @import("../text/style.zig").TextStyle;
+const measure = @import("../layout/measure.zig");
+const p = @import("../platform/interface.zig");
+const text_style = @import("../text/style.zig");
+const custom = @import("../ui/custom.zig");
+const element = @import("../ui/element.zig");
+const ui = @import("../ui/ui.zig");
 const icons = @import("icons.zig");
+const metrics_module = @import("metrics.zig");
+const Ui = ui.Ui;
+const Element = element.Element;
+const TextStyle = text_style.TextStyle;
 pub const TextInput = struct {
     pub const Appearance = struct {
         background: g.Color = g.Color.rgb(0x282c33),
@@ -48,7 +53,7 @@ pub const TextInput = struct {
     pub fn render(self: *const TextInput, b: *Ui) !Element {
         try (TextStyle{ .size = self.font_size }).validate();
         const field: Field = .{ .text = try b.allocator().dupe(u8, self.bytes.items), .placeholder = try b.allocator().dupe(u8, self.placeholder), .show_focus_border = self.show_focus_border, .selection = self.selection(), .cursor = self.cursor, .revision = self.revision, .marked = self.marked, .appearance = self.appearance, .height = self.height, .font_size = self.font_size, .leading_icon = self.leading_icon };
-        return b.listen(try b.key(.{ .string = "text-input" }, try b.custom(Field, field, .{ .height = .{ .px = self.height }, .overflow = .hidden })), .{ .focusable = true, .on_input = b.onInput(onInput) });
+        return b.fluent().adopt(try b.custom(Field, field, .{ .height = .{ .px = self.height }, .overflow = .hidden })).id(.{ .string = "text-input" }).listeners(.{ .focusable = true, .on_input = b.onInput(onInput) }).build();
     }
     pub fn setAppearance(self: *TextInput, cx: *runtime.Context(TextInput), appearance: Appearance) void {
         if (std.meta.eql(self.appearance, appearance)) return;
@@ -203,7 +208,7 @@ const Field = struct {
     height: f32,
     font_size: f32,
     leading_icon: ?icons.Name,
-    pub const LayoutState = @import("../layout/measure.zig").Measurer;
+    pub const LayoutState = measure.Measurer;
     pub const PrepaintState = g.Rect;
     pub fn requestLayout(self: *Field, cx: *custom.LayoutCx) !custom.LayoutResult(LayoutState) {
         return .{ .size = .{ .width = cx.available.width, .height = self.height }, .state = cx.measurer };
@@ -218,7 +223,7 @@ const Field = struct {
         return caret;
     }
     pub fn paint(self: *Field, cx: *custom.PaintCx, bounds: g.Rect, metrics: *LayoutState, caret: *g.Rect) !void {
-        const radius = @import("metrics.zig").control_radius;
+        const radius = metrics_module.control_radius;
         try cx.painter.fillRect(.{ .bounds = bounds, .color = if (cx.focused and self.show_focus_border) self.appearance.focus_border else self.appearance.border, .radius = radius });
         try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + 1, .y = bounds.y + 1, .width = @max(0, bounds.width - 2), .height = @max(0, bounds.height - 2) }, .color = self.appearance.background, .radius = @max(0, radius - 1) });
         try cx.painter.pushClip(bounds);

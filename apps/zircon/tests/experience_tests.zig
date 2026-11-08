@@ -1,8 +1,8 @@
 //! App-level journeys use temporary repositories, manifests and real documents.
 //! Native rendering has a separate suite; these tests share its event routing.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 test "completion identity includes server session and document URI" {
     var shell = try zircon.Shell.init(t.allocator, t.io, ".", null);

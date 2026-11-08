@@ -1,6 +1,11 @@
+//! PTY session ownership, ANSI grid updates and the terminal dock UI.
+//! Native process transport is currently macOS-specific; portable builds keep the model.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("shell.zig").Shell;
+const store = @import("settings/store.zig");
+const shell_module = @import("shell.zig");
+const components = @import("views/components.zig");
+const Shell = shell_module.Shell;
 const native = ui.testing.native != void;
 const Cell = struct { code: u21 = ' ', fg: ?u8 = null, bg: ?u8 = null };
 const Line = struct { cells: []Cell };
@@ -291,7 +296,7 @@ pub const Model = struct {
     active: usize = 0,
     next_id: u32 = 1,
     visible: bool = false,
-    dock: @import("settings/store.zig").TerminalDock = .bottom,
+    dock: store.TerminalDock = .bottom,
     ratio: f32 = 0.35,
     focus: u64 = 0,
     focused: bool = false,
@@ -486,14 +491,14 @@ const Canvas = struct {
     }
 };
 pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Element {
-    const v = @import("views/components.zig");
+    const v = components;
     const c = self.colors;
     var tabs: std.ArrayList(ui.Element) = .empty;
     for (self.terminal.sessions.items, 0..) |session, i| {
         const name = try std.fmt.allocPrint(b.allocator(), "Terminal {d}{s}", .{ session.id, if (session.exited) " · exited" else "" });
-        try tabs.append(b.allocator(), try b.row(.{ .height = .{ .px = 32 }, .background = if (i == self.terminal.active) c.document else c.tab_bar, .align_items = .center }, &.{ try b.button(.{ .label = name, .children = &.{ try v.icon(b, .terminal, c.muted, 13), try v.text(b, name, c.text, 12) }, .on_click = b.onClickWith(select, session.id), .style = .{ .direction = .row, .height = .{ .px = 32 }, .gap = 5, .padding = .{ .left = 10, .right = 6 }, .align_items = .center } }), try b.button(.{ .label = "Close terminal", .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(closeTab, session.id), .style = .{ .width = .{ .px = 22 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }) }));
+        try tabs.append(b.allocator(), try b.fluent().div().h(.{ .px = 32 }).background(if (i == self.terminal.active) c.document else c.tab_bar).items_center().flex().children(.{ b.fluent().button(.{ .label = name, .children = &.{ try v.icon(b, .terminal, c.muted, 13), try v.text(b, name, c.text, 12) }, .on_click = b.onClickWith(select, session.id), .style = .{ .direction = .row, .height = .{ .px = 32 }, .gap = 5, .padding = .{ .left = 10, .right = 6 }, .align_items = .center } }), b.fluent().button(.{ .label = "Close terminal", .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(closeTab, session.id), .style = .{ .width = .{ .px = 22 }, .height = .{ .px = 22 }, .align_items = .center, .justify_content = .center, .hover_background = c.hover } }) }).build());
     }
-    try tabs.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
+    try tabs.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
     try tabs.append(b.allocator(), try v.iconButton(b, c, .new_terminal, "New terminal", .plus, false));
     try tabs.append(b.allocator(), try v.iconButton(b, c, if (self.terminal.dock == .bottom) .terminal_right else .terminal_bottom, if (self.terminal.dock == .bottom) "Dock terminal right" else "Dock terminal bottom", .split, false));
     try tabs.append(b.allocator(), try v.iconButton(b, c, .toggle_terminal, "Hide terminal", .close, false));
@@ -506,8 +511,8 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
     @memset(cells, .{});
     for (session.lines.items[start..end], 0..) |line, row| @memcpy(cells[row * cols ..][0..cols], line.cells[0..cols]);
     const canvas = try b.custom(Canvas, .{ .cells = cells, .cols = cols, .rows = rows, .cursor_row = if (session.cursor_visible and session.row >= start and session.row < end) session.row - start else null, .cursor_col = @min(session.col, cols - 1), .background = c.document, .foreground = c.text }, .{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden });
-    const surface = try b.requestFocus(try b.listen(try b.key(.{ .string = "terminal-canvas" }, canvas), .{ .focusable = true, .on_input = b.onInput(input) }), self.terminal.focus);
-    return b.key(.{ .string = "terminal-panel" }, try b.column(.{ .width = .{ .px = width }, .height = .{ .px = height }, .flex_shrink = 0, .min_width = .{ .px = 0 }, .min_height = .{ .px = 0 }, .overflow = .hidden }, &.{ try b.row(.{ .height = .{ .px = 32 }, .flex_shrink = 0, .background = c.tab_bar, .overflow = .hidden }, tabs.items), surface }));
+    const surface = try b.fluent().adopt(canvas).id(.{ .string = "terminal-canvas" }).listeners(.{ .focusable = true, .on_input = b.onInput(input) }).request_focus(self.terminal.focus).build();
+    return b.fluent().div().w(.{ .px = width }).h(.{ .px = height }).shrink_0().min_w(.{ .px = 0 }).min_h(.{ .px = 0 }).overflow_hidden().flex_col().children(.{ b.fluent().div().h(.{ .px = 32 }).shrink_0().background(c.tab_bar).overflow_hidden().flex().children(tabs.items), surface }).id(.{ .string = "terminal-panel" }).build();
 }
 
 const Wake = struct {

@@ -1,7 +1,7 @@
 //! A native application driven by the subprocess crash-recovery check.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const Shell = zircon.Shell;
 const saved = "dirty 日本語 disk\n";
 const untitled = "unsaved 👩‍💻\n";

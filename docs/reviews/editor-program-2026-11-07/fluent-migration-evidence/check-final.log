@@ -1,0 +1,74 @@
+    Finished `release` profile [optimized] target(s) in 0.48s
+0 files need import hoisting
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.494s
+
+OK
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK
+0 files need migration
+2 UI example matches compiled source
+Build Summary: 48/48 steps succeeded; 383/387 tests passed (4 skipped)
+check success
++- run test 17 pass (17 total) 8s MaxRSS:7M
+|  +- compile test debug native success 10s MaxRSS:198M
++- run test 11 pass (11 total) 854ms MaxRSS:4M
+|  +- compile test debug native success 11s MaxRSS:209M
++- run test 11 pass (11 total) 393ms MaxRSS:3M
+|  +- compile test debug native success 5s MaxRSS:293M
++- run test 15 pass (15 total) 2s MaxRSS:16M
+|  +- compile test debug native success 14s MaxRSS:239M
++- run test 3 pass (3 total) 1s MaxRSS:15M
+|  +- compile test debug native success 11s MaxRSS:206M
++- run test 5 pass (5 total) 554ms MaxRSS:3M
+|  +- compile test debug native success 5s MaxRSS:272M
++- run test 8 pass (8 total) 412ms MaxRSS:3M
+|  +- compile test debug native success 9s MaxRSS:187M
++- contracts success
+|  +- compile test debug native success 391ms MaxRSS:102M
+|  |  +- options cached
+|  +- compile test debug native success 395ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 354ms MaxRSS:101M
+|  |  +- options (reused)
+|  +- compile test debug native success 394ms MaxRSS:103M
+|  |  +- options (reused)
+|  +- compile test debug native success 390ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 403ms MaxRSS:103M
+|  |  +- options (reused)
+|  +- compile test debug native success 399ms MaxRSS:102M
+|  |  +- options (reused)
+|  +- compile test debug native success 403ms MaxRSS:101M
+|     +- options (reused)
++- examples-check success
+|  +- compile exe counter-tree debug native success 5s MaxRSS:264M
+|  |  +- options (reused)
+|  +- run python3 success 39ms
+|  +- run python3 success 589ms
+|  +- run python3 success 52ms
+|  +- run python3 success 174ms
+|  +- run python3 success 2s
+|  +- compile exe zircon-counter debug native success 3s MaxRSS:359M
+|     +- options cached
++- run test 123 pass (123 total) 1s MaxRSS:29M
+|  +- compile test debug native success 8s MaxRSS:436M
+|     +- options (reused)
++- run test 17 pass (17 total) 11s MaxRSS:36M
+|  +- compile test debug native success 9s MaxRSS:184M
++- run test 25 pass (25 total) 1s MaxRSS:6M
+|  +- compile test debug native success 13s MaxRSS:221M
++- run test 5 pass (5 total) 392ms MaxRSS:3M
+|  +- compile test debug native success 5s MaxRSS:271M
++- run test 46 pass (46 total) 1s MaxRSS:13M
+|  +- compile test debug native success 7s MaxRSS:352M
+|     +- options (reused)
++- run test 97 pass, 4 skip (101 total) 24s MaxRSS:230M
+|  +- compile test debug native success 22s MaxRSS:632M
+|  |  +- options (reused)
+|  +- run cargo success 676ms
++- zig fmt --check success

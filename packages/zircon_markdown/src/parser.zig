@@ -1,8 +1,8 @@
 //! A bounded Markdown block parser. Document owns one arena and a copied source;
 //! all block/inline/table values remain valid until Document.deinit.
 const std = @import("std");
-const types = @import("types.zig");
 const inline_parser = @import("inline.zig");
+const types = @import("types.zig");
 const Line = struct { start: usize, end: usize, after: usize };
 pub const Document = struct {
     arena: std.heap.ArenaAllocator,

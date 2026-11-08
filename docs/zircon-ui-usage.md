@@ -97,22 +97,13 @@ const Counter = struct {
 	count: u32 = 0,
 
 	pub fn render(self: *const Counter, b: *ui.Ui) !ui.Element {
-		return b.column(.{
-			.padding = ui.Insets.all(24),
-			.gap = 12,
-			.background = ui.Color.rgb(0x171b24),
-		}, &.{
-			try b.textFmt("Count: {d}", .{self.count}),
-			try b.key(.{ .string = "increment" }, try b.button(.{
-				.label = "Increment",
-				.on_click = b.onClick(increment),
-				.style = .{
-					.height = .{ .px = 42 },
-					.background = ui.Color.rgb(0x395bd8),
-					.radius = 7,
-				},
-			})),
-		});
+		const f = b.fluent();
+		return f.column().p(6).gap_px(12).bg(.rgb(0x171b24))
+			.child(f.textFmt("Count: {d}", .{self.count}))
+			.child(f.button(.{ .label = "Increment" }).id(.named("increment"))
+				.h_px(42).rounded_px(7).bg(.rgb(0x395bd8))
+				.on_click(b.onClick(increment)))
+			.build();
 	}
 
 	fn increment(self: *Counter, _: *ui.Event(ui.Click), cx: *ui.Context(Counter)) void {
@@ -156,7 +147,7 @@ Use these existing examples for each next task:
 | Task | API and example |
 | --- | --- |
 | Create child state | `cx.createChild(T, value)`, as used by the [application bootstrap](../apps/zircon/src/actions.zig) |
-| Render another view | `b.view(entity)`, as used by [application views](../apps/zircon/src/view.zig) |
+| Render another view | `b.fluent().view(entity)`, as used by [application views](../apps/zircon/src/view.zig) |
 | Read another model during rendering | `b.watch(entity, reader, args)`, covered by [reactivity tests](../packages/zircon_ui/tests/reactive_tests.zig) |
 | Edit a single line | Create a `controls.TextInput` entity and compose it with `b.view`, as covered by [control tests](../packages/zircon_ui/tests/control_tests.zig) |
 | Copy input text out | `app.read(field, ui.controls.TextInput.copy, .{ allocator, &owned_bytes })`. Free `owned_bytes` with that allocator |

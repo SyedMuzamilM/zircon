@@ -1,12 +1,13 @@
 //! Drives actual AppKit input and verifies rendered editor state and disk bytes.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
+const journeys = @import("journeys.zig");
 const t = std.testing;
 const native = ui.testing.native;
 const objc = native.objc;
 test {
-    _ = @import("journeys.zig");
+    _ = journeys;
 }
 fn bytes(self: *const zircon.Shell, a: std.mem.Allocator, out: *[]u8) !void {
     const tab = self.tabs.items[self.active];

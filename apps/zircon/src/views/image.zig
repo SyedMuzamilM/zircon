@@ -2,6 +2,8 @@
 //! retains the immutable decoded pixels until the frame is retired.
 const std = @import("std");
 const ui = @import("zircon_ui");
+const shell = @import("../shell.zig");
+const components = @import("components.zig");
 pub const Image = ui.graphics.images.Image;
 pub const Asset = struct {
     path: []u8,
@@ -54,26 +56,21 @@ fn zoomElement(b: *ui.Ui, source: Image, zoom: f32, scroll: ui.Point) !ui.Elemen
     errdefer owned.deinit();
     return b.custom(Canvas, .{ .image = owned, .zoom = zoom, .scroll = scroll }, .{ .flex_grow = 1, .min_height = .{ .px = 0 }, .overflow = .hidden });
 }
-pub fn render(self: *const @import("../shell.zig").Shell, b: *ui.Ui) !ui.Element {
+pub fn render(self: *const shell.Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
     const asset = self.image orelse return error.NoImage;
     const size = asset.image.size();
-    const v = @import("components.zig");
+    const v = components;
     const canvas = try zoomElement(b, asset.image, self.image_zoom, self.image_scroll);
     var path: []const u8 = asset.path;
     if (std.mem.startsWith(u8, path, self.workspace.root_path)) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
-    return b.column(.{ .flex_grow = 1, .min_height = .{ .px = 0 }, .background = c.document, .overflow = .hidden }, &.{
-        try b.row(.{ .height = .{ .px = v.metrics.file_header }, .flex_shrink = 0, .gap = 8, .align_items = .center, .padding = .{ .left = 13, .right = 7 }, .background = c.document }, &.{
-            try b.styled(try v.text(b, path, c.muted, 12), .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }),
-            try v.iconButton(b, c, .image_zoom_out, "Zoom image out", .minus, false),
-            try v.actionButton(b, c, .image_zoom_reset, try std.fmt.allocPrint(b.allocator(), "{d:.0}%", .{self.image_zoom * 100}), false),
-            try v.iconButton(b, c, .image_zoom_in, "Zoom image in", .plus, false),
-        }),
-        try b.listen(try b.key(.{ .string = "image-canvas" }, canvas), .{ .on_input = b.onInput(onInput) }),
-        try b.row(.{ .height = .{ .px = 22 }, .flex_shrink = 0, .padding = .{ .left = 13 }, .align_items = .center }, &.{try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0} × {d:.0} px · {s}", .{ size.width, size.height, std.fs.path.extension(asset.path) }), c.muted, 11)}),
-    });
+    return b.fluent().div().grow().min_h(.{ .px = 0 }).background(c.document).overflow_hidden().flex_col().children(&.{
+        try b.fluent().div().h(.{ .px = v.metrics.file_header }).shrink_0().gap_px(8).items_center().padding(.{ .left = 13, .right = 7 }).background(c.document).flex().children(.{ b.fluent().adopt(try v.text(b, path, c.muted, 12)).style(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden }), v.iconButton(b, c, .image_zoom_out, "Zoom image out", .minus, false), v.actionButton(b, c, .image_zoom_reset, try std.fmt.allocPrint(b.allocator(), "{d:.0}%", .{self.image_zoom * 100}), false), v.iconButton(b, c, .image_zoom_in, "Zoom image in", .plus, false) }).build(),
+        try b.fluent().adopt(canvas).id(.{ .string = "image-canvas" }).listeners(.{ .on_input = b.onInput(onInput) }).build(),
+        try b.fluent().div().h(.{ .px = 22 }).shrink_0().padding(.{ .left = 13 }).items_center().flex().children(.{v.text(b, try std.fmt.allocPrint(b.allocator(), "{d:.0} × {d:.0} px · {s}", .{ size.width, size.height, std.fs.path.extension(asset.path) }), c.muted, 11)}).build(),
+    }).build();
 }
-fn onInput(self: *@import("../shell.zig").Shell, event: *ui.Event(ui.Input), cx: *ui.Context(@import("../shell.zig").Shell)) void {
+fn onInput(self: *shell.Shell, event: *ui.Event(ui.Input), cx: *ui.Context(shell.Shell)) void {
     if (event.data != .scroll or self.image == null) return;
     const size = self.image.?.image.size();
     self.image_scroll.x = std.math.clamp(self.image_scroll.x + event.data.scroll.x, 0, @max(0, size.width * self.image_zoom - event.bounds.width));

@@ -1,13 +1,17 @@
 //! Editor custom element. It owns an immutable document root, copies visible
 //! lines into frame storage, and publishes a bounded surrounding-text excerpt.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const annotations = @import("annotations.zig");
+const blame_view = @import("blame_view.zig");
+const display = @import("display.zig");
 const editor = @import("editor.zig");
+const profile_module = @import("profile.zig");
 const selection = @import("selections.zig");
 const syntax = @import("syntax.zig");
-const display = @import("display.zig");
-const annotations = @import("annotations.zig");
+const theme_module = @import("theme.zig");
+const wrap = @import("wrap.zig");
 const line_limit = 64 * 1024;
 const number_right_inset: f32 = 36;
 pub fn gutterWidth(lines: usize, font_size: f32) f32 {
@@ -45,21 +49,21 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
     const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
     return b.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
-const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22, segment: ?@import("wrap.zig").Row = null };
+const RenderLine = struct { row: usize, range: text.Range, original: []const u8, display: display.Line, spans: []const syntax.Span, y: f32, oversized: bool = false, height: f32 = 22, segment: ?wrap.Row = null };
 const Prepared = struct { lines: []RenderLine, caret: ui.Rect, gutter: f32, content_width: f32 };
 const Canvas = struct {
     snapshot: text.Snapshot,
     grammar_spans: ?[]const syntax.Span,
-    wrap_cache: *@import("wrap.zig").Cache,
+    wrap_cache: *wrap.Cache,
     soft_wrap: bool,
     wrap_enabled: bool,
     block_cursor: bool,
     cursor: usize,
-    profile: ?@import("profile.zig").Profile,
+    profile: ?profile_module.Profile,
     blame: ?annotations.Blame,
     git_changes: []const annotations.GitChange,
     blame_message_scroll: f32,
-    theme: @import("theme.zig").Theme,
+    theme: theme_module.Theme,
     show_line_numbers: bool,
     gutter_hovered: bool,
     indent_guides: bool,
@@ -100,7 +104,7 @@ const Canvas = struct {
         var content_width: f32 = 0;
         for (lines, 0..) |*line, i| {
             const visual_row = visible.start + i;
-            const segment: ?@import("wrap.zig").Row = if (self.soft_wrap) self.wrap_cache.rows.items[visual_row] else null;
+            const segment: ?wrap.Row = if (self.soft_wrap) self.wrap_cache.rows.items[visual_row] else null;
             const row = if (segment) |part| part.line else visual_row;
             const range = try self.snapshot.lineRange(row);
             const oversized = range.end - range.start > line_limit;
@@ -108,7 +112,7 @@ const Canvas = struct {
             const expanded = try display.Line.build(cx.allocator, original, self.tab_width);
             content_width = @max(content_width, (try metrics.text(metrics.context, expanded.bytes, style)).width);
             const initial = if (row >= self.state_start and row - self.state_start < self.states.len) self.states[row - self.state_start] else null;
-            const lexed = if (self.profile != null and !oversized) try @import("profile.zig").lex(cx.allocator, original, self.profile.?, initial orelse .{}) else try syntax.lex(cx.allocator, original, if (initial != null and !oversized) self.language else .plain, initial orelse .{});
+            const lexed = if (self.profile != null and !oversized) try profile_module.lex(cx.allocator, original, self.profile.?, initial orelse .{}) else try syntax.lex(cx.allocator, original, if (initial != null and !oversized) self.language else .plain, initial orelse .{});
             var spans = lexed.spans;
             if (!oversized) if (self.grammar_spans) |external| {
                 var classified: std.ArrayList(syntax.Span) = .empty;
@@ -285,8 +289,8 @@ const Canvas = struct {
                 .deleted => self.theme.git_deleted,
             } });
         }
-        if (self.blame) |blame| if (try @import("blame_view.zig").layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .source_y = if (self.soft_wrap) self.wrap_cache.rowY(self.wrap_cache.starts.items[blame.line + 1] - 1, self.line_height, self.git_changes) else null, .source_x = if (self.soft_wrap) self.wrap_cache.rows.items[self.wrap_cache.starts.items[blame.line + 1] - 1].x else 0, .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
-            try @import("blame_view.zig").paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
+        if (self.blame) |blame| if (try blame_view.layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .source_y = if (self.soft_wrap) self.wrap_cache.rowY(self.wrap_cache.starts.items[blame.line + 1] - 1, self.line_height, self.git_changes) else null, .source_x = if (self.soft_wrap) self.wrap_cache.rows.items[self.wrap_cache.starts.items[blame.line + 1] - 1].x else 0, .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
+            try blame_view.paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
         };
         const available = @max(1, bounds.width - prepared.gutter - 12);
         const content_width = @max(prepared.content_width, self.horizontal + available);
@@ -345,7 +349,7 @@ const Canvas = struct {
         }
     }
 };
-fn drawRun(cx: *ui.PaintCx, line: RenderLine, theme: @import("theme.zig").Theme, metrics: ui.layout.Measurer, style: ui.TextStyle, x: f32, start: usize, end: usize, kind: syntax.Kind) !void {
+fn drawRun(cx: *ui.PaintCx, line: RenderLine, theme: theme_module.Theme, metrics: ui.layout.Measurer, style: ui.TextStyle, x: f32, start: usize, end: usize, kind: syntax.Kind) !void {
     const begin = line.display.displayOffset(start);
     const finish = line.display.displayOffset(end);
     if (begin == finish) return;

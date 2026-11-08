@@ -1,9 +1,9 @@
 //! One owner publishes immutable contribution generations. Readers retain a
 //! Snapshot; failed loading/persistence never replaces the effective generation.
 const std = @import("std");
-const m = @import("model.zig");
-const manifest = @import("manifest.zig");
 const files = @import("filesystem.zig");
+const manifest = @import("manifest.zig");
+const m = @import("model.zig");
 const ActivationEntry = struct { id: []const u8, enabled: bool };
 const Activation = struct { schema_version: u32, extensions: []const ActivationEntry = &.{} };
 const State = struct {

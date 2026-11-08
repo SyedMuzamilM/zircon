@@ -1,0 +1,31 @@
+    Finished `release` profile [optimized] target(s) in 0.39s
+test-native-fresh
++- run test
+   +- run test 85 pass, 1 fail (86 total)
+error: 'grammar_retry_tests.test.transient grammar failure retries the same revision and clears its error' failed:
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:52:67: 0x100cfd143 in wait__func_4364 (test)
+               if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.GrammarRetryTimeout;
+                                                                         ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:122:9: 0x100cff557 in journey (test)
+               try wait(&app, owner, &now, Ops.failedOnce);
+               ^
+       /Users/syedmuzamilm/work/expirements/zigpui/apps/zircon/tests/grammar_retry_tests.zig:136:5: 0x100d02f67 in test.transient grammar failure retries the same revision and clears its error (test)
+           try journey("once", false);
+           ^
+failed command: ./.zig-cache/o/3e496c412fa26b04afe97901f0a6b24e/test --cache-dir=./.zig-cache --seed=0xf77fc634 --listen=-
+
+Build Summary: 9/12 steps succeeded (1 failed); 121/122 tests passed (1 failed)
+test-native-fresh transitive failure
++- run test transitive failure
+   +- compile test debug native cached 85ms MaxRSS:32M
+   |  +- options cached
+   +- run test 85 pass, 1 fail (86 total)
+      +- compile test debug native cached 85ms MaxRSS:32M
+      |  +- options (reused)
+      +- run cargo success 463ms
+      +- run test 27 pass (27 total) 1s MaxRSS:117M
+         +- compile test debug native cached 81ms MaxRSS:32M
+         |  +- options cached
+         +- run test 9 pass (9 total) 333ms MaxRSS:110M
+            +- compile test debug native cached 81ms MaxRSS:32M
+               +- options (reused)

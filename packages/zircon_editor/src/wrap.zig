@@ -2,8 +2,9 @@
 const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
-const display = @import("display.zig");
 const annotations = @import("annotations.zig");
+const display = @import("display.zig");
+const folding_module = @import("folding.zig");
 pub const Mode = enum { none, editor_width };
 // Subtract x from shaped source positions to get row-local positions. For a
 // continuation it includes the repeated indentation, without inserting bytes.
@@ -16,7 +17,7 @@ pub const Cache = struct {
     width: f32 = 0,
     font_size: f32 = 0,
     tab_width: usize = 0,
-    folding: @import("folding.zig").State = .{},
+    folding: folding_module.State = .{},
     rows: std.ArrayList(Row) = .empty,
     starts: std.ArrayList(usize) = .empty,
     builds: usize = 0,

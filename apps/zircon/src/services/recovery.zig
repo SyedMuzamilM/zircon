@@ -1,12 +1,15 @@
 //! One checkpoint writer owns the session store at a time. Snapshots are
 //! retained and released on the UI thread; workers only read their contents.
 const std = @import("std");
+const editing = @import("zircon_editor");
+const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
-const text = @import("zircon_text");
-const editing = @import("zircon_editor");
-const storage = ws.recovery;
+const actions = @import("../actions.zig");
+const panes = @import("../panes.zig");
 const shell = @import("../shell.zig");
+const handoff = @import("handoff.zig");
+const storage = ws.recovery;
 const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 const debounce = 0.25;
@@ -65,7 +68,7 @@ const Result = struct {
         self.store.deinit();
     }
 };
-const Box = @import("handoff.zig").Handoff(Result);
+const Box = handoff.Handoff(Result);
 const Job = struct {
     pub const Output = *Box;
     box: *Box,
@@ -163,11 +166,11 @@ fn restore(self: *Shell, model: *Model, loaded: *storage.Loaded) !void {
     }
     if (loaded.index.secondary_active) |active| for (model.documents.items, 0..) |doc, index| {
         if (doc.id == active) {
-            try @import("../panes.zig").selectSecondary(&restored, index);
+            try panes.selectSecondary(&restored, index);
             break;
         }
     };
-    @import("../panes.zig").normalizePrimary(&restored);
+    panes.normalizePrimary(&restored);
     restored.active_pane = if (loaded.index.focus_secondary and restored.secondary != null) .secondary else .primary;
     std.mem.swap(ws.Workspace, &self.workspace, &restored.workspace);
     std.mem.swap(std.ArrayList(shell.Tab), &self.tabs, &restored.tabs);
@@ -426,7 +429,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), output: anyerror!*Box) !void {
                 model.due = try cx.app.currentTime();
                 try self.reportError(error.DocumentChangedWhileClosing);
             } else for (self.tabs.items, 0..) |tab, index| if (std.meta.eql(tab.document, target.id)) {
-                try @import("../actions.zig").finishCloseTab(self, index);
+                try actions.finishCloseTab(self, index);
                 for (model.documents.items, 0..) |doc, tracked_index| if (std.meta.eql(doc.runtime, target.id)) {
                     _ = model.documents.orderedRemove(tracked_index);
                     break;

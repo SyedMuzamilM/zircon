@@ -1,8 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const workspace = @import("zircon_workspace");
+const document_change_tests = @import("document_change_tests.zig");
+const recovery = @import("recovery.zig");
 const t = std.testing;
 test {
-    _ = @import("document_change_tests.zig");
+    _ = document_change_tests;
 }
 fn rootPath(temp: *t.TmpDir, a: std.mem.Allocator) ![]u8 {
     var buffer: [4096]u8 = undefined;
@@ -59,7 +62,7 @@ test "atomic save preserves permissions and undo to saved content clears dirty s
     defer t.allocator.free(bytes);
     try t.expectEqualStrings("saved!", bytes);
     const stat = try temp.dir.statFile(t.io, "source.txt", .{});
-    if (comptime @import("builtin").os.tag != .windows) try t.expectEqual(permissions.toMode() & 0o7777, stat.permissions.toMode() & 0o7777);
+    if (comptime builtin.os.tag != .windows) try t.expectEqual(permissions.toMode() & 0o7777, stat.permissions.toMode() & 0o7777);
     try append(&project, id, "new");
     try t.expect(try project.dirty(id));
     try t.expect(try (try project.get(id)).doc.undo());
@@ -241,5 +244,5 @@ test "binary edit cannot replace a file that the workspace would refuse to reope
 }
 
 test {
-    _ = @import("recovery.zig");
+    _ = recovery;
 }

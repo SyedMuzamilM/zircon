@@ -1,28 +1,37 @@
 //! A frame owns nodes, strings, child lists, handlers and cleanup hooks.
 //! Two frames allow failed staging work to leave the committed tree untouched.
 const std = @import("std");
+const animation_timeline = @import("../animation/timeline.zig");
+const app_app = @import("../app/app.zig");
+const entity_entity = @import("../entity/entity.zig");
+const graphics_scene = @import("../graphics/scene.zig");
+const geometry = @import("../layout/geometry.zig");
+const interface = @import("../platform/interface.zig");
+const adapter = @import("adapter.zig");
+const custom_module = @import("custom.zig");
 const elements = @import("element.zig");
-const Style = @import("style.zig").Style;
-const ClickHandler = @import("adapter.zig").ClickHandler;
+const style_module = @import("style.zig");
+const Style = style_module.Style;
+const ClickHandler = adapter.ClickHandler;
 var next_epoch = std.atomic.Value(u64).init(1);
 pub const Node = struct {
     parent: ?u32 = null,
     children: []const u32 = &.{},
     style: Style = .{},
     key: ?elements.Key = null,
-    on_input: ?@import("adapter.zig").InputHandler = null,
-    on_capture: ?@import("adapter.zig").InputHandler = null,
+    on_input: ?adapter.InputHandler = null,
+    on_capture: ?adapter.InputHandler = null,
     tooltip: ?[]const u8 = null,
-    tooltip_colors: ?[3]@import("../layout/geometry.zig").Color = null,
+    tooltip_colors: ?[3]geometry.Color = null,
     focusable: bool = false,
     autofocus: bool = false,
     focus_request: u64 = 0,
     modal: bool = false,
     drag_region: bool = false,
-    kind: union(enum) { container, custom: @import("custom.zig").Custom, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
+    kind: union(enum) { container, custom: custom_module.Custom, text: []const u8, button: struct { label: []const u8, on_click: ?ClickHandler } },
 };
 pub const Cleanup = struct { object: *anyopaque, destroy: *const fn (*anyopaque) void };
-pub const Dependency = struct { entity: @import("../entity/entity.zig").Token, version: u64 };
+pub const Dependency = struct { entity: entity_entity.Token, version: u64 };
 pub const Frame = struct {
     /// Budget for an arena after retirement. Active frames may exceed it; a
     /// temporary large text/selection frame must not permanently grow the pool.
@@ -31,18 +40,18 @@ pub const Frame = struct {
     nodes: std.ArrayList(Node) = .empty,
     cleanups: std.ArrayList(Cleanup) = .empty,
     dependencies: std.ArrayList(Dependency) = .empty,
-    app: ?*@import("../app/app.zig").App = null,
+    app: ?*app_app.App = null,
     epoch: u64,
     root: ?elements.Element = null,
     retiring: bool = false,
     fluent_error: ?anyerror = null,
-    bounds: []const @import("../layout/geometry.zig").Rect = &.{},
-    scene: @import("../graphics/scene.zig").Frame = .{ .items = &.{}, .background = .black },
-    timeline: ?*@import("../animation/timeline.zig").Timeline = null,
+    bounds: []const geometry.Rect = &.{},
+    scene: graphics_scene.Frame = .{ .items = &.{}, .background = .black },
+    timeline: ?*animation_timeline.Timeline = null,
     time: f64 = 0,
     next_deadline: ?f64 = null,
-    viewport: @import("../layout/geometry.zig").Size = .{ .width = 0, .height = 0 },
-    text_input: ?@import("../platform/interface.zig").TextSnapshot = null,
+    viewport: geometry.Size = .{ .width = 0, .height = 0 },
+    text_input: ?interface.TextSnapshot = null,
     focused_node: ?u32 = null,
     hovered_node: ?u32 = null,
     hover_started: f64 = 0,
@@ -113,7 +122,7 @@ pub const Frame = struct {
         if (frame.retiring) return error.InvalidFrame;
         try frame.cleanups.append(frame.allocator(), entry);
     }
-    pub fn watch(frame: *Frame, token: @import("../entity/entity.zig").Token, version: u64) !void {
+    pub fn watch(frame: *Frame, token: entity_entity.Token, version: u64) !void {
         for (frame.dependencies.items) |*dependency| if (std.meta.eql(dependency.entity, token)) {
             dependency.version = version;
             return;

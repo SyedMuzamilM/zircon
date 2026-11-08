@@ -1,8 +1,8 @@
 //! Frame-owned source text shared by diff and search excerpts. Measurements,
 //! highlights and glyph drawing use the same font and expanded tab positions.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const editor = @import("zircon_editor");
+const ui = @import("zircon_ui");
 pub const Highlight = struct { start: usize, end: usize, color: ui.Color };
 pub fn element(b: *ui.Ui, source: []const u8, path: []const u8, font: f32, line_height: f32, theme: editor.Theme, ranges: []const Highlight) !ui.Element {
     const safe = if (source.len > 65536) "[Line exceeds the display limit]" else if (!std.unicode.utf8ValidateSlice(source)) "[Non-UTF-8 source line]" else source;

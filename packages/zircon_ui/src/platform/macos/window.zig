@@ -2,14 +2,17 @@
 //! The heap-stable adapter is referenced by a private NSView ivar. Callbacks
 //! borrow native strings only while delivering the synchronous framework event.
 const std = @import("std");
-const objc = @import("objc.zig");
-const platform = @import("../interface.zig");
-const geometry = @import("../../layout/geometry.zig");
-const scene = @import("../../graphics/scene.zig");
-const measurement = @import("../../layout/measure.zig");
-const TextStyle = @import("../../text/style.zig").TextStyle;
-const shaping = @import("../../text/shaping.zig");
 const metal = @import("../../graphics/backends/metal.zig");
+const scene = @import("../../graphics/scene.zig");
+const geometry = @import("../../layout/geometry.zig");
+const measurement = @import("../../layout/measure.zig");
+const shaping = @import("../../text/shaping.zig");
+const text_style = @import("../../text/style.zig");
+const text_typography = @import("../../text/typography.zig");
+const platform = @import("../interface.zig");
+const icon_module = @import("icon.zig");
+const objc = @import("objc.zig");
+const TextStyle = text_style.TextStyle;
 const Id = objc.Id;
 const Sel = *opaque {};
 const Range = extern struct { location: usize, length: usize };
@@ -133,7 +136,7 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     const pool = objc.Pool.init();
     defer pool.deinit();
     const app = objc.send(Id, objc.class("NSApplication"), "sharedApplication", .{}) orelse return error.AppKitUnavailable;
-    const icon = if (options.icon) |view| try @import("icon.zig").create(view) else null;
+    const icon = if (options.icon) |view| try icon_module.create(view) else null;
     errdefer objc.release(icon);
     application.store(@intFromPtr(app), .release);
     _ = objc.send(bool, app, "setActivationPolicy:", .{@as(isize, 0)});
@@ -312,7 +315,7 @@ fn present(raw: *anyopaque, frame: scene.Frame) !bool {
 fn measurer(raw: *anyopaque) measurement.Measurer {
     return .{ .generation = state(raw).font_generation, .context = raw, .text = measureText, .caret_fn = caret, .index_fn = index };
 }
-fn setTypography(raw: *anyopaque, value: @import("../../text/typography.zig").Typography) void {
+fn setTypography(raw: *anyopaque, value: text_typography.Typography) void {
     state(raw).font_generation +%= 1;
     metal.setTypography(state(raw).renderer, value);
 }
@@ -708,6 +711,6 @@ fn didBlur(object: Id, _: Sel, _: Id) callconv(.c) void {
     s.emit(.{ .focus = false });
 }
 
-fn fontFamilies(_: *anyopaque, a: std.mem.Allocator) ![]@import("../../text/typography.zig").FontName {
+fn fontFamilies(_: *anyopaque, a: std.mem.Allocator) ![]text_typography.FontName {
     return shaping.fontFamilies(a);
 }

@@ -1,10 +1,13 @@
 //! Private platform seam. Native callbacks borrow payload bytes only until the
 //! callback returns; framework dispatch never retains them. No OS types escape.
 const std = @import("std");
-const g = @import("../layout/geometry.zig");
+const images = @import("../graphics/images.zig");
 const scene = @import("../graphics/scene.zig");
+const g = @import("../layout/geometry.zig");
 const measure = @import("../layout/measure.zig");
-pub const Cursor = @import("../ui/style.zig").Cursor;
+const text_typography = @import("../text/typography.zig");
+const style = @import("../ui/style.zig");
+pub const Cursor = style.Cursor;
 pub const WindowOptions = struct {
     title: []const u8 = "Zircon",
     width: f32 = 1080,
@@ -12,7 +15,7 @@ pub const WindowOptions = struct {
     visible: bool = true,
     /// Borrowed only during window creation. macOS uses an application-wide
     /// Dock icon; other desktop adapters use their native window icon.
-    icon: ?@import("../graphics/images.zig").View = null,
+    icon: ?images.View = null,
     chrome: enum { system, integrated } = .system,
     background: g.Color = .{ .r = 0.07, .g = 0.08, .b = 0.1 },
 };
@@ -95,7 +98,7 @@ pub const Surface = struct {
     context: *anyopaque,
     ops: *const Ops,
     pub const Ops = struct {
-        font_families: ?*const fn (*anyopaque, std.mem.Allocator) anyerror![]@import("../text/typography.zig").FontName = null,
+        font_families: ?*const fn (*anyopaque, std.mem.Allocator) anyerror![]text_typography.FontName = null,
         deinit: *const fn (*anyopaque) void,
         size: *const fn (*anyopaque) g.Size,
         present: *const fn (*anyopaque, scene.Frame) anyerror!bool,
@@ -108,7 +111,7 @@ pub const Surface = struct {
         accept_close: ?*const fn (*anyopaque) void = null,
         set_parent: ?*const fn (*anyopaque, ?Surface) void = null,
         raise: ?*const fn (*anyopaque) void = null,
-        typography: ?*const fn (*anyopaque, @import("../text/typography.zig").Typography) void = null,
+        typography: ?*const fn (*anyopaque, text_typography.Typography) void = null,
         system_dark: ?*const fn (*anyopaque) bool = null,
         set_appearance: ?*const fn (*anyopaque, ?bool) void = null,
         choose_path: ?*const fn (*anyopaque, std.mem.Allocator, PathKind) anyerror!?[]u8 = null,
@@ -134,11 +137,11 @@ pub const Surface = struct {
     pub fn measurer(s: Surface) measure.Measurer {
         return s.ops.measurer(s.context);
     }
-    pub fn fontFamilies(s: Surface, a: std.mem.Allocator) ![]@import("../text/typography.zig").FontName {
+    pub fn fontFamilies(s: Surface, a: std.mem.Allocator) ![]text_typography.FontName {
         if (s.ops.font_families) |function| return function(s.context, a);
         return &.{};
     }
-    pub fn setTypography(s: Surface, value: @import("../text/typography.zig").Typography) void {
+    pub fn setTypography(s: Surface, value: text_typography.Typography) void {
         if (s.ops.typography) |function| function(s.context, value);
     }
     pub fn choosePath(s: Surface, allocator: std.mem.Allocator, kind: PathKind) !?[]u8 {

@@ -1,10 +1,12 @@
 //! Blame hover geometry is shared by painting and input. It never inserts rows
 //! into the source projection; Git hunk expansion owns that independently.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const text = @import("zircon_text");
+const ui = @import("zircon_ui");
 const annotations = @import("annotations.zig");
-const Theme = @import("theme.zig").Theme;
+const display = @import("display.zig");
+const theme_module = @import("theme.zig");
+const Theme = theme_module.Theme;
 pub const Options = struct { source_y: ?f32 = null, source_x: f32 = 0, font: f32, line_height: f32, gutter: f32, horizontal: f32, scroll: f32, tab_width: usize };
 pub const Layout = struct { label: ui.Rect, card: ui.Rect, copy: ui.Rect, close: ui.Rect, message: ui.Rect, lines: []const []const u8, label_text: []const u8, content_height: f32 };
 pub fn layout(a: std.mem.Allocator, snapshot: text.Snapshot, blame: annotations.Blame, changes: []const annotations.GitChange, options: Options, metrics: ui.layout.Measurer, bounds: ui.Rect) !?Layout {
@@ -12,7 +14,7 @@ pub fn layout(a: std.mem.Allocator, snapshot: text.Snapshot, blame: annotations.
     const range = try snapshot.lineRange(blame.line);
     if (range.end - range.start > 65536) return null;
     const original = try snapshot.copy(a, range);
-    const source = try @import("display.zig").Line.build(a, original, options.tab_width);
+    const source = try display.Line.build(a, original, options.tab_width);
     const width = (try metrics.text(metrics.context, source.bytes, .{ .size = options.font, .mono = true })).width;
     const label_text = if (blame.uncommitted) "Uncommitted changes" else try std.fmt.allocPrint(a, "{s} · {s}", .{ blame.author, try annotations.date(a, blame.timestamp) });
     const measured = try metrics.text(metrics.context, label_text, .{ .size = options.font - 1 });

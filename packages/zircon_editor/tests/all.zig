@@ -1,7 +1,7 @@
 const std = @import("std");
+const editor = @import("zircon_editor");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
-const editor = @import("zircon_editor");
 const t = std.testing;
 test "blame details never displace source rows or caret geometry" {
     var document = try text.Document.init(t.allocator, "one\ntwo\nthree\nfour\nfive\n");

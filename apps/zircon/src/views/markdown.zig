@@ -1,10 +1,11 @@
 //! Native Markdown preview. Parsed generations and decoded images live outside
 //! frame arenas; committed custom elements retain a generation until retirement.
 const std = @import("std");
-const ui = @import("zircon_ui");
-const text = @import("zircon_text");
+const zircon_editor = @import("zircon_editor");
 const md = @import("zircon_markdown");
-const syntax = @import("zircon_editor").syntax;
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const syntax = zircon_editor.syntax;
 const Image = ui.graphics.images.Image;
 pub const Outcome = struct { handled: bool = false, source_offset: ?usize = null, open_path: ?[]const u8 = null, open_url: ?[]const u8 = null };
 pub const Colors = struct {
@@ -14,7 +15,7 @@ pub const Colors = struct {
     accent: ui.Color = ui.Color.rgb(0x87afd6),
     code: ui.Color = ui.Color.rgb(0x1c222b),
     border: ui.Color = ui.Color.rgb(0x3c4350),
-    tokens: [7]ui.Color = (@import("zircon_editor").Theme{}).tokens,
+    tokens: [7]ui.Color = (zircon_editor.Theme{}).tokens,
 };
 const Asset = struct { stamp: ?std.Io.File.Stat = null, target: []const u8, path: ?[]u8 = null, image: ?Image = null, failure: ?anyerror = null };
 const Generation = struct {

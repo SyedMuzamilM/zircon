@@ -1,3 +1,4 @@
+const document_tests = @import("document_tests.zig");
 test {
-    _ = @import("document_tests.zig");
+    _ = document_tests;
 }

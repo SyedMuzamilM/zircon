@@ -1,8 +1,8 @@
 //! Optional acceptance check against the installed Apple clangd. It is kept
 //! separate from portable checks so those do not require a particular server.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 const Ops = struct {
     fn configure(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), home: []const u8) !void {

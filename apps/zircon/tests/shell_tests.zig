@@ -1,6 +1,6 @@
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const zircon_workspace = @import("zircon_workspace");
 const t = std.testing;
 test "shell opens an untitled document and builds its real custom editor" {

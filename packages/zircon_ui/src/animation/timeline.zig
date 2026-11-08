@@ -2,8 +2,8 @@
 //! commit installs its targets and prunes unseen keys. Discard leaves the
 //! committed animation unchanged. All times are monotonic seconds supplied by
 //! the window scheduler, so tests and native windows use the same equations.
-const std = @import("std");
 
+const std = @import("std");
 pub const Easing = enum {
     linear,
     ease_in,

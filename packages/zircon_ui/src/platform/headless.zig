@@ -1,9 +1,9 @@
 //! In-memory platform adapter for the ordinary window runtime.
 const std = @import("std");
-const p = @import("interface.zig");
-const g = @import("../layout/geometry.zig");
 const scene = @import("../graphics/scene.zig");
+const g = @import("../layout/geometry.zig");
 const measure = @import("../layout/measure.zig");
+const p = @import("interface.zig");
 const State = struct { allocator: std.mem.Allocator, dimensions: g.Size, metrics: measure.FixedMetrics = .{}, clipboard: []u8 = &.{} };
 pub fn open(a: std.mem.Allocator, options: p.WindowOptions, _: p.Sink) !p.Surface {
     const s = try a.create(State);

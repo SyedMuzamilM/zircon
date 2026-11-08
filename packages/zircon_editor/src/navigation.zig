@@ -2,9 +2,11 @@
 const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
-const Editor = @import("editor.zig").Editor;
+const canvas = @import("canvas.zig");
 const commands = @import("commands.zig");
 const display = @import("display.zig");
+const editor = @import("editor.zig");
+const Editor = editor.Editor;
 pub fn move(self: *Editor, snapshot: text.Snapshot, request: commands.Move) !void {
     for (self.selections.items.items) |*item| {
         var head = item.head;
@@ -71,7 +73,7 @@ pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
     const line = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), range), self.tab_width);
-    const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
+    const gutter = if (self.show_line_numbers) canvas.gutterWidth(snapshot.lineCount(), self.font_size) else 20;
     const at = range.start + line.index(metrics, .{ .size = self.font_size, .mono = true }, point.x - e.bounds.x - gutter + (if (part) |segment| segment.x else self.horizontal));
     return if (part) |segment| std.math.clamp(at, segment.start, segment.end) else at;
 }
@@ -127,7 +129,7 @@ pub fn revealHorizontal(self: *Editor, snapshot: text.Snapshot, event: *ui.Event
     const line = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), range), self.tab_width);
     const metrics = try event.textMetrics();
     const x = line.caret(metrics, .{ .size = self.font_size, .mono = true }, @min(point.byte_column, range.end - range.start));
-    const gutter = if (self.show_line_numbers) @import("canvas.zig").gutterWidth(snapshot.lineCount(), self.font_size) else 20;
+    const gutter = if (self.show_line_numbers) canvas.gutterWidth(snapshot.lineCount(), self.font_size) else 20;
     const available = @max(20, event.bounds.width - gutter - 20);
     if (x < self.horizontal) self.horizontal = @max(0, x - 12);
     if (x > self.horizontal + available) self.horizontal = x - available;

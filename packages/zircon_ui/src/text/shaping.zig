@@ -2,8 +2,9 @@
 //! Cached lines retain their CoreFoundation strings and font runs. A returned
 //! layout is borrowed until the next `layout` call; callers consume its runs
 //! before requesting another line. UTF-16 never escapes the platform adapter.
-const std = @import("std");
 
+const std = @import("std");
+const typography_module = @import("typography.zig");
 pub const CFRef = *const anyopaque;
 pub const CFStringRef = CFRef;
 pub const CTLineRef = CFRef;
@@ -85,7 +86,7 @@ const CacheContext = struct {
 
 pub const TextSystem = struct {
     allocator: std.mem.Allocator,
-    typography: @import("typography.zig").Typography = .{},
+    typography: typography_module.Typography = .{},
     layouts: [max_layouts]?*Layout = @splat(null),
     first_layout: usize = 0,
     layout_count: usize = 0,
@@ -113,7 +114,7 @@ pub const TextSystem = struct {
         for (system.bundled_faces) |face| if (face) |value| CGFontRelease(value);
         system.* = .{ .allocator = system.allocator };
     }
-    pub fn setTypography(system: *TextSystem, value: @import("typography.zig").Typography) void {
+    pub fn setTypography(system: *TextSystem, value: typography_module.Typography) void {
         if (std.meta.eql(system.typography, value)) return;
         system.deinit();
         system.typography = value;
@@ -343,8 +344,8 @@ test "native UTF-16 ranges preserve accented code points and surrogate pairs" {
 
 extern "c" fn CTFontManagerCopyAvailableFontFamilyNames() ?CFRef;
 extern "c" fn CFStringGetCString(CFStringRef, [*]u8, CFIndex, u32) u8;
-pub fn fontFamilies(a: std.mem.Allocator) ![]@import("typography.zig").FontName {
-    const Name = @import("typography.zig").FontName;
+pub fn fontFamilies(a: std.mem.Allocator) ![]typography_module.FontName {
+    const Name = typography_module.FontName;
     const array = CTFontManagerCopyAvailableFontFamilyNames() orelse return error.NativeFontUnavailable;
     defer CFRelease(array);
     var result: std.ArrayList(Name) = .empty;

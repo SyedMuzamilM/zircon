@@ -3,6 +3,7 @@
 //! earlier lines during paint. Oversized lines fall back to plain text.
 const std = @import("std");
 const text = @import("zircon_text");
+const profile_module = @import("profile.zig");
 pub const Language = enum { plain, zig, rust, json, markdown, custom };
 pub const Kind = enum { plain, keyword, string, number, comment, punctuation, builtin };
 pub const Span = struct { start: usize, end: usize, kind: Kind };
@@ -88,7 +89,7 @@ pub const Cache = struct {
     states: std.ArrayList(State) = .empty,
     revision: ?u64 = null,
     language: Language = .plain,
-    profile: ?@import("profile.zig").Profile = null,
+    profile: ?profile_module.Profile = null,
     pub fn init(a: std.mem.Allocator) Cache {
         return .{ .allocator = a };
     }
@@ -112,7 +113,7 @@ pub const Cache = struct {
             var next: State = .{};
             if (range.end - range.start <= 64 * 1024) {
                 const line = try snapshot.copy(arena.allocator(), range);
-                next = (if (language == .custom and self.profile != null) try @import("profile.zig").lex(arena.allocator(), line, self.profile.?, self.states.items[row]) else try lex(arena.allocator(), line, language, self.states.items[row])).state;
+                next = (if (language == .custom and self.profile != null) try profile_module.lex(arena.allocator(), line, self.profile.?, self.states.items[row]) else try lex(arena.allocator(), line, language, self.states.items[row])).state;
             }
             const converged = can_converge and row + 1 < old_len and std.meta.eql(self.states.items[row + 1], next);
             self.states.items[row + 1] = next;

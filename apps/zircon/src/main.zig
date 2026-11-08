@@ -1,8 +1,9 @@
 //! Native entry point. The optional path opens a real file or project directory.
 //! --snapshot exports one real rendered frame and exits for artifact checks.
 const std = @import("std");
+const zircon = @import("zircon");
 const ui = @import("zircon_ui");
-const Shell = @import("zircon").Shell;
+const Shell = zircon.Shell;
 pub fn main(init: std.process.Init) !void {
     const started = ui.testing.native.now();
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -36,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
             file = absolute;
         }
     }
-    var icon = try @import("zircon").applicationIcon(init.gpa);
+    var icon = try zircon.applicationIcon(init.gpa);
     defer icon.deinit();
     var app = try ui.App.init(.{ .allocator = init.gpa, .icon = icon });
     defer app.deinit();

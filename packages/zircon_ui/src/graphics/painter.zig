@@ -2,9 +2,10 @@
 //! text. Painter values and the resulting scene must not outlive that arena.
 const std = @import("std");
 const g = @import("../layout/geometry.zig");
-const scene = @import("scene.zig");
-const TextStyle = @import("../text/style.zig").TextStyle;
+const text_style = @import("../text/style.zig");
 const images = @import("images.zig");
+const scene = @import("scene.zig");
+const TextStyle = text_style.TextStyle;
 pub const Quad = struct { bounds: g.Rect, color: g.Color, radius: f32 = 0 };
 pub const Text = struct { bounds: g.Rect, text: []const u8, style: TextStyle = .{} };
 pub const Painter = struct {

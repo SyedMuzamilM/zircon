@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ws = @import("zircon_workspace");
 const recovery = ws.recovery;
 const t = std.testing;
@@ -85,7 +86,7 @@ test "corrupt recovery text is retained while other documents restore" {
 }
 
 test "active session locks isolate windows and unlocked sessions are claimed" {
-    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var temp = t.tmpDir(.{ .iterate = true });
     defer temp.cleanup();
     const home = try path(&temp);

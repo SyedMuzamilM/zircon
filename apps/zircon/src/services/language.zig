@@ -1,11 +1,17 @@
 //! UI-thread owner of persistent language servers. Transport threads publish
 //! owned messages and wake AppKit; no transport thread borrows editor state.
 const std = @import("std");
-const ui = @import("zircon_ui");
+const zircon_editor = @import("zircon_editor");
+const zircon_extensions = @import("zircon_extensions");
 const lsp = @import("zircon_language");
 const text = @import("zircon_text");
+const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
-const Shell = @import("../shell.zig").Shell;
+const actions = @import("../actions.zig");
+const model = @import("../settings/model.zig");
+const shell = @import("../shell.zig");
+const host = @import("extension_host.zig");
+const Shell = shell.Shell;
 const Session = struct { id: []u8, client: ?*lsp.Client, resolving: bool = false, scope: ?ws.DocumentId = null, retired: bool = false, epoch: u64 = 0 };
 const SyntaxDocument = struct {
     id: ws.DocumentId,
@@ -20,7 +26,6 @@ const SyntaxDocument = struct {
     retry_at: f64 = 0,
     status_sequence: u64 = 0,
 };
-const host = @import("extension_host.zig");
 const Document = struct {
     id: ws.DocumentId,
     uri: []u8,
@@ -132,7 +137,7 @@ pub fn invalidateDocument(self: *Shell, id: ws.DocumentId) !void {
 fn wake(_: ?*anyopaque) void {
     ui.App.wake();
 }
-fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const @import("zircon_extensions").Server, scope: ?ws.DocumentId) !usize {
+fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const zircon_extensions.Server, scope: ?ws.DocumentId) !usize {
     for (self.language.sessions.items, 0..) |session, index| if (!session.retired and std.meta.eql(session.scope, scope) and std.mem.eql(u8, session.id, server.id)) return index;
     const id = try self.allocator.dupe(u8, server.id);
     errdefer self.allocator.free(id);
@@ -150,7 +155,7 @@ fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const @import("zirc
         const work = try std.fs.path.join(self.allocator, &.{ root, ".work", server.id });
         defer self.allocator.free(work);
         var settings_path: ?[]u8 = null;
-        if (self.settings) |settings| try cx.read(settings, @import("../settings/model.zig").Settings.copyPath, .{ self.allocator, &settings_path });
+        if (self.settings) |settings| try cx.read(settings, model.Settings.copyPath, .{ self.allocator, &settings_path });
         defer if (settings_path) |path| self.allocator.free(path);
         const argv: []const []const u8 = if (server.zed_wasm) |wasm| &.{ "resolve", wasm, server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" } else &.{ "resolve-builtin", server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" };
         try host.start(self, cx, argv, null, .{ .generation = self.language.generation, .epoch = epoch, .index = index }, resolved);
@@ -277,7 +282,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
 }
 pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
     try poll(self, cx);
-    const current = try @import("../actions.zig").active(self);
+    const current = try actions.active(self);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
         const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
         if (self.language.pending) |old| if (old.session < self.language.sessions.items.len) if (self.language.sessions.items[old.session].client) |previous| previous.cancel(old.request) catch {};
@@ -293,7 +298,7 @@ pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
     return error.NoLanguageServer;
 }
 pub fn selectDiagnostic(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
-    const current = try @import("../actions.zig").active(self);
+    const current = try actions.active(self);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
         const message = doc.diagnostics orelse return;
         if (index >= message.data.diagnostics.items.len) return;
@@ -314,7 +319,7 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
     if (index >= message.data.completion.items.len) return error.NoCompletion;
     const item = message.data.completion.items[index];
     if (item.snippet) return error.SnippetNotSupported;
-    const current = try @import("../actions.zig").active(self);
+    const current = try actions.active(self);
     if (!std.meta.eql(current.id, pending.document) or current.editor.primary().head != pending.cursor) {
         self.language.clearCompletion();
         return error.StaleCompletion;
@@ -335,8 +340,8 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
             return a.range.start < b.range.start;
         }
     }.less);
-    var outcome = try current.editor.applyEdits(&record.doc, edits.items, try @import("zircon_editor").Editor.freshGroup());
-    try @import("../actions.zig").applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .completion);
+    var outcome = try current.editor.applyEdits(&record.doc, edits.items, try zircon_editor.Editor.freshGroup());
+    try actions.applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .completion);
     self.language.clearCompletion();
     self.editor_focus_request +%= 1;
     cx.notify();

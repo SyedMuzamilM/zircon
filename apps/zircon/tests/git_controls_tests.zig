@@ -1,6 +1,7 @@
 const std = @import("std");
-const ui = @import("zircon_ui");
+const builtin = @import("builtin");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 
 fn bounds(app: *ui.App, h: ui.WindowHandle, name: []const u8, button: bool) !ui.Rect {
@@ -129,7 +130,7 @@ const CountOps = struct {
     }
 };
 test "Git rows render real rounded counts and joined action menus at narrow widths" {
-    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);

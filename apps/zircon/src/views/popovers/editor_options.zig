@@ -1,10 +1,11 @@
 //! View preferences for the focused editor pane.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("../../shell.zig").Shell;
-const v = @import("../components.zig");
+const shell = @import("../../shell.zig");
 const view = @import("../../view.zig");
+const v = @import("../components.zig");
 const panel = @import("panel.zig");
+const Shell = shell.Shell;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;

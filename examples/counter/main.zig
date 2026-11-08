@@ -4,10 +4,11 @@ const ui = @import("zircon_ui");
 const Counter = struct {
     count: u32 = 0,
     pub fn render(self: *const Counter, builder: *ui.Ui) !ui.Element {
-        return builder.column(.{ .gap = 12, .padding = .all(24) }, .{
-            builder.textFmt("Count: {d}", .{self.count}),
-            builder.button(.{ .key = .named("increment"), .label = "Increment", .on_click = builder.onClick(increment) }),
-        });
+        const f = builder.fluent();
+        return f.column().gap_px(12).p(6)
+            .child(f.textFmt("Count: {d}", .{self.count}))
+            .child(f.button(.{ .label = "Increment" }).id(.named("increment")).on_click(builder.onClick(increment)))
+            .build();
     }
     fn increment(self: *Counter, event: *ui.Event(ui.Click), cx: *ui.Context(Counter)) void {
         _ = event;

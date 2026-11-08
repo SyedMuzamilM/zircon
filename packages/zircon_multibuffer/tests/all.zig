@@ -1,7 +1,7 @@
 const std = @import("std");
+const multi = @import("zircon_multibuffer");
 const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
-const multi = @import("zircon_multibuffer");
 const t = std.testing;
 const id = workspace.DocumentId{ .workspace = 1, .slot = 0, .generation = 1 };
 

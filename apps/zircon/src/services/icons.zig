@@ -1,8 +1,8 @@
 //! Decode each active icon asset once. Frames retain image pixels, so replacing
 //! the selected theme does not invalidate images already submitted to Metal.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const ext = @import("zircon_extensions");
+const ui = @import("zircon_ui");
 pub const Cache = struct {
     entries: std.ArrayList(struct { path: []u8, image: ui.graphics.images.Image }) = .empty,
     pub fn deinit(self: *Cache, a: std.mem.Allocator) void {

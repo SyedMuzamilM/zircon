@@ -1,9 +1,11 @@
+//! Native AppKit window/input fixtures and event-lifecycle assertions.
 const std = @import("std");
-const window = @import("window.zig");
-const platform = @import("../interface.zig");
 const scene = @import("../../graphics/scene.zig");
+const geometry = @import("../../layout/geometry.zig");
+const platform = @import("../interface.zig");
 const objc = @import("objc.zig");
-const EventLog = struct { down: usize = 0, up: usize = 0, resized: usize = 0, closed: usize = 0, text: usize = 0, keys: usize = 0, position: @import("../../layout/geometry.zig").Point = .{} };
+const window = @import("window.zig");
+const EventLog = struct { down: usize = 0, up: usize = 0, resized: usize = 0, closed: usize = 0, text: usize = 0, keys: usize = 0, position: geometry.Point = .{} };
 fn event(raw: *anyopaque, input: platform.Input) !void {
     const log: *EventLog = @ptrCast(@alignCast(raw));
     switch (input) {
@@ -179,7 +181,7 @@ test "native text snapshots convert UTF16 replacements and queue composition unt
     const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
     const native_window = findWindow(app, "Zircon input test") orelse return error.TestWindowNotFound;
     const view = objc.send(objc.Id, native_window, "contentView", .{});
-    const caret: @import("../../layout/geometry.zig").Rect = .{ .x = 32, .y = 44, .width = 2, .height = 20 };
+    const caret: geometry.Rect = .{ .x = 32, .y = 44, .width = 2, .height = 20 };
     surface.setTextInput(.{ .text = "a🌍日", .revision = 7, .selection = .{ .start = 1, .end = 5 }, .caret = caret });
     const selected = objc.send(NativeRange, view, "selectedRange", .{});
     try t.expectEqual(@as(usize, 1), selected.location);

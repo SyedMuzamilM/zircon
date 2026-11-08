@@ -1,17 +1,18 @@
 //! Text measurement is injected so layout is testable without a font system.
+const text_style = @import("../text/style.zig");
 const geometry = @import("geometry.zig");
 pub const Measurer = struct {
     /// Changes whenever resolved fonts or text metrics change.
     generation: u64 = 0,
     context: ?*anyopaque,
-    text: *const fn (?*anyopaque, []const u8, @import("../text/style.zig").TextStyle) anyerror!geometry.Size,
-    caret_fn: ?*const fn (?*anyopaque, []const u8, @import("../text/style.zig").TextStyle, usize) f32 = null,
-    index_fn: ?*const fn (?*anyopaque, []const u8, @import("../text/style.zig").TextStyle, f32) usize = null,
-    pub fn caret(m: Measurer, bytes: []const u8, style: @import("../text/style.zig").TextStyle, offset: usize) f32 {
+    text: *const fn (?*anyopaque, []const u8, text_style.TextStyle) anyerror!geometry.Size,
+    caret_fn: ?*const fn (?*anyopaque, []const u8, text_style.TextStyle, usize) f32 = null,
+    index_fn: ?*const fn (?*anyopaque, []const u8, text_style.TextStyle, f32) usize = null,
+    pub fn caret(m: Measurer, bytes: []const u8, style: text_style.TextStyle, offset: usize) f32 {
         if (m.caret_fn) |f| return f(m.context, bytes, style, offset);
         return (m.text(m.context, bytes[0..@min(offset, bytes.len)], style) catch return 0).width;
     }
-    pub fn index(m: Measurer, bytes: []const u8, style: @import("../text/style.zig").TextStyle, x: f32) usize {
+    pub fn index(m: Measurer, bytes: []const u8, style: text_style.TextStyle, x: f32) usize {
         if (m.index_fn) |f| return f(m.context, bytes, style, x);
         var previous: f32 = 0;
         var i: usize = 0;
@@ -33,7 +34,7 @@ pub const FixedMetrics = struct {
     pub fn measurer(metrics: *FixedMetrics) Measurer {
         return .{ .context = metrics, .text = measure };
     }
-    fn measure(raw: ?*anyopaque, text: []const u8, _: @import("../text/style.zig").TextStyle) !geometry.Size {
+    fn measure(raw: ?*anyopaque, text: []const u8, _: text_style.TextStyle) !geometry.Size {
         const metrics: *FixedMetrics = @ptrCast(@alignCast(raw.?));
         var points: usize = 0;
         for (text) |byte| if (byte & 0xc0 != 0x80) {

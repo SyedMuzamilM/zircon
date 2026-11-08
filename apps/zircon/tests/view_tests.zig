@@ -1,6 +1,6 @@
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 
 fn open(app: *ui.App) !ui.WindowHandle {

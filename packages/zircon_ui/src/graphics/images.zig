@@ -4,7 +4,10 @@
 //! premultiplied RGBA8 with logical top-left row order.
 const std = @import("std");
 const builtin = @import("builtin");
-const Size = @import("../layout/geometry.zig").Size;
+const zircon_options = @import("zircon_options");
+const geometry = @import("../layout/geometry.zig");
+const images = @import("../platform/macos/images.zig");
+const Size = geometry.Size;
 pub const max_dimension = 16384;
 pub const max_bytes = 64 * 1024 * 1024;
 pub const Fit = enum { contain, cover, stretch };
@@ -49,9 +52,9 @@ pub const Image = struct {
     /// Decodes the first frame through the native image adapter. The decoder
     /// applies orientation and returns normalized, premultiplied RGBA8 bytes.
     pub fn load(a: std.mem.Allocator, encoded: []const u8) !Image {
-        if (comptime builtin.os.tag != .macos or !@import("zircon_options").native) return error.ImageDecodingUnavailable;
+        if (comptime builtin.os.tag != .macos or !zircon_options.native) return error.ImageDecodingUnavailable;
         if (encoded.len == 0 or encoded.len > max_bytes) return error.InvalidImage;
-        const decoded = try @import("../platform/macos/images.zig").decode(a, encoded);
+        const decoded = try images.decode(a, encoded);
         errdefer a.free(decoded.pixels);
         return adopt(a, decoded.width, decoded.height, decoded.pixels);
     }

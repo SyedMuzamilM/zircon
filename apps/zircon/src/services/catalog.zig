@@ -1,8 +1,12 @@
 //! Search the official Zed registry and install through the atomic local registry.
 const std = @import("std");
 const ui = @import("zircon_ui");
+const actions = @import("../actions.zig");
+const language_suggestions = @import("../language_suggestions.zig");
+const shell = @import("../shell.zig");
 const host = @import("extension_host.zig");
-const Shell = @import("../shell.zig").Shell;
+const extensions_module = @import("extensions.zig");
+const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 pub const Entry = struct { installed_id: ?[]const u8 = null, source: []const u8 = "zed", id: []const u8, name: []const u8, version: []const u8, description: []const u8, provides: []const []const u8, metadata_available: bool };
 pub const Response = struct { source: []const u8, total: usize, entries: []const Entry };
@@ -120,7 +124,7 @@ fn installed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
             return;
         },
     }
-    @import("extensions.zig").refresh(self, cx) catch |err| {
+    extensions_module.refresh(self, cx) catch |err| {
         try errorText(self, @errorName(err));
         cx.notify();
         return;
@@ -129,9 +133,9 @@ fn installed(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !voi
     cx.notify();
 }
 pub fn recommend(self: *Shell, cx: *ui.Context(Shell)) !void {
-    const current = try @import("../actions.zig").active(self);
+    const current = try actions.active(self);
     const record = try self.workspace.getConst(current.id);
-    const suffix = @import("../language_suggestions.zig").query(record.path orelse record.title());
+    const suffix = language_suggestions.query(record.path orelse record.title());
     const Set = struct {
         fn call(field: *ui.controls.TextInput, context: *ui.Context(ui.controls.TextInput), value: []const u8) !void {
             try field.bytes.ensureTotalCapacity(field.allocator, value.len);

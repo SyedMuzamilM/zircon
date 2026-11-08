@@ -1,13 +1,15 @@
 //! Shared assets/icons SVG geometry, baked into native strokes and fill spans.
 //! Drawing and hit targets remain Zircon UI; no icon font or SVG parsing runs
 //! during a frame. Source SVGs, attribution and the offline generator are kept.
-const ui = @import("../ui/ui.zig");
+const graphics_painter = @import("../graphics/painter.zig");
 const g = @import("../layout/geometry.zig");
 const custom = @import("../ui/custom.zig");
-const Painter = @import("../graphics/painter.zig").Painter;
+const ui_element = @import("../ui/element.zig");
+const ui = @import("../ui/ui.zig");
 const paths = @import("icon_paths.zig");
+const Painter = graphics_painter.Painter;
 pub const Name = paths.Name;
-pub fn element(builder: *ui.Ui, name: Name, color: g.Color, size: f32) !@import("../ui/element.zig").Element {
+pub fn element(builder: *ui.Ui, name: Name, color: g.Color, size: f32) !ui_element.Element {
     return builder.custom(Icon, .{ .name = name, .color = color, .size = size }, .{ .width = .{ .px = size }, .height = .{ .px = size }, .flex_shrink = 0 });
 }
 const Icon = struct {

@@ -1,20 +1,28 @@
 //! Real repository queries/mutations run as entity-owned jobs. UI installation
 //! checks document revisions and uses an explicit single-owner result handoff.
 const std = @import("std");
-const ui = @import("zircon_ui");
+const zircon_editor = @import("zircon_editor");
 const git = @import("zircon_git");
-const text = @import("zircon_text");
-const workspace = @import("zircon_workspace");
 const multibuffer = @import("zircon_multibuffer");
-const Shell = @import("../shell.zig").Shell;
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const workspace = @import("zircon_workspace");
+const actions = @import("../actions.zig");
+const git_editing = @import("../git_editing.zig");
+const diff_layout = @import("../models/diff_layout.zig");
+const git_tree = @import("../models/git_tree.zig");
+const shell = @import("../shell.zig");
+const views_git_diff = @import("../views/git_diff.zig");
+const handoff = @import("handoff.zig");
+const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 const BlameRequest = struct { line: usize, expanded: bool = true, document: ?workspace.DocumentId = null };
 pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: BlameRequest, network: git.Network, switch_branch: struct { name: []const u8, create: bool = false, track: bool = false }, stash_save: bool, stash_apply: struct { oid: []const u8, pop: bool }, stash_show: []const u8 };
 const BlameTarget = struct { document: workspace.DocumentId, revision: u64, line: usize };
 pub const Presentation = struct {
     diff: ?git.Diff = null,
-    projection: ?@import("../models/diff_layout.zig").Projection = null,
-    state: @import("../models/diff_layout.zig").State = .{},
+    projection: ?diff_layout.Projection = null,
+    state: diff_layout.State = .{},
     scroll: ui.controls.Scroll = .{},
     message: []u8 = &.{},
     fn deinit(self: *Presentation) void {
@@ -39,9 +47,9 @@ pub const Model = struct {
     /// Live source snapshots and excerpt identities shared by the diff editor.
     editable: ?multibuffer.MultiBuffer = null,
     editable_source: ?workspace.DocumentId = null,
-    editing: @import("../git_editing.zig").Model = .{},
-    projection: ?@import("../models/diff_layout.zig").Projection = null,
-    diff_view: @import("../models/diff_layout.zig").State = .{},
+    editing: git_editing.Model = .{},
+    projection: ?diff_layout.Projection = null,
+    diff_view: diff_layout.State = .{},
     commit_focus: u64 = 0,
     diff_generation: u64 = 0,
     root_path: []u8 = &.{},
@@ -78,7 +86,7 @@ pub const Model = struct {
     pending_all_diff: bool = false,
     diff_scroll: ui.controls.Scroll = .{},
     sidebar_scroll: ui.controls.Scroll = .{},
-    tree: @import("../models/git_tree.zig").Tree = .{},
+    tree: git_tree.Tree = .{},
     staged_diff: bool = false,
     error_text: []u8 = &.{},
     pub fn deinit(self: *Model) void {
@@ -280,7 +288,7 @@ const Result = struct {
     message: []u8 = &.{},
     preserve_scroll: bool = false,
     root_path: []u8 = &.{},
-    projection: ?@import("../models/diff_layout.zig").Projection = null,
+    projection: ?diff_layout.Projection = null,
     found: bool = false,
     generation: u64,
     status: ?git.Status = null,
@@ -316,7 +324,7 @@ const Result = struct {
         a.free(self.error_text);
     }
 };
-const Box = @import("handoff.zig").Handoff(Result);
+const Box = handoff.Handoff(Result);
 const Job = struct {
     pub const Output = *Box;
     io: std.Io,
@@ -385,7 +393,7 @@ const Job = struct {
             result.source_versions = try versions.toOwnedSlice(a);
         }
         try cancel.check();
-        if (result.diff) |diff| result.projection = try @import("../models/diff_layout.zig").Projection.init(a, diff);
+        if (result.diff) |diff| result.projection = try diff_layout.Projection.init(a, diff);
         return Box.create(a, result);
     }
     fn perform(self: *Job, repo: *git.Repository, result: *Result) !void {
@@ -601,7 +609,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
             tab.editor.hideBlame();
             if (self.secondary) |*pane| if (std.meta.eql(pane.document, tab.document)) pane.editor.synchronize(snap);
         };
-        try @import("../actions.zig").refreshTree(self);
+        try actions.refreshTree(self);
     }
     if (value.status) |status| {
         if (self.git.status) |*old| old.deinit();
@@ -650,7 +658,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         value.message = &.{};
         try rebuildEditable(self, diff);
         if (self.git.reveal_path.len > 0) {
-            if (@import("../views/git_diff.zig").fileOffset(diff, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| self.git.diff_scroll.offset = offset;
+            if (views_git_diff.fileOffset(diff, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| self.git.diff_scroll.offset = offset;
             a.free(self.git.reveal_path);
             self.git.reveal_path = &.{};
         }
@@ -697,14 +705,14 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         try start(self, cx, .refresh);
     }
 }
-fn installEditor(editor: *@import("zircon_editor").Editor, result: *const Result) !void {
+fn installEditor(editor: *zircon_editor.Editor, result: *const Result) !void {
     if (result.blame) |blame| {
         try editor.setBlame(.{ .line = blame.line - 1, .revision = result.revision, .author = blame.author, .summary = blame.summary, .oid = blame.oid, .timestamp = blame.timestamp, .email = blame.email, .message = result.blame_message, .uncommitted = blame.uncommitted, .expanded = result.blame_expanded and (editor.blame_hovered or editor.blame_pinned) });
     }
     if (!result.changes_ready) return;
     const baseline = try editor.allocator.dupe(u8, result.baseline);
     errdefer editor.allocator.free(baseline);
-    const changes = try editor.allocator.alloc(@import("zircon_editor").GitChange, result.changes.len);
+    const changes = try editor.allocator.alloc(zircon_editor.GitChange, result.changes.len);
     errdefer editor.allocator.free(changes);
     var row: usize = 0;
     var cursor: usize = 0;

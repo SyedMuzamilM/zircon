@@ -1,7 +1,7 @@
 //! Native and portable journeys for buffer controls, icons and hover behavior.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 fn settle(app: *ui.App) !void {
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));

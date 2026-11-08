@@ -1,7 +1,8 @@
 //! Porcelain v1 -z parsing preserves arbitrary path bytes, including newlines.
 const std = @import("std");
+const numstat = @import("numstat.zig");
 pub const Change = enum { clean, added, modified, deleted, renamed, copied, unmerged, untracked, ignored, type_changed, unknown };
-pub const Entry = struct { path: []const u8, old_path: ?[]const u8 = null, index: Change, worktree: Change, staged: bool, unstaged: bool, conflicted: bool = false, stats: ?@import("numstat.zig").LineStats = null };
+pub const Entry = struct { path: []const u8, old_path: ?[]const u8 = null, index: Change, worktree: Change, staged: bool, unstaged: bool, conflicted: bool = false, stats: ?numstat.LineStats = null };
 pub const Status = struct {
     arena: std.heap.ArenaAllocator,
     branch: []const u8,

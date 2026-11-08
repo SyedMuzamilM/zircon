@@ -2,13 +2,14 @@
 //! command system. Payloads bind to the installed repository generation.
 const std = @import("std");
 const ui = @import("zircon_ui");
-const Shell = @import("../shell.zig").Shell;
 const catalogue = @import("../commands.zig");
-const Command = catalogue.Command;
 const service = @import("../services/git.zig");
+const shell = @import("../shell.zig");
 const v = @import("components.zig");
-const Target = struct { index: u32, generation: u64 };
 const picker = @import("popovers/git_picker.zig");
+const Shell = shell.Shell;
+const Command = catalogue.Command;
+const Target = struct { index: u32, generation: u64 };
 pub const defaultRemote = picker.defaultRemote;
 pub const hasUpstream = picker.hasUpstream;
 pub const stashAction = picker.stashAction;
@@ -22,7 +23,7 @@ fn dismiss(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
 }
 pub fn commandRow(self: *const Shell, b: *ui.Ui, command: Command, label: []const u8, enabled: bool) !ui.Element {
     if (enabled and !self.git.busy) return v.menuRow(b, self.colors, command, label, try self.key_bindings.shortcut(b.allocator(), command), false);
-    return b.row(.{ .height = .{ .px = 30 }, .flex_shrink = 0, .align_items = .center, .padding = .{ .left = 10, .right = 10 }, .opacity = 0.45 }, &.{try v.text(b, label, self.colors.muted, 13)});
+    return b.fluent().div().h(.{ .px = 30 }).shrink_0().items_center().padding(.{ .left = 10, .right = 10 }).opacity(0.45).flex().children(.{v.text(b, label, self.colors.muted, 13)}).build();
 }
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
@@ -57,6 +58,6 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     const searchable = self.git.menu == .branches or self.git.menu == .stashes or self.git.menu == .fetch_remote or self.git.menu == .push_remote;
     const height = @min(if (searchable) @as(f32, 360) else @as(f32, @floatFromInt(rows.items.len)) * 30 + 12, b.viewport().height - 90);
     const placement = v.popoverBounds(b.viewport(), self.git_anchor, .{ .width = if (searchable) 440 else 300, .height = height });
-    const popup = try b.key(.{ .string = "git-controls" }, try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(if (searchable) 12 else 6), if (searchable) 8 else 0, rows.items));
-    return b.modal(try b.listen(try b.stack(.{ .padding = .{ .top = placement.y, .left = placement.x }, .align_items = .start }, &.{popup}), .{ .on_input = b.onInput(dismiss) }));
+    const popup = try b.fluent().adopt(try v.floatingPanel(b, c, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(if (searchable) 12 else 6), if (searchable) 8 else 0, rows.items)).id(.{ .string = "git-controls" }).build();
+    return b.fluent().div().padding(.{ .top = placement.y, .left = placement.x }).items(.start).stack().children(.{popup}).listeners(.{ .on_input = b.onInput(dismiss) }).modal().build();
 }

@@ -3,7 +3,10 @@
 const std = @import("std");
 const runtime = @import("../app/app.zig");
 const identity = @import("../entity/entity.zig");
+const entity_value = @import("../entity/value.zig");
 const event = @import("../event/event.zig");
+const element = @import("element.zig");
+const ui = @import("ui.zig");
 pub fn Handler(comptime E: type) type {
     return struct {
         owner: identity.Token,
@@ -74,11 +77,11 @@ fn bindWith(comptime E: type, a: std.mem.Allocator, owner: identity.Token, value
     return .{ .owner = owner, .payload = owned, .invoke = Adapter.invoke };
 }
 fn requireValue(comptime T: type) void {
-    if (@import("../entity/value.zig").containsPointer(T)) @compileError("handler payloads must be pointer-free copied values");
+    if (entity_value.containsPointer(T)) @compileError("handler payloads must be pointer-free copied values");
 }
 pub fn requireView(comptime T: type) void {
-    const Ui = @import("ui.zig").Ui;
-    const Element = @import("element.zig").Element;
+    const Ui = ui.Ui;
+    const Element = element.Element;
     if (!@hasDecl(T, "render")) @compileError(@typeName(T) ++ " must implement render(*const Self, *Ui) !Element");
     const info = @typeInfo(@TypeOf(T.render));
     if (info != .@"fn" or info.@"fn".param_types.len != 2 or info.@"fn".param_types[0] != *const T or info.@"fn".param_types[1] != *Ui) @compileError("render must receive (*const Self, *Ui)");

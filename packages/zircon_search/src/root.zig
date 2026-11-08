@@ -2,10 +2,11 @@
 //! outputs retain source identities so UI activation can refuse stale offsets.
 const std = @import("std");
 const text = @import("zircon_text");
-const files = @import("files.zig");
-const Matcher = @import("matcher.zig").Matcher;
 const excerpts = @import("excerpts.zig");
+const files = @import("files.zig");
+const matcher_module = @import("matcher.zig");
 const types = @import("types.zig");
+const Matcher = matcher_module.Matcher;
 pub const Query = types.Query;
 pub const Buffer = types.Buffer;
 pub const Limits = types.Limits;

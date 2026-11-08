@@ -1,8 +1,8 @@
 //! Strict schema-one manifests. Parsing copies JSON strings into the snapshot
 //! arena; referenced PNG assets are loaded once and survive uninstall/reload.
 const std = @import("std");
-const m = @import("model.zig");
 const fs = @import("filesystem.zig");
+const m = @import("model.zig");
 pub const max_json_bytes = 16 * 1024 * 1024;
 pub const RawColors = struct {
     document: []const u8 = "#171b22",

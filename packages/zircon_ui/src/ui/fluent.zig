@@ -1,11 +1,13 @@
 //! Eager frame-owned elements with GPUI-style chaining. Copies alias one draft;
 //! build is idempotent, while mutations after build fail the staging frame.
 const std = @import("std");
-const builder = @import("ui.zig");
-const tree = @import("tree.zig");
+const style_module = @import("../text/style.zig");
+const adapter = @import("adapter.zig");
 const elements = @import("element.zig");
 const styles = @import("style.zig");
-const adapter = @import("adapter.zig");
+const tree = @import("tree.zig");
+const builder = @import("ui.zig");
+const TextStyle = style_module.TextStyle;
 const Draft = struct {
     element: elements.Element,
     children: std.ArrayList(elements.Element) = .empty,
@@ -33,6 +35,23 @@ pub const Fluent = struct {
         if (!self.valid()) return self.failed(error.InvalidFrame);
         var ui = self.ui;
         return self.wrap(ui.div(.{}, .{}), true);
+    }
+    /// Rows and stacks use the same eager children and rollback rules as div.
+    pub fn row(self: Fluent) Chain {
+        return self.div().flex();
+    }
+    pub fn column(self: Fluent) Chain {
+        return self.div().flex_col();
+    }
+    pub fn stack(self: Fluent) Chain {
+        return self.div().stack();
+    }
+    /// Render an entity through its normal const lease, tracking the dependency
+    /// in this frame before decorating the resulting element.
+    pub fn view(self: Fluent, handle: anytype) Chain {
+        if (!self.valid()) return self.failed(error.InvalidFrame);
+        var ui = self.ui;
+        return self.wrap(ui.view(handle), false);
     }
     pub fn text(self: Fluent, bytes: []const u8) Chain {
         if (!self.valid()) return self.failed(error.InvalidFrame);
@@ -148,6 +167,49 @@ pub const Chain = struct {
         }
         return self;
     }
+    /// Set only the named fields. Existing text/padding/layout fields survive.
+    pub fn refine(self: Chain, changes: anytype) Chain {
+        return self.when(true, changes);
+    }
+    pub fn text_style(self: Chain, value: TextStyle) Chain {
+        return self.refine(.{ .text = value });
+    }
+    pub fn direction(self: Chain, value: styles.Direction) Chain {
+        return self.refine(.{ .direction = value });
+    }
+    pub fn items(self: Chain, value: styles.Align) Chain {
+        return self.refine(.{ .align_items = value });
+    }
+    pub fn justify(self: Chain, value: styles.Justify) Chain {
+        return self.refine(.{ .justify_content = value });
+    }
+    pub fn grow_by(self: Chain, value: f32) Chain {
+        return self.refine(.{ .flex_grow = value });
+    }
+    pub fn shrink_by(self: Chain, value: f32) Chain {
+        return self.refine(.{ .flex_shrink = value });
+    }
+    pub fn min_w(self: Chain, value: styles.Length) Chain {
+        return self.refine(.{ .min_width = value });
+    }
+    pub fn max_w(self: Chain, value: styles.Length) Chain {
+        return self.refine(.{ .max_width = value });
+    }
+    pub fn min_h(self: Chain, value: styles.Length) Chain {
+        return self.refine(.{ .min_height = value });
+    }
+    pub fn max_h(self: Chain, value: styles.Length) Chain {
+        return self.refine(.{ .max_height = value });
+    }
+    pub fn margin(self: Chain, value: styles.Insets) Chain {
+        return self.refine(.{ .margin = value });
+    }
+    pub fn background(self: Chain, value: ?styles.Color) Chain {
+        return self.refine(.{ .background = value });
+    }
+    pub fn hover_background(self: Chain, value: ?styles.Color) Chain {
+        return self.refine(.{ .hover_background = value });
+    }
     pub fn id(self: Chain, key: elements.Key) Chain {
         const record = self.draft(true) catch |err| return self.fail(err);
         var ui = self.factory.ui;
@@ -167,6 +229,46 @@ pub const Chain = struct {
         const callback = handler catch |err| return self.fail(err);
         self.factory.ui.frame.nodes.items[record.element.index].on_input = callback;
         return self;
+    }
+    pub fn on_capture(self: Chain, handler: anyerror!adapter.InputHandler) Chain {
+        return self.listeners(.{ .on_capture = handler });
+    }
+    /// Applies typed handlers without changing unspecified focus/input state.
+    pub fn listeners(self: Chain, options: builder.Ui.Listeners) Chain {
+        const record = self.draft(true) catch |err| return self.fail(err);
+        const input_handler = if (options.on_input) |handler| handler catch |err| return self.fail(err) else null;
+        const capture_handler = if (options.on_capture) |handler| handler catch |err| return self.fail(err) else null;
+        const node = &self.factory.ui.frame.nodes.items[record.element.index];
+        if (input_handler) |handler| node.on_input = handler;
+        if (capture_handler) |handler| node.on_capture = handler;
+        if (options.focusable) |value| node.focusable = value;
+        return self;
+    }
+    pub fn focusable(self: Chain) Chain {
+        return self.listeners(.{ .focusable = true });
+    }
+    pub fn autofocus(self: Chain) Chain {
+        const record = self.draft(true) catch |err| return self.fail(err);
+        self.factory.ui.frame.nodes.items[record.element.index].autofocus = true;
+        return self;
+    }
+    pub fn request_focus(self: Chain, generation: u64) Chain {
+        const record = self.draft(true) catch |err| return self.fail(err);
+        self.factory.ui.frame.nodes.items[record.element.index].focus_request = generation;
+        return self;
+    }
+    pub fn modal(self: Chain) Chain {
+        const record = self.draft(true) catch |err| return self.fail(err);
+        self.factory.ui.frame.nodes.items[record.element.index].modal = true;
+        return self;
+    }
+    pub fn drag_region(self: Chain) Chain {
+        const record = self.draft(true) catch |err| return self.fail(err);
+        self.factory.ui.frame.nodes.items[record.element.index].drag_region = true;
+        return self;
+    }
+    pub fn stack(self: Chain) Chain {
+        return self.when(true, .{ .direction = @as(styles.Direction, .stack) });
     }
     pub fn flex(self: Chain) Chain {
         return self.when(true, .{ .direction = @as(styles.Direction, .row) });

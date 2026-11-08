@@ -1,9 +1,11 @@
 //! Project windows share application settings while keeping documents, jobs and
 //! repository state independent. Cloning never runs in an input/render callback.
 const std = @import("std");
-const ui = @import("zircon_ui");
 const git = @import("zircon_git");
-const Shell = @import("shell.zig").Shell;
+const ui = @import("zircon_ui");
+const handoff = @import("services/handoff.zig");
+const shell_module = @import("shell.zig");
+const Shell = shell_module.Shell;
 const a = std.heap.page_allocator;
 pub const Kind = enum { local_folder, git_repository, clone };
 pub fn open(self: *Shell, cx: *ui.Context(Shell), requested: []const u8, kind: Kind) !ui.WindowHandle {
@@ -38,7 +40,7 @@ const Result = struct {
         a.free(self.destination);
     }
 };
-const Box = @import("services/handoff.zig").Handoff(Result);
+const Box = handoff.Handoff(Result);
 const Clone = struct {
     pub const Output = *Box;
     io: std.Io,

@@ -1,9 +1,16 @@
 const std = @import("std");
-const ui = @import("zircon_ui");
+const builtin = @import("builtin");
 const zircon = @import("zircon");
+const ui = @import("zircon_ui");
 const t = std.testing;
 
 const Ops = struct {
+    fn timeoutState(self: *const zircon.Shell) void {
+        const revision = if (self.tabs.items.len > 0) (self.workspace.getConst(self.tabs.items[0].document) catch return).doc.revision() else 0;
+        std.debug.print("grammar wait: jobs={d} source revision={d} status error={} status={s}\n", .{ self.language.syntax_jobs, revision, self.status_is_error, self.status });
+        for (self.language.syntax_documents.items) |tracked| std.debug.print("attempts={d} pending={} observed={?d} highlighted={?d} retry_at={d}\n", .{ tracked.attempts, tracked.pending, tracked.observed, tracked.revision, tracked.retry_at });
+    }
+
     fn configure(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), home: []const u8, worker: []const u8) !void {
         self.extension_host_path = worker;
         try self.loadExtensions(cx, home);
@@ -49,11 +56,14 @@ fn wait(app: *ui.App, owner: ui.Entity(zircon.Shell), now: *f64, comptime condit
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
     while (!try app.read(owner, condition, .{})) {
         try tick(app, now);
-        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.GrammarRetryTimeout;
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) {
+            try app.read(owner, Ops.timeoutState, .{});
+            return error.GrammarRetryTimeout;
+        }
     }
 }
 fn journey(mode: []const u8, unrelated_error: bool) !void {
-    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
@@ -84,7 +94,7 @@ fn journey(mode: []const u8, unrelated_error: bool) !void {
     });
     const file = try tmp.dir.openFile(t.io, "worker.py", .{});
     defer file.close(t.io);
-    try file.setPermissions(t.io, if (comptime @import("builtin").os.tag == .windows) .default_file else .fromMode(0o755));
+    try file.setPermissions(t.io, if (comptime builtin.os.tag == .windows) .default_file else .fromMode(0o755));
     try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.grammar-retry/extension.json", .data =
         \\{"schema_version":1,"id":"org.zircon.grammar-retry","name":"Grammar retry","version":"1.0.0","contributes":{"languages":[{"id":"retry","name":"Retry","extensions":["retry"],"grammar":{"builtin":true,"name":"retry","wasm":"","highlights":""}}]}}
     });

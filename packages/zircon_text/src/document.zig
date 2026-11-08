@@ -1,10 +1,11 @@
 //! Transactional document edits. Validation and candidate allocation complete
 //! before current text, revision, state identity or history are changed.
 const std = @import("std");
-const rope = @import("rope.zig");
 const history = @import("history.zig");
+const rope = @import("rope.zig");
+const snapshot_module = @import("snapshot.zig");
 const types = @import("types.zig");
-const Snapshot = @import("snapshot.zig").Snapshot;
+const Snapshot = snapshot_module.Snapshot;
 pub const Mapping = struct { range: types.Range, inserted: usize };
 pub const Change = struct {
     allocator: std.mem.Allocator,

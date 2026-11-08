@@ -1,14 +1,17 @@
 //! Line commenting shares the normal editor transaction and preserves selections.
 const std = @import("std");
 const text = @import("zircon_text");
-const Editor = @import("editor.zig").Editor;
-const Outcome = @import("editor.zig").Outcome;
+const editor = @import("editor.zig");
+const profile = @import("profile.zig");
+const selections_module = @import("selections.zig");
+const Editor = editor.Editor;
+const Outcome = editor.Outcome;
 pub fn toggle(self: *Editor, document: *text.Document, snapshot: text.Snapshot) !Outcome {
     const prefix = if (self.language_profile) |p| p.line_comment else switch (self.language) {
         .zig, .rust => @as(?[]const u8, "//"),
         else => null,
     };
-    const block: ?@import("profile.zig").Block = if (self.language_profile) |p| p.block_comment else if (self.language == .markdown) .{ .start = "<!--", .end = "-->" } else null;
+    const block: ?profile.Block = if (self.language_profile) |p| p.block_comment else if (self.language == .markdown) .{ .start = "<!--", .end = "-->" } else null;
     if (prefix == null and block == null) return error.CommentNotSupported;
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
@@ -46,8 +49,8 @@ pub fn toggle(self: *Editor, document: *text.Document, snapshot: text.Snapshot) 
             try edits.append(a, .{ .range = .{ .start = if (remove) close else row.end, .end = row.end }, .text = if (remove) "" else try std.mem.concat(a, u8, &.{ " ", block.?.end }) });
         }
     }
-    const previous = try a.dupe(@import("selections.zig").Selection, self.selections.items.items);
-    const restored = try self.allocator.alloc(@import("selections.zig").Selection, previous.len);
+    const previous = try a.dupe(selections_module.Selection, self.selections.items.items);
+    const restored = try self.allocator.alloc(selections_module.Selection, previous.len);
     errdefer self.allocator.free(restored);
     const result = try self.applyEdits(document, edits.items, 0);
     if (result.change) |change| {
