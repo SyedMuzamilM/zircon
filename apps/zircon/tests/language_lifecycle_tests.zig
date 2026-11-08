@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zircon = @import("zircon");
-const lsp = zircon.language;
 const ui = @import("zircon_ui");
+const lsp = zircon.language;
 const t = std.testing;
 
 const Identity = struct { client: usize, diagnostics: usize, generation: u64 };
