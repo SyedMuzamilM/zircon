@@ -210,6 +210,27 @@ test "Vim slash search uses the focused find field and returns to Normal" {
     try t.expect(try app.read(owner, Read.matched, .{}));
 }
 
+test "Vim g slash opens the global project search view" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "settings.json", .data = "{\"vim_mode\":true}" });
+    const path = try tmp.dir.realPathFileAlloc(t.io, "settings.json", t.allocator);
+    defer t.allocator.free(path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, path);
+    try app.dispatch(h, .{ .text = "g" });
+    try app.dispatch(h, .{ .text = "/" });
+    _ = try app.step(0);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Search = struct {
+        fn active(self: *const zircon.Shell) bool {
+            return self.currentTool(0) == .search and self.tabs.items[0].editor.vim.pendingKeys().len == 0;
+        }
+    };
+    try t.expect(try app.read(owner, Search.active, .{}));
+}
+
 test "compact command palette preserves query height, source visibility and outside dismissal" {
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
@@ -764,4 +785,30 @@ test "source actions in one group preserve the other group's tool tab" {
     try t.expect(try app.read(owner, Focus.retained, .{}));
     _ = try bounds(&app, h, "secondary-editor");
     try t.expectError(error.MissingElement, bounds(&app, h, "primary-editor"));
+}
+
+test "Vim status displays incomplete gc and clears it after the command" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "settings.json", .data = "{\"vim_mode\":true}" });
+    const path = try tmp.dir.realPathFileAlloc(t.io, "settings.json", t.allocator);
+    defer t.allocator.free(path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, path);
+    try app.dispatch(h, .{ .text = "g" });
+    _ = try app.step(0);
+    try t.expect(statusHas(&app, h, "[g]"));
+    try app.dispatch(h, .{ .text = "c" });
+    _ = try app.step(0);
+    try t.expect(statusHas(&app, h, "[gc]"));
+    try app.dispatch(h, .{ .text = "c" });
+    _ = try app.step(0);
+    try t.expect(!statusHas(&app, h, "[gc]"));
+    try t.expect(statusHas(&app, h, "-- NORMAL --"));
+}
+fn statusHas(app: *ui.App, h: ui.WindowHandle, label: []const u8) bool {
+    const window = app.window(h) catch return false;
+    for (window.frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, label)) return true;
+    return false;
 }

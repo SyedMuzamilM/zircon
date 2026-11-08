@@ -54,7 +54,7 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
     }
     var shown_tools: usize = 0;
     inline for (.{ Shell.Tool.search, Shell.Tool.git_diff, Shell.Tool.extensions }) |tool| {
-        const selected = active_tool == tool;
+        const selected = active_tool == tool and (tool != .git_diff or self.git.selected_commit.len == 0);
         const opened = switch (tool) {
             .search => opened_tools.search,
             .git_diff => opened_tools.git_diff,
@@ -64,7 +64,7 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
             shown_tools += 1;
             const name: []const u8 = switch (tool) {
                 .search => "Project search",
-                .git_diff => if (self.git.stash_view) "Stash changes" else if (self.git.selected_commit.len > 0) "Commit changes" else "Uncommitted changes",
+                .git_diff => if (self.git.stash_view) "Stash changes" else "Uncommitted changes",
                 .extensions => "Extensions",
             };
             const glyph: v.Icon = switch (tool) {
@@ -78,6 +78,14 @@ pub fn tabsForPane(self: *const Shell, b: *ui.Ui, width: f32, pane: u8) !ui.Elem
             const close = try b.button(.{ .label = "Close view", .tooltip = "Close view", .tooltip_colors = .{ c.panel, c.text, c.line }, .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(Shell.onCloseTool, Shell.ToolTab{ .tool = tool, .pane = pane }), .style = close_style });
             try items.append(b.allocator(), try b.key(.{ .string = @tagName(tool) }, try b.row(.{ .height = .{ .px = v.metrics.tabs }, .min_width = .{ .px = if (selected) @as(f32, 100) else 60 }, .max_width = .{ .px = 210 }, .flex_shrink = 1, .flex_grow = 0, .background = if (selected) c.document else c.tab_bar, .align_items = .center }, &.{ title, close })));
         }
+    }
+    for (self.git.history_tabs.items, 0..) |history, index| {
+        if (history.pane != pane) continue;
+        const selected = active_tool == .git_diff and std.mem.eql(u8, history.oid, self.git.selected_commit);
+        const name = try std.fmt.allocPrint(b.allocator(), "{s} — {s}", .{ history.oid[0..@min(7, history.oid.len)], history.subject });
+        const title = try b.button(.{ .label = name, .tooltip = history.subject, .children = &.{ try v.icon(b, .commit, if (selected) c.accent else c.muted, 14), try v.text(b, name, if (selected) c.text else c.muted, 12) }, .on_click = b.onClickWith(Shell.onGitHistoryTab, @as(u32, @intCast(index))), .style = .{ .direction = .row, .flex_grow = 1, .min_width = .{ .px = 0 }, .align_items = .center, .gap = 7, .padding = .{ .left = 10 }, .overflow = .hidden } });
+        const close = try b.button(.{ .label = try std.fmt.allocPrint(b.allocator(), "Close commit {s}", .{history.oid}), .children = &.{try v.icon(b, .close, c.muted, 12)}, .on_click = b.onClickWith(Shell.onCloseHistoryTab, @as(u32, @intCast(index))), .style = .{ .width = .{ .px = 22 }, .flex_shrink = 0, .align_items = .center, .justify_content = .center, .hover_background = c.hover } });
+        try items.append(b.allocator(), try b.key(.{ .string = try std.fmt.allocPrint(b.allocator(), "commit-tab:{s}", .{history.oid}) }, try b.row(.{ .height = .{ .px = v.metrics.tabs }, .width = .{ .px = 210 }, .min_width = .{ .px = 85 }, .flex_shrink = 1, .background = if (selected) c.document else c.tab_bar, .overflow = .hidden }, &.{ title, close })));
     }
     if (pane == 0) if (self.image) |asset| {
         try items.append(b.allocator(), try b.row(.{ .height = .{ .px = v.metrics.tabs }, .max_width = .{ .px = 220 }, .min_width = .{ .px = 90 }, .flex_shrink = 1, .background = if (self.panel == .image) c.document else c.tab_bar }, &.{
@@ -145,15 +153,20 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.tab_drag) |drag| if (drag.moved) try items.append(b.allocator(), try v.text(b, "Drop on a tab strip or any editor edge · Esc cancels", c.muted, 11));
     try items.append(b.allocator(), try b.div(.{ .flex_grow = 1 }, &.{}));
     if (self.tabs.items.len > 0 and b.viewport().width >= 650) {
-        const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
-        const state = if (self.active_pane == .secondary and self.secondary != null) &self.secondary.?.editor else &self.tabs.items[self.active].editor;
+        const diff_view = if (@import("../git_editing.zig").active(self)) self.git.editing.current() else null;
+        const id = if (diff_view) |view| view.document else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
+        const state = if (diff_view) |view| &view.editor else if (self.active_pane == .secondary and self.secondary != null) &self.secondary.?.editor else &self.tabs.items[self.active].editor;
         var snapshot = try self.workspace.snapshot(id);
         defer snapshot.deinit();
         const point = try snapshot.pointAt(@min(state.primary().head, snapshot.byteLen()));
         const location = try std.fmt.allocPrint(b.allocator(), "{d}:{d}", .{ point.line + 1, point.byte_column + 1 });
-        if (state.vim.enabled) try items.append(b.allocator(), try v.text(b, state.vim.label(), c.muted, 11));
+        if (state.vim.enabled) {
+            try items.append(b.allocator(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "-- {s} --", .{state.vim.label()}), c.muted, 11));
+            const pending = state.vim.pendingKeys();
+            if (pending.len > 0) try items.append(b.allocator(), try v.text(b, try std.fmt.allocPrint(b.allocator(), "[{s}]", .{pending}), c.accent, 11));
+        }
         try items.append(b.allocator(), try v.text(b, location, c.muted, 11));
-        const record = try self.workspace.getConst(if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document);
+        const record = try self.workspace.getConst(id);
         const detected = if (self.extension_snapshot) |generation| generation.languageForPath(record.path orelse "") else null;
         const language = if (self.languageName(id)) |name| name else if (detected) |definition| definition.name else switch (state.language) {
             .plain => "Plain text",

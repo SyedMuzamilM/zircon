@@ -11,11 +11,35 @@ const a = std.heap.page_allocator;
 const BlameRequest = struct { line: usize, expanded: bool = true, document: ?workspace.DocumentId = null };
 pub const Operation = union(enum) { refresh, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: BlameRequest, network: git.Network, switch_branch: struct { name: []const u8, create: bool = false, track: bool = false }, stash_save: bool, stash_apply: struct { oid: []const u8, pop: bool }, stash_show: []const u8 };
 const BlameTarget = struct { document: workspace.DocumentId, revision: u64, line: usize };
+pub const Presentation = struct {
+    diff: ?git.Diff = null,
+    projection: ?@import("../models/diff_layout.zig").Projection = null,
+    state: @import("../models/diff_layout.zig").State = .{},
+    scroll: ui.controls.Scroll = .{},
+    message: []u8 = &.{},
+    fn deinit(self: *Presentation) void {
+        a.free(self.message);
+        if (self.diff) |*diff| diff.deinit();
+        if (self.projection) |*projection| projection.deinit();
+        self.state.deinit(a);
+    }
+};
+pub const HistoryTab = struct {
+    oid: []u8,
+    subject: []u8,
+    pane: u8,
+    presentation: ?Presentation = null,
+    pub fn deinit(self: *HistoryTab) void {
+        a.free(self.oid);
+        a.free(self.subject);
+        if (self.presentation) |*presentation| presentation.deinit();
+    }
+};
 pub const Model = struct {
-    /// Source-backed projection for the active editable Git view. The current
-    /// patch renderer still uses `diff`; this is the mapping seam for WORK-02.
+    /// Live source snapshots and excerpt identities shared by the diff editor.
     editable: ?multibuffer.MultiBuffer = null,
     editable_source: ?workspace.DocumentId = null,
+    editing: @import("../git_editing.zig").Model = .{},
     projection: ?@import("../models/diff_layout.zig").Projection = null,
     diff_view: @import("../models/diff_layout.zig").State = .{},
     commit_focus: u64 = 0,
@@ -28,6 +52,10 @@ pub const Model = struct {
     references: ?git.References = null,
     selected_path: []u8 = &.{},
     selected_commit: []u8 = &.{},
+    history_tabs: std.ArrayList(HistoryTab) = .empty,
+    commit_message: []u8 = &.{},
+    working_presentation: ?Presentation = null,
+    pending_history: ?[]u8 = null,
     busy: bool = false,
     blame_target: ?BlameTarget = null,
     blame_changed_at: f64 = 0,
@@ -54,6 +82,7 @@ pub const Model = struct {
     staged_diff: bool = false,
     error_text: []u8 = &.{},
     pub fn deinit(self: *Model) void {
+        self.editing.deinit();
         if (self.editable) |*value| value.deinit();
         a.free(self.root_path);
         self.tree.deinit(a);
@@ -67,6 +96,11 @@ pub const Model = struct {
         a.free(self.reveal_path);
         a.free(self.selected_path);
         a.free(self.selected_commit);
+        a.free(self.commit_message);
+        if (self.working_presentation) |*presentation| presentation.deinit();
+        if (self.pending_history) |oid| a.free(oid);
+        for (self.history_tabs.items) |*tab| tab.deinit();
+        self.history_tabs.deinit(a);
         a.free(self.error_text);
         self.* = undefined;
     }
@@ -89,6 +123,72 @@ pub const Model = struct {
         self.editable = projection;
         self.editable_source = source;
     }
+    fn stashPresentation(self: *Model) void {
+        const presentation: Presentation = .{ .diff = self.diff, .projection = self.projection, .state = self.diff_view, .scroll = self.diff_scroll, .message = self.commit_message };
+        self.diff = null;
+        self.projection = null;
+        self.diff_view = .{};
+        self.diff_scroll = .{};
+        self.commit_message = &.{};
+        if (self.selected_commit.len > 0) {
+            for (self.history_tabs.items) |*tab| if (std.mem.eql(u8, tab.oid, self.selected_commit)) {
+                if (tab.presentation) |*old| old.deinit();
+                tab.presentation = presentation;
+                return;
+            };
+            var unused = presentation;
+            unused.deinit();
+        } else {
+            if (self.working_presentation) |*old| old.deinit();
+            self.working_presentation = presentation;
+        }
+    }
+    fn restorePresentation(self: *Model, source: *?Presentation) void {
+        if (source.*) |presentation| {
+            self.diff = presentation.diff;
+            self.projection = presentation.projection;
+            self.diff_view = presentation.state;
+            self.diff_scroll = presentation.scroll;
+            self.commit_message = presentation.message;
+            source.* = null;
+        }
+        self.diff_generation +%= 1;
+    }
+    pub fn showWorking(self: *Model) void {
+        if (self.selected_commit.len == 0) return;
+        self.stashPresentation();
+        a.free(self.selected_commit);
+        self.selected_commit = &.{};
+        self.stash_view = false;
+        self.restorePresentation(&self.working_presentation);
+    }
+    pub fn openHistoryTab(self: *Model, oid: []const u8, pane: u8) !void {
+        if (std.mem.eql(u8, self.selected_commit, oid)) return;
+        const selected = try a.dupe(u8, oid);
+        errdefer a.free(selected);
+        var found: ?usize = null;
+        for (self.history_tabs.items, 0..) |tab, index| if (std.mem.eql(u8, tab.oid, oid)) {
+            found = index;
+            break;
+        };
+        if (found == null) {
+            const owned = try a.dupe(u8, oid);
+            errdefer a.free(owned);
+            var subject: []const u8 = "Commit";
+            for (self.commits) |commit| if (std.mem.eql(u8, commit.oid, oid)) {
+                subject = commit.subject;
+                break;
+            };
+            const owned_subject = try a.dupe(u8, subject);
+            errdefer a.free(owned_subject);
+            try self.history_tabs.append(a, .{ .oid = owned, .subject = owned_subject, .pane = pane });
+            found = self.history_tabs.items.len - 1;
+        }
+        self.stashPresentation();
+        a.free(self.selected_commit);
+        self.selected_commit = selected;
+        self.restorePresentation(&self.history_tabs.items[found.?].presentation);
+    }
 };
 fn matchesPath(absolute: []const u8, relative: []const u8) bool {
     if (std.mem.eql(u8, absolute, relative)) return true;
@@ -96,7 +196,54 @@ fn matchesPath(absolute: []const u8, relative: []const u8) bool {
     const separator = absolute[absolute.len - relative.len - 1];
     return separator == '/' or separator == '\\';
 }
-fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
+pub fn ensureEditable(self: *Shell) !void {
+    if (self.git.editable != null or self.git.selected_path.len == 0) return;
+    for (self.tabs.items) |tab| {
+        const record = try self.workspace.getConst(tab.document);
+        if (record.path) |path| if (std.mem.endsWith(u8, path, self.git.selected_path)) {
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            try self.git.setEditableSource(tab.document, snapshot);
+            return;
+        };
+    }
+}
+pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
+    // Opening a diff also loads the live documents that have no source tab yet.
+    // Keep the selected pane and tool while adding them to workspace ownership.
+    if (self.git.selected_commit.len == 0 and !self.git.staged_diff and !self.git.stash_view) {
+        const old_active = self.active;
+        const old_pane = self.active_pane;
+        const old_panel = self.panel;
+        const old_overlay = self.overlay;
+        defer {
+            self.active = old_active;
+            self.active_pane = old_pane;
+            self.panel = old_panel;
+            self.overlay = old_overlay;
+        }
+        self.active_pane = .primary;
+        var previous: []const u8 = "";
+        for (diff.hunks) |hunk| {
+            if (std.mem.eql(u8, previous, hunk.path)) continue;
+            previous = hunk.path;
+            const absolute = try std.fs.path.resolve(a, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, hunk.path });
+            defer a.free(absolute);
+            var present = false;
+            for (self.tabs.items) |tab| if ((try self.workspace.getConst(tab.document)).path) |path| if (std.mem.eql(u8, path, absolute)) {
+                present = true;
+                break;
+            };
+            if (!present) {
+                const old_count = self.tabs.items.len;
+                self.openPath(absolute) catch |err| switch (err) {
+                    error.FileNotFound, error.InvalidUtf8 => continue,
+                    else => return err,
+                };
+                if (self.tabs.items.len > old_count) self.tabs.items[self.tabs.items.len - 1].primary = false;
+            }
+        }
+    }
     var projection = multibuffer.MultiBuffer.init(a);
     errdefer projection.deinit();
     var source: ?workspace.DocumentId = null;
@@ -125,19 +272,13 @@ fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
     }
     self.git.setEditableProjection(projection, if (source_count == 1) source else null);
 }
-pub fn ensureEditable(self: *Shell) !void {
-    if (self.git.editable != null or self.git.selected_path.len == 0) return;
-    for (self.tabs.items) |tab| {
-        const record = try self.workspace.getConst(tab.document);
-        if (record.path) |path| if (std.mem.endsWith(u8, path, self.git.selected_path)) {
-            var snapshot = record.doc.snapshot();
-            defer snapshot.deinit();
-            try self.git.setEditableSource(tab.document, snapshot);
-            return;
-        };
-    }
-}
+const SourceVersion = struct { document: workspace.DocumentId, revision: u64 };
+const CapturedBuffer = struct { document: workspace.DocumentId, path: []u8, snapshot: text.Snapshot, dirty: bool };
 const Result = struct {
+    source_versions: []SourceVersion = &.{},
+    history_oid: []u8 = &.{},
+    message: []u8 = &.{},
+    preserve_scroll: bool = false,
     root_path: []u8 = &.{},
     projection: ?@import("../models/diff_layout.zig").Projection = null,
     found: bool = false,
@@ -159,6 +300,9 @@ const Result = struct {
     baseline: []u8 = &.{},
     error_text: []u8 = &.{},
     pub fn deinit(self: *Result) void {
+        a.free(self.source_versions);
+        a.free(self.history_oid);
+        a.free(self.message);
         a.free(self.root_path);
         if (self.projection) |*projection| projection.deinit();
         if (self.status) |*v| v.deinit();
@@ -176,6 +320,7 @@ const Box = @import("handoff.zig").Handoff(Result);
 const Job = struct {
     pub const Output = *Box;
     io: std.Io,
+    buffers: []CapturedBuffer = &.{},
     root: []u8,
     operation: Operation,
     generation: u64,
@@ -190,6 +335,11 @@ const Job = struct {
         errdefer result.deinit();
         var repo = (try git.Repository.discover(a, self.io, self.root)) orelse return Box.create(a, result);
         defer repo.deinit();
+        if (self.operation == .history) {
+            result.history_oid = try a.dupe(u8, self.operation.history);
+            result.message = try repo.commitMessage(a, self.operation.history);
+        }
+        result.preserve_scroll = self.comparison != null;
         result.found = true;
         result.root_path = try a.dupe(u8, repo.root);
         result.quiet_blame = self.operation == .blame and !self.operation.blame.expanded;
@@ -199,6 +349,41 @@ const Job = struct {
             if (result.status == null) result.status = repo.status(a) catch null;
             if (result.references == null) result.references = repo.references(a) catch null;
         };
+        if (result.diff != null and self.operation != .history and self.operation != .stash_show and !(self.operation == .diff and self.operation.diff.staged) and !(self.comparison != null and self.comparison.?.staged)) {
+            var inputs: std.ArrayList(git.buffer_diff.Buffer) = .empty;
+            defer {
+                for (inputs.items) |input| {
+                    a.free(input.path);
+                    a.free(input.before);
+                    a.free(input.after);
+                }
+                inputs.deinit(a);
+            }
+            var versions: std.ArrayList(SourceVersion) = .empty;
+            defer versions.deinit(a);
+            for (self.buffers) |buffer| {
+                try versions.append(a, .{ .document = buffer.document, .revision = buffer.snapshot.revision() });
+                if (!buffer.dirty) continue;
+                const path = repo.relativePath(a, buffer.path) catch continue;
+                errdefer a.free(path);
+                const selected_path = if (self.operation == .diff) self.operation.diff.path else if (self.comparison) |comparison| comparison.path else null;
+                if (selected_path) |selected| if (!std.mem.eql(u8, selected, path)) {
+                    a.free(path);
+                    continue;
+                };
+                const before = try repo.baseline(a, path, if (self.operation == .all_diff or (self.comparison != null and self.comparison.?.all)) .head else .index);
+                errdefer a.free(before);
+                const after = try buffer.snapshot.copy(a, .{ .start = 0, .end = buffer.snapshot.byteLen() });
+                errdefer a.free(after);
+                try inputs.append(a, .{ .path = path, .before = before, .after = after });
+            }
+            if (inputs.items.len > 0) {
+                const replacement = try git.buffer_diff.replace(a, result.diff.?, inputs.items);
+                result.diff.?.deinit();
+                result.diff = replacement;
+            }
+            result.source_versions = try versions.toOwnedSlice(a);
+        }
         try cancel.check();
         if (result.diff) |diff| result.projection = try @import("../models/diff_layout.zig").Projection.init(a, diff);
         return Box.create(a, result);
@@ -264,6 +449,11 @@ const Job = struct {
     }
     pub fn deinit(self: *Job, _: std.mem.Allocator) void {
         a.free(self.root);
+        for (self.buffers) |*buffer| {
+            a.free(buffer.path);
+            buffer.snapshot.deinit();
+        }
+        a.free(self.buffers);
         if (self.comparison) |comparison| if (comparison.path) |path| a.free(path);
         if (self.path) |path| a.free(path);
         if (self.snapshot) |*snapshot| snapshot.deinit();
@@ -312,6 +502,12 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
             self.git.needs_refresh = true;
             return;
         }
+        if (operation == .history) {
+            const pending = try a.dupe(u8, operation.history);
+            if (self.git.pending_history) |old| a.free(old);
+            self.git.pending_history = pending;
+            return;
+        }
         return error.GitBusy;
     }
     if (self.git.generation == std.math.maxInt(u64)) return error.GitGenerationExhausted;
@@ -344,11 +540,25 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
         .stage, .unstage, .stage_all, .unstage_all, .commit, .network, .switch_branch, .stash_save, .stash_apply => true,
         else => false,
     };
-    if (mutation and self.panel == .git_diff and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
+    if ((mutation or operation == .refresh) and (self.panel == .git_diff or self.secondary_tool == .git_diff) and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
     job.include_references = self.git.needs_metadata or self.git.references == null or switch (operation) {
         .network, .switch_branch, .stash_save, .stash_apply, .commit => true,
         else => false,
     };
+    var buffers: std.ArrayList(CapturedBuffer) = .empty;
+    defer buffers.deinit(a);
+    errdefer for (buffers.items) |*buffer| {
+        a.free(buffer.path);
+        buffer.snapshot.deinit();
+    };
+    for (self.tabs.items) |tab| {
+        const record = try self.workspace.getConst(tab.document);
+        const path = record.path orelse continue;
+        const owned = try a.dupe(u8, path);
+        errdefer a.free(owned);
+        try buffers.append(a, .{ .document = tab.document, .path = owned, .snapshot = record.doc.snapshot(), .dirty = record.dirty() });
+    }
+    job.buffers = try buffers.toOwnedSlice(a);
     _ = try cx.spawn(Job, job, complete);
     if (job.include_references) self.git.needs_metadata = false;
     self.git.busy = true;
@@ -404,6 +614,26 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         self.git.commits = value.commits;
         value.commits = &.{};
     }
+    var diff_stale = false;
+    for (value.source_versions) |source| {
+        const record = self.workspace.getConst(source.document) catch {
+            diff_stale = true;
+            break;
+        };
+        if (record.doc.revision() != source.revision) {
+            diff_stale = true;
+            break;
+        }
+    }
+    if (diff_stale and value.diff != null) {
+        value.diff.?.deinit();
+        value.diff = null;
+        self.git.pending_all_diff = true;
+    }
+    if (value.diff != null and !std.mem.eql(u8, value.history_oid, self.git.selected_commit)) {
+        value.diff.?.deinit();
+        value.diff = null;
+    }
     if (value.diff) |diff| {
         if (self.git.projection) |*old| old.deinit();
         self.git.projection = value.projection;
@@ -414,7 +644,10 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         if (self.git.diff) |*old| old.deinit();
         self.git.diff = diff;
         value.diff = null;
-        self.git.diff_scroll.offset = 0;
+        if (!value.preserve_scroll) self.git.diff_scroll.offset = 0;
+        a.free(self.git.commit_message);
+        self.git.commit_message = value.message;
+        value.message = &.{};
         try rebuildEditable(self, diff);
         if (self.git.reveal_path.len > 0) {
             if (@import("../views/git_diff.zig").fileOffset(diff, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| self.git.diff_scroll.offset = offset;
@@ -440,6 +673,12 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         }
     } else |_| {};
     cx.notify();
+    if (self.git.pending_history) |pending| {
+        self.git.pending_history = null;
+        defer a.free(pending);
+        try start(self, cx, .{ .history = pending });
+        return;
+    }
     if (self.git.pending_blame) |pending| {
         self.git.pending_blame = null;
         const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else return;

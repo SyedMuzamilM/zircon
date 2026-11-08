@@ -96,6 +96,7 @@ pub const MultiBuffer = struct {
             if (std.meta.eql(self.excerpts.items[i].value.source, id)) _ = self.excerpts.orderedRemove(i);
         }
         self.generation +%= 1;
+        self.reindex();
     }
     pub fn setExcerpts(self: *MultiBuffer, source: SourceId, ranges: []const text.Range) !void {
         const stored = self.sourceFor(source) orelse return error.SourceNotFound;

@@ -30,13 +30,15 @@ The Git UI dependency list includes `multi_buffer`, `buffer_diff`, `editor`, `la
 
 `Anchor` stores source identity, byte offset and insertion bias. `updateSource` remaps excerpt ranges through `text.Change` mappings and swaps the retained snapshot. `mapAnchor` applies the same mapping. Revision mismatches return `StaleSourceRevision`. The package does not mutate workspace documents; the caller must group returned source edits through the existing workspace transaction and publish `DocumentChange` values.
 
-The Git service now creates this source-backed projection for every distinct open workspace document represented in a combined Git diff, while retaining the single-file selection path. The existing patch renderer remains a display projection. The experience suite opens two changed files, asserts that both source identities are retained, and still verifies that patch rows remain display-only until a multibuffer editor is wired into the view.
+Git now loads live source documents for the worktree comparison, including files without an existing visible source tab. Each current/context diff row resolves its document and revision through `zircon_multibuffer`. Clicking it activates a source editor in place, keeping file headers, hunk headers, deleted lines and staging controls visible. Removed lines, staged comparisons and immutable commits remain read-only. Source documents own text, save state and undo/redo; there is no separate flattened editable document or edit-mode toggle.
+
+The Git worker overlays unsaved snapshots on its repository comparison with the bounded line-diff algorithm. It publishes a result only while its captured source revisions are current. Typing, newline changes, undo, redo and save refresh the diff. Revisioned document events map rows while a refresh is pending. Native integration tests exercise the same AppKit/CoreText/Metal rendering path as the editor.
+
+Commit history opens distinct entries in the main top tab strip. Each retains its patch, mode, collapsed paths, scroll and commit message; reselecting an immutable commit uses that retained presentation. The body shows commit metadata and message above its read-only patch.
 
 ## Gaps before calling it full support
 
-The current core does not yet provide UTF-16 projected points, context-line expansion, diff transforms, deleted hunks, per-source event subscriptions, grouped multi-document undo, virtualization or a multibuffer editor. The Git patch view still renders `git.Diff` rows. Search and diagnostics still use their existing copied excerpt models. Those are explicit WORK-02 follow-ups.
-
-The next verifiable slice is a read/write editor backed by `zircon_multibuffer` for one open Git file. It should map a projected replacement to the workspace `DocumentId`, apply one undoable transaction, update anchors and hunk state, and reject a stale source revision. Then add multiple source excerpts and grouped transactions. Do not flatten several files into one workspace document.
+The current core does not yet provide UTF-16 projected points, context expansion, a shared display-map model, or grouped undo across several source documents. Search and diagnostics still use their existing excerpt models. Cross-file selections and edits, drag selection across several diff rows, and split-diff editing need separate acceptance before claiming full Zed parity. The live Git view currently edits one source through the normal editor transaction/history contract at a time.
 
 Primary source links:
 

@@ -103,3 +103,18 @@ test "setSources atomically replaces a multi-file projection" {
     defer t.allocator.free(retained);
     try t.expectEqualStrings("one\nbeta", retained);
 }
+
+test "removing a source reindexes the remaining editable excerpts" {
+    var source = try snapshot("one");
+    defer source.deinit();
+    var other = try snapshot("two");
+    defer other.deinit();
+    const second_id = workspace.DocumentId{ .workspace = 1, .slot = 1, .generation = 1 };
+    var mb = multi.MultiBuffer.init(t.allocator);
+    defer mb.deinit();
+    try mb.setSources(&.{ .{ .source = id, .snapshot = source, .excerpts = &.{.{ .start = 0, .end = 3 }} }, .{ .source = second_id, .snapshot = other, .excerpts = &.{.{ .start = 0, .end = 3 }} } });
+    try mb.removeSource(id);
+    const edit = try mb.edit(.{ .start = 0, .end = 3 }, "TWO");
+    try t.expectEqual(second_id, edit.source);
+    try t.expectEqual(text.Range{ .start = 0, .end = 3 }, edit.range);
+}

@@ -73,9 +73,9 @@ const Ops = struct {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onGitFile(&event, cx, 0);
     }
-    fn gitCommit(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+    fn gitCommit(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), index: u32) !void {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
-        try self.onGitCommit(&event, cx, 0);
+        try self.onGitCommit(&event, cx, index);
     }
     fn gitGeneration(self: *const zircon.Shell) u64 {
         return self.git.generation;
@@ -85,6 +85,21 @@ const Ops = struct {
     }
     fn editableGitSources(self: *const zircon.Shell) usize {
         return if (self.git.editable) |projection| projection.sources.items.len else 0;
+    }
+    fn historyTabs(self: *const zircon.Shell) usize {
+        return self.git.history_tabs.items.len;
+    }
+    fn sourceBySuffix(self: *const zircon.Shell, suffix: []const u8, a: std.mem.Allocator, out: *[]u8) !void {
+        for (self.tabs.items) |tab| {
+            const record = try self.workspace.getConst(tab.document);
+            if (record.path) |path| if (std.mem.endsWith(u8, path, suffix)) {
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                out.* = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
+                return;
+            };
+        }
+        return error.DocumentNotFound;
     }
     fn previewImage(self: *const zircon.Shell) ?u64 {
         return self.preview.?.view.imageIdentity("image.png");
@@ -425,7 +440,7 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try t.expectEqual(before_navigation, try app.read(owner, Ops.gitGeneration, .{}));
     try settle(&app);
     try t.expect(try app.read(owner, Ops.editableGitSource, .{}));
-    try t.expectEqual(@as(usize, 2), try app.read(owner, Ops.editableGitSources, .{}));
+    try t.expectEqual(@as(usize, 3), try app.read(owner, Ops.editableGitSources, .{}));
     var numbered = false;
     var addition = false;
     for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .text) {
@@ -478,8 +493,31 @@ test "Git panel stages unstages commits and shows unsaved gutters and inline bla
     try command(root, &.{ "commit", "--amend", "-m", "Change value", "-m", "Keep the fixture change documented in the commit body." });
     try send(&app, h, .git_history);
     try settle(&app);
-    try app.update(owner, Ops.gitCommit, .{});
+    try app.update(owner, Ops.gitCommit, .{0});
     try settle(&app);
+    try app.update(owner, Ops.gitCommit, .{1});
+    try settle(&app);
+    try t.expectEqual(@as(usize, 2), try app.read(owner, Ops.historyTabs, .{}));
+    const History = struct {
+        fn tabName(self: *const zircon.Shell, allocator: std.mem.Allocator, out: *[]u8) !void {
+            const tab = self.git.history_tabs.items[0];
+            out.* = try std.fmt.allocPrint(allocator, "{s} — {s}", .{ tab.oid[0..7], tab.subject });
+        }
+    };
+    var tab_name: []u8 = undefined;
+    try app.read(owner, History.tabName, .{ t.allocator, &tab_name });
+    defer t.allocator.free(tab_name);
+    try click(&app, h, tab_name);
+    try settle(&app);
+    const tabs_bounds = try elementBounds(&app, h, "tabs");
+    var top_tab = false;
+    for ((try app.window(h)).frames.committed.nodes.items, 0..) |node, index| if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, tab_name)) {
+        const rect = (try app.window(h)).frames.committed.bounds[index];
+        top_tab = rect.y >= tabs_bounds.y and rect.y + rect.height <= tabs_bounds.y + tabs_bounds.height + 0.1;
+    };
+    try t.expect(top_tab);
+    try t.expect((try elementBounds(&app, h, "commit-details")).height > 0);
+
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-history.png");
     try send(&app, h, .back_to_editor);
     try app.dispatch(h, .{ .text = "// unsaved\n" });
@@ -873,4 +911,57 @@ test "light Markdown code keeps theme colors indentation and long tokens inside 
     };
     try t.expect(found);
     if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-markdown-code-wrap-light.png");
+}
+
+test "Git diff edits live files directly and uses source undo save and redo" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 1;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "helper.zig", .data = "pub const enabled = false;\n" });
+    try command(root, &.{ "init", "-b", "main" });
+    try command(root, &.{ "config", "user.email", "fixture@zircon.invalid" });
+    try command(root, &.{ "config", "user.name", "Zircon fixture" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Initial" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 2;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "helper.zig", .data = "pub const enabled = true;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_changes);
+    try settle(&app);
+    const row = try elementBounds(&app, h, "git-live:main.zig:1");
+    const point: ui.Point = .{ .x = row.x + 120, .y = row.y + row.height / 2 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .key_down = .{ .key = .home } });
+    try app.dispatch(h, .{ .text = "// from Git\n" });
+    try app.dispatch(h, .{ .text = "// still typing\n" });
+    try settle(&app);
+    var actual: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &actual });
+    defer t.allocator.free(actual);
+    try t.expectEqualStrings("// from Git\n// still typing\nconst value = 2;\n", actual);
+    const disk = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(disk);
+    try t.expectEqualStrings("const value = 2;\n", disk);
+    try t.expect((try elementBounds(&app, h, "git-live:main.zig:3")).height > 0);
+    try send(&app, h, .undo);
+    try settle(&app);
+    var undone: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &undone });
+    defer t.allocator.free(undone);
+    try t.expectEqualStrings("const value = 2;\n", undone);
+    try send(&app, h, .redo);
+    try settle(&app);
+    try send(&app, h, .save);
+    try settle(&app);
+    const saved = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(saved);
+    try t.expectEqualStrings(actual, saved);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-editable-git.png");
 }

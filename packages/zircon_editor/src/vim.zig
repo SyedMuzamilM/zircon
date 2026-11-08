@@ -57,6 +57,12 @@ pub const State = struct {
         self.find = 0;
         self.object = 0;
     }
+    /// Keys consumed by the current incomplete Vim command, such as `g` or
+    /// `gc`. The slice is empty once the command has completed.
+    pub fn pendingKeys(self: *const State) []const u8 {
+        if (self.mode == .insert or (self.operator == null and self.prefix == 0 and self.find == 0 and self.object == 0 and self.count == 0)) return "";
+        return self.recording.keys[0..self.recording.len];
+    }
 };
 pub fn enable(self: *Editor, enabled: bool) void {
     if (self.vim.enabled == enabled) return;
@@ -520,6 +526,10 @@ fn token(self: *Editor, doc: *text.Document, key: u8, event: *ui.Event(ui.Input)
     if (v.prefix != 0) {
         const prefix = v.prefix;
         v.prefix = 0;
+        if (prefix == 'g' and key == '/') {
+            v.reset();
+            return .{ .handled = true, .request_project_search = true };
+        }
         if (prefix == 'g' and key == 'c') {
             if (v.visual()) return try comment(self, doc, event);
             v.prefix = 'C';

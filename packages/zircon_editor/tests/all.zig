@@ -467,6 +467,22 @@ test "Vim counts operators register paste and history use document transactions"
     try vimKeys(&state, &document, "Q");
     try expectText(&document, "new two three\nfour five\nsix seven\n");
 }
+test "Vim g slash opens the project search request and clears the pending prefix" {
+    var document = try text.Document.init(t.allocator, "one\ntwo\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    var first: ui.Event(ui.Input) = .{ .data = .{ .text = "g" } };
+    var pending = try state.handle(&document, &first);
+    defer release(&pending);
+    try t.expectEqualStrings("g", state.vim.pendingKeys());
+    var second: ui.Event(ui.Input) = .{ .data = .{ .text = "/" } };
+    var result = try state.handle(&document, &second);
+    defer release(&result);
+    try t.expect(result.request_project_search);
+    try t.expectEqual(@as(usize, 0), state.vim.pendingKeys().len);
+}
 test "Vim visual reversal linewise and block operations select inclusive characters" {
     var document = try text.Document.init(t.allocator, "abcd\nefgh\nijkl\n");
     defer document.deinit();

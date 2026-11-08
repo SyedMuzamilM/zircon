@@ -7,8 +7,8 @@ const Shell = @import("../shell.zig").Shell;
 const Command = @import("../commands.zig").Command;
 const v = @import("components.zig");
 const controls = @import("git_diff_controls.zig");
-const file_height: f32 = 38;
-const context_height: f32 = 26;
+const file_height = @import("../models/diff_layout.zig").file_height;
+const context_height = @import("../models/diff_layout.zig").context_height;
 
 pub fn contentHeight(diff: git.Diff, line_height: f32) f32 {
     if (diff.hunks.len == 0) return @as(f32, @floatFromInt(std.mem.count(u8, diff.text, "\n") + 1)) * line_height;
@@ -70,6 +70,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     }
     try tools.append(b.allocator(), try v.iconButton(b, c, .back_to_editor, "Editor", .close, false));
     try rows.append(b.allocator(), try b.row(.{ .height = .{ .px = 38 }, .flex_shrink = 0, .align_items = .center, .gap = 4, .padding = .{ .left = 10, .right = 8 }, .overflow = .hidden }, tools.items));
+    if (self.git.selected_commit.len > 0 and !self.git.stash_view) try rows.append(b.allocator(), try @import("commit_details.zig").render(self, b));
     try rows.append(b.allocator(), try v.rule(b, c));
     var lines: std.ArrayList(ui.Element) = .empty;
     const top = self.git.diff_scroll.offset;
@@ -176,7 +177,10 @@ fn codeRow(self: *const Shell, b: *ui.Ui, line: git.Line, path: []const u8, pair
         ranges = &highlights;
     }
     const code = try @import("code_line.zig").element(b, line.text, path, self.editor_options.font_size, self.editor_options.font_size * self.editor_options.line_height, self.editor_options.theme, ranges);
-    return b.row(.{ .height = .{ .px = self.editor_options.font_size * self.editor_options.line_height }, .flex_shrink = 0, .align_items = .stretch, .gap = 8, .background = if (changed) fill else null, .overflow = .hidden }, &.{ try b.div(.{ .width = .{ .px = 5 }, .background = if (changed) tint else null, .flex_shrink = 0 }, &.{}), try b.column(.{ .width = .{ .px = 38 }, .flex_shrink = 0, .justify_content = .center, .align_items = .end }, &.{try b.styled(try v.text(b, number, tint, 12), .{ .text = .{ .size = 12, .mono = true, .color = tint } })}), try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.border_subtle }, &.{}), code });
+    const rendered = try b.row(.{ .height = .{ .px = self.editor_options.font_size * self.editor_options.line_height }, .flex_shrink = 0, .align_items = .stretch, .gap = 8, .background = if (changed) fill else null, .overflow = .hidden }, &.{ try b.div(.{ .width = .{ .px = 5 }, .background = if (changed) tint else null, .flex_shrink = 0 }, &.{}), try b.column(.{ .width = .{ .px = 38 }, .flex_shrink = 0, .justify_content = .center, .align_items = .end }, &.{try b.styled(try v.text(b, number, tint, 12), .{ .text = .{ .size = 12, .mono = true, .color = tint } })}), try b.div(.{ .width = .{ .px = 1 }, .flex_shrink = 0, .background = c.border_subtle }, &.{}), code });
+    const editable = try @import("../git_editing.zig").renderRow(self, b, line, path, rendered);
+    if (line.new_line) |row| return b.key(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-live:{s}:{d}", .{ path, row }) }, editable);
+    return editable;
 }
 
 // Pair equally sized adjacent deletion/addition runs. Large or unbalanced runs

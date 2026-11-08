@@ -439,6 +439,7 @@ pub const Shell = struct {
         };
     }
     pub fn onToolTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: ToolTab) void {
+        if (target.tool == .git_diff) self.git.showWorking();
         self.rememberPanel();
         self.active_pane = if (target.pane == 1 and self.secondary != null) .secondary else .primary;
         self.showTool(target.tool);
@@ -590,6 +591,7 @@ pub const Shell = struct {
         }
     }
     pub fn onGitFile(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+        self.git.showWorking();
         if (self.git.status) |status| if (index < status.entries.len) {
             const path = try std.heap.page_allocator.dupe(u8, status.entries[index].path);
             std.heap.page_allocator.free(self.git.selected_path);
@@ -618,11 +620,26 @@ pub const Shell = struct {
         self.git.stash_view = false;
         if (index >= self.git.commits.len) return;
         const oid = try std.heap.page_allocator.dupe(u8, self.git.commits[index].oid);
-        std.heap.page_allocator.free(self.git.selected_commit);
-        self.git.selected_commit = oid;
+        defer std.heap.page_allocator.free(oid);
+        try self.git.openHistoryTab(oid, if (self.active_pane == .secondary) 1 else 0);
         self.showTool(.git_diff);
         self.rememberPanel();
-        @import("services/git.zig").start(self, cx, .{ .history = oid }) catch |err| try self.reportError(err);
+        if (self.git.diff == null) @import("services/git.zig").start(self, cx, .{ .history = self.git.selected_commit }) catch |err| try self.reportError(err);
+        cx.notify();
+    }
+    pub fn onGitHistoryTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+        if (index >= self.git.history_tabs.items.len) return;
+        try self.git.openHistoryTab(self.git.history_tabs.items[index].oid, if (self.active_pane == .secondary) 1 else 0);
+        self.showTool(.git_diff);
+        self.rememberPanel();
+        if (self.git.diff == null) @import("services/git.zig").start(self, cx, .{ .history = self.git.selected_commit }) catch |err| try self.reportError(err);
+        cx.notify();
+    }
+    pub fn onCloseHistoryTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) void {
+        if (index >= self.git.history_tabs.items.len) return;
+        if (std.mem.eql(u8, self.git.selected_commit, self.git.history_tabs.items[index].oid)) self.git.showWorking();
+        var removed = self.git.history_tabs.orderedRemove(index);
+        removed.deinit();
         cx.notify();
     }
     pub fn onGitScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {

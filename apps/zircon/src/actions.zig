@@ -276,6 +276,8 @@ fn closeTab(self: *Shell, cx: *ui.Context(Shell), index: usize, decision: ws.Clo
 pub fn finishCloseTab(self: *Shell, index: usize) !void {
     const id = self.tabs.items[index].document;
     if (!try self.workspace.close(id, .discard)) return;
+    self.git.editing.remove(id);
+    if (self.git.editable) |*projection| projection.removeSource(id) catch {};
     if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) {
         preview.view.deinit();
         self.preview = null;
@@ -344,6 +346,12 @@ pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pan
     };
     for (self.tabs.items, 0..) |*tab, index| if (std.meta.eql(tab.document, id) and index == self.active) try prepareEditor(self, cx, &tab.editor, snapshot, "primary-editor");
     if (self.secondary) |*other| if (std.meta.eql(other.document, id)) try prepareEditor(self, cx, &other.editor, snapshot, "secondary-editor");
+    for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) {
+        if (pane != 2) {
+            if (outcome.change) |*change| view.editor.mapChange(change);
+            view.editor.synchronize(snapshot);
+        }
+    };
     if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) try preview.view.refresh(snapshot);
 }
 pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !bool {
@@ -362,6 +370,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         self.vim_find_pending = true;
         try @import("services/buffer_find.zig").open(self, cx, false);
     }
+    if (outcome.request_project_search) try execute(self, cx, .project_search, e);
     if (outcome.change != null or outcome.reset) {
         self.allocator.free(self.status);
         self.status = &.{};
@@ -384,8 +393,10 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (outcome.handled or old_gutter_hover != selected.editor.gutter_hovered) cx.notify();
     return outcome.handled;
 }
+
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     if (which != .complete) self.language.clearCompletion();
+    if (try @import("git_editing.zig").command(self, cx, which)) return;
     switch (which) {
         .agent_mode => {
             try @import("services/agents.zig").ensure(self);
@@ -522,6 +533,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .complete => try @import("services/language.zig").request(self, cx),
         .git_changes => {
+            self.git.showWorking();
             if (self.sidebar_visible and self.left_panel == .git_changes) {
                 self.sidebar_visible = false;
                 return;
@@ -590,6 +602,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try @import("services/git.zig").start(self, cx, .refresh);
         },
         .git_diff_all => {
+            self.git.showWorking();
             self.git.stash_view = false;
             self.git.combined = true;
             std.heap.page_allocator.free(self.git.selected_path);
@@ -616,6 +629,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             try @import("services/git.zig").start(self, cx, .{ .commit = message });
         },
         .git_working_diff, .git_staged_diff => {
+            self.git.showWorking();
             self.git.combined = false;
             std.heap.page_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
@@ -765,6 +779,12 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             const pane: u8 = if (self.active_pane == .secondary) 1 else 0;
             if (self.currentTool(pane)) |tool| {
                 var click: ui.Event(ui.Click) = .{ .data = .{} };
+                if (tool == .git_diff and self.git.selected_commit.len > 0) {
+                    for (self.git.history_tabs.items, 0..) |tab, index| if (std.mem.eql(u8, tab.oid, self.git.selected_commit)) {
+                        self.onCloseHistoryTab(&click, cx, @intCast(index));
+                        return;
+                    };
+                }
                 self.onCloseTool(&click, cx, .{ .tool = tool, .pane = pane });
                 return;
             }

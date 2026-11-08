@@ -483,3 +483,26 @@ test "oversized untracked content leaves counts unknown without hiding the file"
     try t.expectEqualStrings("large.dat", status.entries[0].path);
     try t.expect(status.entries[0].stats == null);
 }
+
+test "unsaved buffer hunks preserve source numbering context and deleted text" {
+    var patch = try git.buffer_diff.fromText(t.allocator, .{ .path = "main.zig", .before = "one\ntwo\nthree\n", .after = "one\n日🙂\nnew\nthree\n" });
+    defer patch.deinit();
+    try t.expectEqual(@as(usize, 1), patch.hunks.len);
+    const hunk = patch.hunks[0];
+    try t.expectEqualStrings("main.zig", hunk.path);
+    try t.expectEqual(@as(usize, 3), hunk.old_count);
+    try t.expectEqual(@as(usize, 4), hunk.new_count);
+    try t.expectEqualStrings("two", hunk.lines[1].text);
+    try t.expect(hunk.lines[1].kind == .deletion);
+    try t.expectEqualStrings("日🙂", hunk.lines[2].text);
+    try t.expectEqual(@as(?usize, 2), hunk.lines[2].new_line);
+    try t.expectEqual(@as(?usize, 4), hunk.lines[4].new_line);
+    var empty = try git.buffer_diff.fromText(t.allocator, .{ .path = "main.zig", .before = "", .after = "new\n" });
+    defer empty.deinit();
+    try t.expectEqual(@as(usize, 0), empty.hunks[0].old_count);
+    try t.expectEqual(@as(?usize, 1), empty.hunks[0].lines[0].new_line);
+    var removed = try git.buffer_diff.replace(t.allocator, patch, &.{.{ .path = "main.zig", .before = "one\n", .after = "one\n" }});
+    defer removed.deinit();
+    try t.expectEqual(@as(usize, 0), removed.hunks.len);
+    try t.expectEqualStrings("", removed.text);
+}

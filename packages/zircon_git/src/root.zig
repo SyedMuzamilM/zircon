@@ -16,6 +16,7 @@ pub const Hunk = diff_module.Hunk;
 pub const Line = diff_module.Line;
 pub const LineChange = diff_module.LineChange;
 pub const diffLines = diff_module.diffLines;
+pub const buffer_diff = @import("buffer_diff.zig");
 pub const Commit = history_module.Commit;
 pub const deinitHistory = history_module.deinitHistory;
 pub const Blame = history_module.Blame;
