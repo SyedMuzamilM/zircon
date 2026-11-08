@@ -165,7 +165,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const panel = switch (self.panel) {
             .image => try views_image.render(self, b),
             .extensions => try views_extensions.render(self, b),
-            .search => try views_search.render(self, b),
+            .search => try views_search.render(self, b, 0),
             .git_diff => try views_git_diff.render(self, b),
             .diagnostics => try views_diagnostics.render(self, b, 0),
             .language_results => try views_language_results.render(self, b, 0),
@@ -315,7 +315,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
 fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool, pane: u8) !ui.Element {
     if (tool) |which| return switch (which) {
         .git_diff => views_git_diff.render(self, b),
-        .search => views_search.render(self, b),
+        .search => views_search.render(self, b, pane),
         .language_results => views_language_results.render(self, b, pane),
         .diagnostics => views_diagnostics.render(self, b, pane),
         .extensions => views_extensions.render(self, b),

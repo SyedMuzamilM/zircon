@@ -48,3 +48,7 @@ Primary source links:
 - [`git_ui/src/text_diff_view.rs`](https://github.com/zed-industries/zed/blob/b5cd310b3b54dfc659fcc06453e6358843dfe216/crates/git_ui/src/text_diff_view.rs)
 - [`git_ui/src/project_diff.rs`](https://github.com/zed-industries/zed/blob/b5cd310b3b54dfc659fcc06453e6358843dfe216/crates/git_ui/src/project_diff.rs)
 - [`search/src/project_search.rs`](https://github.com/zed-industries/zed/blob/b5cd310b3b54dfc659fcc06453e6358843dfe216/crates/search/src/project_search.rs)
+
+## Later implementation status
+
+The editor workflow follow-up now adds editable Project Search excerpts, independent split-pane source views, source range remapping, per-source undo/redo and saving dirty results. See [the current progress record](../progress/2026-11-08-editor-workflow-fixes.md). The earlier gaps section describes the initial implementation; cross-source selection and grouped transactions still remain.

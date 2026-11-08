@@ -84,21 +84,7 @@ pub fn apply(self: *Shell, cx: *ui.Context(Shell), pending: Pending, files: []co
         target.* = .{ .id = id, .tab = 0, .edits = edits };
     }
     // Normal tabs own every edited document, including files opened by the server.
-    for (targets) |*target| {
-        target.tab = for (self.tabs.items, 0..) |tab, index| {
-            if (std.meta.eql(tab.document, target.id)) break index;
-        } else blk: {
-            var view = try editor.Editor.init(self.allocator);
-            errdefer view.deinit();
-            const record = try self.workspace.getConst(target.id);
-            self.configureEditor(&view, record.path orelse "");
-            var snapshot = record.doc.snapshot();
-            defer snapshot.deinit();
-            view.synchronize(snapshot);
-            try self.tabs.append(self.allocator, .{ .document = target.id, .editor = view });
-            break :blk self.tabs.items.len - 1;
-        };
-    }
+    for (targets) |*target| target.tab = try actions.ensureTab(self, target.id);
     const prepared = try a.alloc(editor.Editor.PreparedEdit, targets.len);
     var count: usize = 0;
     defer for (prepared[0..count]) |*edit| edit.deinit();

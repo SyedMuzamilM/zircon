@@ -642,7 +642,7 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
         }
     }.less);
     var outcome = try current.editor.applyEditsWithSelection(&record.doc, edits.items, try zircon_editor.Editor.freshGroup(), primary_edit.range);
-    try actions.applyOutcome(self, cx, current.id, if (self.active_pane == .primary) 0 else 1, &outcome, .completion);
+    try actions.applyOutcome(self, cx, current.id, actions.activeOrigin(self), &outcome, .completion);
     self.language.clearCompletion();
     self.editor_focus_request +%= 1;
     cx.notify();
@@ -684,7 +684,14 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
     const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
     const snapshot = self.extension_snapshot orelse return;
     for (self.tabs.items, 0..) |tab, tab_index| {
-        if (tab_index != self.active and (self.secondary == null or !std.meta.eql(self.secondary.?.document, tab.document))) continue;
+        var visible = tab_index == self.active or (self.secondary != null and std.meta.eql(self.secondary.?.document, tab.document));
+        for (self.search.editing.panes) |pane| if (pane.active) |id| if (std.meta.eql(id, tab.document)) {
+            visible = true;
+        };
+        if (self.git.editing.active) |id| if (std.meta.eql(id, tab.document)) {
+            visible = true;
+        };
+        if (!visible) continue;
         const record = try self.workspace.getConst(tab.document);
         const language = snapshot.languageForPath(self.languagePath(tab.document, record.path orelse "")) orelse continue;
         const grammar = language.grammar orelse continue;
@@ -753,6 +760,9 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
         pane.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
     };
     for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, document)) {
+        view.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
+    };
+    for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| if (std.meta.eql(view.document, document)) {
         view.editor.setHighlights(source, parsed.value.spans) catch |err| return syntaxFailed(self, cx, tracked, @errorName(err));
     };
     tracked.revision = result.stamp.revision;

@@ -381,6 +381,17 @@ pub const Shell = struct {
             view.editor.show_git_gutters = false;
             view.editor.show_indent_guides = false;
         }
+        for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| {
+            const record = self.workspace.getConst(view.document) catch continue;
+            self.configureEditor(&view.editor, self.languagePath(view.document, record.path orelse ""));
+            view.editor.soft_wrap = .none;
+            view.editor.show_fold_controls = false;
+            view.editor.show_git_gutters = false;
+            view.editor.show_scrollbars = false;
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            view.editor.synchronize(snapshot);
+        };
         try self.styleInputs(cx);
         cx.notify();
     }
@@ -755,13 +766,6 @@ pub const Shell = struct {
     }
     pub fn onDefinition(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.language.definitions) |message| try services_language.acceptDefinition(self, cx, self.language.definition_pending.?.session, message.data);
-    }
-    pub fn onSearchScroll(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) void {
-        if (e.data != .scroll) return;
-        const height = if (self.search.results) |results| views_search.contentHeight(results, self.editor_options.font_size * self.editor_options.line_height) else 0;
-        self.search.scroll.wheel(e.data.scroll.y, height, e.bounds.height);
-        e.preventDefault();
-        cx.notify();
     }
     pub fn onGitPickerQuery(self: *Shell, cx: *ui.Context(Shell), _: ui.Entity(ui.controls.TextInput)) void {
         if (self.git.menu == .none) return;

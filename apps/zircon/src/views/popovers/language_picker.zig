@@ -89,6 +89,14 @@ pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choi
         };
         break;
     };
+    for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| if (std.meta.eql(view.document, current.id)) {
+        services_extensions.applyLanguage(self, &view.editor, path);
+        view.editor.syntax_cache.clear();
+        view.editor.grammar_revision = null;
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        view.editor.synchronize(snapshot);
+    };
     self.popup = .none;
     self.editor_focus_request +%= 1;
     cx.notify();

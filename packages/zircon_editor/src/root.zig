@@ -8,6 +8,7 @@ pub const display = @import("display.zig");
 const editor = @import("editor.zig");
 const profile = @import("profile.zig");
 const selections = @import("selections.zig");
+const source_editors = @import("source_editors.zig");
 pub const syntax = @import("syntax.zig");
 const theme = @import("theme.zig");
 pub const vim = @import("vim.zig");
@@ -26,3 +27,5 @@ pub const GitChange = annotations.GitChange;
 pub const Blame = annotations.Blame;
 
 pub const Profile = profile.Profile;
+
+pub const SourceEditors = source_editors.Sources;

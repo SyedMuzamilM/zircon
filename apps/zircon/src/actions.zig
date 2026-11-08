@@ -10,6 +10,7 @@ const editor_git = @import("editor_git.zig");
 const git_editing = @import("git_editing.zig");
 const panes = @import("panes.zig");
 const project_index = @import("project_index.zig");
+const search_editing = @import("search_editing.zig");
 const buffer_find = @import("services/buffer_find.zig");
 const catalog = @import("services/catalog.zig");
 const services_extensions = @import("services/extensions.zig");
@@ -98,17 +99,21 @@ pub fn refreshTree(self: *Shell) !void {
 /// Dirty documents stay untouched so a later save can surface the conflict.
 pub fn refreshExternalDocuments(self: *Shell) !bool {
     var changed = false;
-    for (self.tabs.items) |*tab| {
-        if (!try self.workspace.reloadClean(tab.document)) continue;
-        var snapshot = try self.workspace.snapshot(tab.document);
+    for (self.workspace.slots.items, 0..) |slot, index| if (slot.record != null) {
+        const id: ws.DocumentId = .{ .workspace = self.workspace.identity, .slot = @intCast(index), .generation = slot.generation };
+        if (!try self.workspace.reloadClean(id)) continue;
+        var snapshot = try self.workspace.snapshot(id);
         defer snapshot.deinit();
-        tab.editor.synchronize(snapshot);
-        if (tab.secondary_state) |*state| state.synchronize(snapshot);
-        if (self.secondary) |*pane| if (std.meta.eql(pane.document, tab.document)) pane.editor.synchronize(snapshot);
-        for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, tab.document)) view.editor.synchronize(snapshot);
-        services_language.invalidateDocument(self, tab.document) catch |err| try self.reportError(err);
+        for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
+            tab.editor.synchronize(snapshot);
+            if (tab.secondary_state) |*state| state.synchronize(snapshot);
+        };
+        if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) pane.editor.synchronize(snapshot);
+        for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) view.editor.synchronize(snapshot);
+        try search_editing.changed(self, id, null, 255);
+        services_language.invalidateDocument(self, id) catch |err| try self.reportError(err);
         changed = true;
-    }
+    };
     return changed;
 }
 
@@ -207,6 +212,21 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
     self.overlay = .none;
 }
 
+/// Attach an already resolved source to ordinary Save/close/recovery ownership
+/// without changing the visible pane or its active source.
+pub fn ensureTab(self: *Shell, id: ws.DocumentId) !usize {
+    for (self.tabs.items, 0..) |tab, index| if (std.meta.eql(tab.document, id)) return index;
+    var view = try editing.Editor.init(self.allocator);
+    errdefer view.deinit();
+    const record = try self.workspace.getConst(id);
+    self.configureEditor(&view, record.path orelse "");
+    var snapshot = record.doc.snapshot();
+    defer snapshot.deinit();
+    view.synchronize(snapshot);
+    try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    return self.tabs.items.len - 1;
+}
+
 pub fn newFile(self: *Shell) !void {
     if (self.active_pane != .secondary or self.secondary == null) self.panel = .editor;
     const id = try self.workspace.untitled("");
@@ -226,9 +246,23 @@ pub fn newFile(self: *Shell) !void {
 }
 
 pub fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
+    const pane_index: usize = if (self.active_pane == .secondary) 1 else 0;
+    if (self.currentTool(@intCast(pane_index)) == .search) {
+        if (self.search.editing.panes[pane_index].active) |id| for (self.search.editing.panes[pane_index].views.items) |*view| if (std.meta.eql(view.document, id)) return .{ .id = id, .editor = &view.editor };
+    }
+    if (self.currentTool(@intCast(pane_index)) == .git_diff and self.git.selected_commit.len == 0 and !self.git.staged_diff and !self.git.stash_view) {
+        if (self.git.editing.active) |id| for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) return .{ .id = id, .editor = &view.editor };
+    }
     if (self.active_pane == .secondary) if (self.secondary) |*pane| return .{ .id = pane.document, .editor = &pane.editor };
     if (self.tabs.items.len == 0) return error.NoDocument;
     return .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
+}
+
+pub fn activeOrigin(self: *const Shell) u8 {
+    const pane: u8 = if (self.active_pane == .secondary) 1 else 0;
+    if (self.currentTool(pane) == .search and self.search.editing.panes[pane].active != null) return 3 + pane;
+    if (git_editing.active(self)) return 2;
+    return pane;
 }
 
 fn firstDirty(self: *const Shell) ?usize {
@@ -270,6 +304,7 @@ pub fn finishCloseTab(self: *Shell, index: usize) !void {
     const id = self.tabs.items[index].document;
     if (!try self.workspace.close(id, .discard)) return;
     self.git.editing.remove(id);
+    self.search.editing.remove(id);
     if (self.git.editable) |*projection| projection.removeSource(id) catch {};
     if (self.preview) |*preview| if (std.meta.eql(preview.document, id)) {
         preview.view.deinit();
@@ -325,6 +360,7 @@ pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pan
     if (outcome.change == null and !outcome.reset) return;
     defer cx.notify();
     self.language.clearCompletion();
+    try search_editing.changed(self, id, if (outcome.change) |*change| change else null, pane);
     var snapshot = try self.workspace.snapshot(id);
     defer snapshot.deinit();
     for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id) and pane != 0) {
@@ -394,6 +430,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
     if (which != .complete) self.language.clearCompletion();
+    if (try search_editing.command(self, cx, which)) return;
     if (try git_editing.command(self, cx, which)) return;
     if (try git_commands.execute(self, cx, which)) return;
     if (try open_project.command(self, cx, which)) return;
@@ -539,7 +576,6 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .install_extension => try overlays.show(self, cx, .extension_path),
         .install_bundled_extension => try services_extensions.installBundled(self, cx),
         .project_search => {
-            self.language.clearReferences();
             if (self.currentTool(if (self.active_pane == .secondary) 1 else 0) == .search) {
                 if (self.active_pane == .secondary) self.secondary_tool = null else self.panel = .editor;
                 return;
@@ -549,7 +585,6 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             self.search_focus_request +%= 1;
         },
         .run_project_search => {
-            self.language.clearReferences();
             try services_search.start(self, cx);
         },
 

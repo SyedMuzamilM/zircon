@@ -1,13 +1,11 @@
 //! Persistent project-search tab with source-linked excerpts. Buffers override
-//! disk files; clicking a row opens the original document, never a copied buffer.
+//! disk files; excerpts edit their source documents and headers open source tabs.
 const std = @import("std");
-const zircon_editor = @import("zircon_editor");
-const search = @import("zircon_search");
 const ui = @import("zircon_ui");
+const search_editing = @import("../search_editing.zig");
 const shell = @import("../shell.zig");
 const v = @import("components.zig");
 const field_input = @import("input.zig");
-const code = zircon_editor.code_line;
 const Shell = shell.Shell;
 
 pub const Fields = struct {
@@ -20,16 +18,20 @@ pub const Fields = struct {
 
 pub const Target = struct { group: u32, match: u32, generation: u64 };
 const header_height: f32 = 36;
-pub fn contentHeight(results: search.Results, line_height: f32) f32 {
+pub fn contentHeight(self: *const Shell) !f32 {
+    const results = self.search.results orelse return 0;
+    const line_height = self.editor_options.font_size * self.editor_options.line_height;
     var total: f32 = 0;
-    for (results.groups) |group| {
+    for (results.groups, 0..) |group, group_index| {
         total += header_height;
-        for (group.excerpts) |excerpt| total += @as(f32, @floatFromInt(std.mem.count(u8, excerpt.bytes, "\n") + 1)) * line_height + 12;
+        for (group.excerpts, 0..) |_, index| {
+            if (try search_editing.excerpt(self, group_index, index)) |source| total += @as(f32, @floatFromInt(source.rows)) * line_height + 12 else total += 40;
+        }
     }
     return total;
 }
 
-pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
+pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
     const c = self.colors;
     const line_height = self.editor_options.font_size * self.editor_options.line_height;
     var content: std.ArrayList(ui.Element) = .empty;
@@ -38,7 +40,9 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             .flex_grow = 1,
             .min_width = .{ .px = 0 },
             .height = .{ .px = 32 },
-        }).id(.{ .string = "project-query" }).request_focus(self.search_focus_request).build();
+        })
+            .id(.{ .string = "project-query" }).request_focus(self.search_focus_request)
+            .build();
         try content.append(b.allocator(), try b.fluent().div()
             .h(.{ .px = 56 })
             .shrink_0()
@@ -50,7 +54,8 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             .children(.{
                 query,
                 v.actionButton(b, c, .run_project_search, if (self.search.busy) "Searching…" else "Search", false),
-            }).listeners(.{ .on_input = b.onInput(Shell.onSearchQuery) }).build());
+            }).listeners(.{ .on_input = b.onInput(Shell.onSearchQuery) })
+            .build());
     }
     const summary = if (self.search.results) |results| try std.fmt.allocPrint(b.allocator(), "{d} matches in {d} files and buffers{s}", .{ results.total_matches, results.groups.len, if (results.truncated) " · results limited" else "" }) else "Search all project files, including unsaved and untitled buffers";
     try content.append(b.allocator(), try b.fluent().div()
@@ -62,9 +67,9 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .children(.{v.text(b, summary, c.muted, 12)})
         .build());
     try content.append(b.allocator(), try v.rule(b, c));
-    const viewport = @max(1, b.viewport().height - v.metrics.titlebar - v.metrics.tabs - v.metrics.status - 85);
-    const total = if (self.search.results) |results| contentHeight(results, line_height) else 0;
-    const top = @min(self.search.scroll.offset, @max(0, total - viewport));
+    const viewport = self.search.editing.viewport[pane] orelse @max(1, b.viewport().height - v.metrics.titlebar - v.metrics.tabs - v.metrics.status - 85);
+    const total = try contentHeight(self);
+    const top = @min(self.search.editing.scroll[pane].offset, @max(0, total - viewport));
     const bottom = top + viewport;
     var y: f32 = 0;
     var first: ?f32 = null;
@@ -92,66 +97,45 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                     .overflow_hidden()
                     .on_click(b.onClickWith(Shell.onSearchResult, target))
                     .children(&.{
-                        try v.fileGlyph(self, b, path, false, false, 16), try v.text(b, path, c.text, 13),
-                        try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} matches{s}", .{ group.matches.len, if (group.source == .buffer) " · open buffer" else "" }), c.muted, 11),
-                    }).id(.{ .number = @intCast(group_index) }).build());
+                        try v.fileGlyph(self, b, path, false, false, 16),                                                                                                         try v.text(b, path, c.text, 13),
+                        try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} {s}", .{ group.matches.len, if (group.matches.len == 1) "match" else "matches" }), c.muted, 11),
+                    })
+                    .id(.{ .number = @intCast(group_index) })
+                    .build());
             }
             y += header_height;
-            var match_cursor: usize = 0;
-            for (group.excerpts) |excerpt| {
-                if (y >= bottom) break;
-                var lines = std.mem.splitScalar(u8, excerpt.bytes, '\n');
-                var row = excerpt.start_line;
-                var offset = excerpt.source_range.start;
-                while (lines.next()) |line| {
-                    if (y >= bottom) break;
-                    while (match_cursor < group.matches.len and group.matches[match_cursor].line < row) match_cursor += 1;
-                    if (visible(y, line_height, top, bottom)) {
+            for (group.excerpts, 0..) |_, excerpt_index| {
+                const source = try search_editing.excerpt(self, group_index, excerpt_index) orelse {
+                    if (visible(y, 40, top, bottom)) {
                         if (first == null) first = y;
-                        var ranges: std.ArrayList(code.Highlight) = .empty;
-                        var index = match_cursor;
-                        var fill = c.accent;
-                        fill.a = 0.23;
-                        while (index < group.matches.len and group.matches[index].line == row) : (index += 1) {
-                            const range = group.matches[index].range;
-                            try ranges.append(b.allocator(), .{ .start = @min(line.len, range.start -| offset), .end = @min(line.len, range.end -| offset), .color = fill });
-                        }
-                        var destination = target;
-                        destination.match = @intCast(@min(match_cursor, group.matches.len -| 1));
-                        const number = try std.fmt.allocPrint(b.allocator(), "{d}", .{row + 1});
-                        const label = try std.fmt.allocPrint(b.allocator(), "{s}   {s}", .{ number, line });
-                        try rows.append(b.allocator(), try b.fluent().button(.{
-                            .label = label,
-                        })
-                            .flex()
-                            .h(.{ .px = line_height })
-                            .gap_px(10)
+                        try rows.append(b.allocator(), try b.fluent().div()
+                            .h(.{ .px = 40 })
                             .shrink_0()
-                            .hover_background(c.hover)
-                            .overflow_hidden()
-                            .on_click(b.onClickWith(Shell.onSearchResult, destination))
-                            .children(&.{
-                                try b.fluent().div()
-                                    .w(.{ .px = 45 })
-                                    .shrink_0()
-                                    .items(.end)
-                                    .justify_center()
-                                    .flex_col()
-                                    .children(.{v.text(b, number, self.editor_options.theme.line_number, 12)})
-                                    .build(),
-                                try b.fluent().div()
-                                    .w(.{ .px = 1 })
-                                    .shrink_0()
-                                    .background(c.border_subtle)
-                                    .children(.{})
-                                    .build(),
-                                try code.element(b, line, group.path() orelse group.title, self.editor_options.font_size, line_height, self.editor_options.theme, ranges.items),
-                            }).build());
+                            .padding(.{ .left = 14 })
+                            .items_center()
+                            .children(.{v.text(b, "This source changed. Run the search again.", c.muted, 12)})
+                            .build());
                     }
-                    y += line_height;
-                    offset += line.len + 1;
-                    row += 1;
+                    y += 40;
+                    continue;
+                };
+                const height = @as(f32, @floatFromInt(source.rows)) * line_height;
+                if (visible(y, height, top, bottom)) {
+                    const skipped: usize = @intFromFloat(@floor(@max(0, top - y) / line_height));
+                    const shown: usize = @min(source.rows - skipped, @as(usize, @intFromFloat(@ceil((bottom - @max(y, top)) / line_height))) + 1);
+                    const origin = y + @as(f32, @floatFromInt(skipped)) * line_height;
+                    if (first == null) first = origin;
+                    const record = try self.workspace.getConst(source.document);
+                    try rows.append(b.allocator(), try search_editing.render(self, b, .{
+                        .group = @intCast(group_index),
+                        .excerpt = @intCast(excerpt_index),
+                        .generation = self.search.editing.generation,
+                        .revision = record.doc.revision(),
+                        .first_row = source.first_row + skipped,
+                        .pane = pane,
+                    }, source, source.first_row + skipped, shown));
                 }
+                y += height;
                 if (visible(y, 12, top, bottom)) {
                     if (first == null) first = y;
                     try rows.append(b.allocator(), try b.fluent().div()
@@ -174,7 +158,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .flex_col()
         .children(rows.items)
         .id(.{ .string = "search-excerpts" })
-        .listeners(.{ .on_input = b.onInput(Shell.onSearchScroll) })
+        .listeners(.{ .on_input = b.onInputWith(onScroll, pane) })
         .build());
     return b.fluent().div()
         .grow()
@@ -194,5 +178,14 @@ fn note(b: *ui.Ui, c: v.Palette, text: []const u8) !ui.Element {
     return b.fluent().adopt(try v.text(b, text, c.muted, 13)).style(.{
         .padding = ui.Insets.all(18),
         .text = .{ .size = 13, .color = c.muted },
-    }).build();
+    })
+        .build();
+}
+
+fn onScroll(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !void {
+    if (event.data != .scroll) return;
+    self.search.editing.viewport[pane] = event.bounds.height;
+    self.search.editing.scroll[pane].wheel(event.data.scroll.y, try contentHeight(self), event.bounds.height);
+    event.preventDefault();
+    cx.notify();
 }

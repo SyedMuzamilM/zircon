@@ -15,7 +15,7 @@ const v = @import("components.zig");
 const Shell = shell.Shell;
 const Action = union(enum) { command: commands.Command, copy_trim, reveal, terminal };
 const Entry = struct { label: []const u8, action: Action, group: u8, enabled: bool = true };
-pub const Model = struct { document: ws.DocumentId, revision: u64, selection: u64, pane: u8, anchor: ui.Point, selected: usize = 0, keyboard: bool = false };
+pub const Model = struct { document: ws.DocumentId, revision: u64, selection: u64, has_selection: bool, pane: u8, anchor: ui.Point, selected: usize = 0, keyboard: bool = false };
 const row_height: f32 = 30;
 
 fn fingerprint(state: *const editor.Editor) u64 {
@@ -30,6 +30,9 @@ fn validSelection(state: *editor.Editor, menu: Model) !*editor.Editor {
 fn sourceEditor(self: *Shell, menu: Model) !*editor.Editor {
     const record = try self.workspace.getConst(menu.document);
     if (record.doc.revision() != menu.revision) return error.StaleContextMenu;
+    if (self.currentTool(menu.pane) == .search) {
+        for (self.search.editing.panes[menu.pane].views.items) |*view| if (std.meta.eql(view.document, menu.document)) return validSelection(&view.editor, menu);
+    }
     if (menu.pane == 1) {
         if (self.secondary) |*pane| if (std.meta.eql(pane.document, menu.document) and self.secondary_tool == null) return validSelection(&pane.editor, menu);
     } else if (self.tabs.items.len > 0 and (self.panel == .editor or self.panel == .markdown)) {
@@ -46,7 +49,7 @@ fn entries(self: *const Shell, menu: Model) [12]Entry {
         break;
     };
     if (client != null and !client.?.ready()) client = null;
-    const selected = if (menu.pane == 1 and self.secondary != null) !self.secondary.?.editor.primary().empty() else self.tabs.items.len > 0 and !self.tabs.items[self.active].editor.primary().empty();
+    const selected = menu.has_selection;
     const saved = if (self.workspace.getConst(menu.document)) |record| record.path != null else |_| false;
     return .{
         .{ .label = "Go to Definition", .action = .{ .command = .go_to_definition }, .group = 0, .enabled = client != null and client.?.supportsDefinition() },
@@ -90,7 +93,7 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editor.Editor, docu
     self.popup = .none;
     self.git.menu = .none;
     self.menu_open = false;
-    self.editor_context_menu = .{ .document = id, .revision = snapshot.revision(), .selection = fingerprint(state), .pane = pane, .anchor = e.data.pointer_down.position };
+    self.editor_context_menu = .{ .document = id, .revision = snapshot.revision(), .selection = fingerprint(state), .has_selection = !state.primary().empty(), .pane = pane, .anchor = e.data.pointer_down.position };
     const choices = entries(self, self.editor_context_menu.?);
     for (choices, 0..) |choice, index| if (choice.enabled) {
         self.editor_context_menu.?.selected = index;

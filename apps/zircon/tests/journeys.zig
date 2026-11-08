@@ -12,11 +12,13 @@ const grammar_retry_tests = @import("grammar_retry_tests.zig");
 const language_actions_tests = @import("language_actions_tests.zig");
 const language_lifecycle_tests = @import("language_lifecycle_tests.zig");
 const recovery_tests = @import("recovery_tests.zig");
+const search_editing_tests = @import("search_editing_tests.zig");
 const settings_tests = @import("settings_tests.zig");
 const sidebar_tests = @import("sidebar_tests.zig");
 const ui_ownership_tests = @import("ui_ownership_tests.zig");
 const workspace_polish_tests = @import("workspace_polish_tests.zig");
 test {
+    _ = search_editing_tests;
     _ = git_workflow_tests;
     _ = editor_context_menu_tests;
     _ = git_tree_tests;

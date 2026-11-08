@@ -7,17 +7,21 @@ const ui = @import("zircon_ui");
 const zircon_workspace = @import("zircon_workspace");
 const actions = @import("../actions.zig");
 const panes = @import("../panes.zig");
+const search_editing = @import("../search_editing.zig");
 const shell = @import("../shell.zig");
 const handoff = @import("handoff.zig");
 const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 pub const Model = struct {
+    query: []u8 = &.{},
+    editing: search_editing.Model = .{},
     results: ?search.Results = null,
     generation: u64 = 0,
     busy: bool = false,
     task: ?ui.tasks.Handle = null,
-    scroll: ui.controls.Scroll = .{},
     pub fn deinit(self: *Model) void {
+        self.editing.deinit();
+        a.free(self.query);
         if (self.results) |*result| result.deinit();
     }
 };
@@ -69,10 +73,12 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.search.task) |task| cx.app.cancelTask(task) catch {};
         if (self.search.results) |*results| results.deinit();
         self.search.results = null;
+        search_editing.clear(self);
+        a.free(self.search.query);
+        self.search.query = &.{};
         self.search.generation = std.math.add(u64, self.search.generation, 1) catch return error.SearchGenerationExhausted;
         self.search.task = null;
         self.search.busy = false;
-        self.search.scroll.offset = 0;
         a.free(query);
         cx.notify();
         return;
@@ -123,13 +129,16 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
         self.search.busy = false;
         self.search.task = null;
     }
+    const owned_query = try a.dupe(u8, query);
+    errdefer a.free(owned_query);
     const task = try cx.spawn(Job, .{ .io = self.workspace.io, .generation = self.search.generation, .query = query, .buffers = buffer_slice, .files = files }, complete);
+    a.free(self.search.query);
+    self.search.query = owned_query;
     self.search.task = task;
     self.search.busy = true;
     self.showTool(.search);
     self.tool_tabs.search = true;
     self.overlay = .none;
-    self.search.scroll.offset = 0;
     cx.notify();
 }
 
@@ -143,7 +152,9 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         return;
     };
     if (box.value.?.value.generation != self.search.generation) return;
-    const value = box.take();
+    var value = box.take();
+    errdefer value.deinit();
+    try search_editing.install(self, value.value);
     if (self.search.results) |*old| old.deinit();
     self.search.results = value.value;
     self.search.busy = false;
@@ -156,6 +167,7 @@ pub fn id(document: zircon_workspace.DocumentId) u64 {
 }
 
 pub fn activate(self: *Shell, cx: *ui.Context(Shell), group_index: usize, match_index: usize) !void {
+    if (try search_editing.activate(self, cx, group_index, match_index)) return;
     const results = self.search.results orelse return;
     if (group_index >= results.groups.len) return;
     const group = results.groups[group_index];

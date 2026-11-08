@@ -266,6 +266,7 @@ fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), destinati
         return;
     }
     const view = try getView(self, destination.document);
+    if (e.data == .pointer_down) _ = try actions.ensureTab(self, destination.document);
     if (e.data == .pointer_down or view.editor.edit_scope == null) {
         var snapshot = record.doc.snapshot();
         defer snapshot.deinit();

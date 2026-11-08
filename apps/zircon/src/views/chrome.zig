@@ -485,9 +485,11 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.tab_drag) |drag| if (drag.moved) try items.append(b.allocator(), try v.text(b, "Drop on a tab strip or any editor edge · Esc cancels", c.muted, 11));
     try items.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
     if (self.tabs.items.len > 0 and b.viewport().width >= 650) {
+        const search_pane: usize = if (self.active_pane == .secondary) 1 else 0;
+        const search_view = if (self.currentTool(@intCast(search_pane)) == .search) self.search.editing.panes[search_pane].current() else null;
         const diff_view = if (git_editing.active(self)) self.git.editing.current() else null;
-        const id = if (diff_view) |view| view.document else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
-        const state = if (diff_view) |view| &view.editor else if (self.active_pane == .secondary and self.secondary != null) &self.secondary.?.editor else &self.tabs.items[self.active].editor;
+        const id = if (search_view) |view| view.document else if (diff_view) |view| view.document else if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
+        const state = if (search_view) |view| &view.editor else if (diff_view) |view| &view.editor else if (self.active_pane == .secondary and self.secondary != null) &self.secondary.?.editor else &self.tabs.items[self.active].editor;
         var snapshot = try self.workspace.snapshot(id);
         defer snapshot.deinit();
         const point = try snapshot.pointAt(@min(state.primary().head, snapshot.byteLen()));
