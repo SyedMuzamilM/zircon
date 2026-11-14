@@ -46,7 +46,7 @@ pub const Frame = struct {
     retiring: bool = false,
     fluent_error: ?anyerror = null,
     bounds: []const geometry.Rect = &.{},
-    scene: graphics_scene.Frame = .{ .items = &.{}, .background = .black },
+    scene: graphics_scene.Frame = .{ .items = &.{}, .background = .black, .animations = &.{} },
     timeline: ?*animation_timeline.Timeline = null,
     time: f64 = 0,
     next_deadline: ?f64 = null,
@@ -78,7 +78,7 @@ pub const Frame = struct {
         frame.epoch = next;
         frame.retiring = false;
         frame.bounds = &.{};
-        frame.scene = .{ .items = &.{}, .background = .black };
+        frame.scene = .{ .items = &.{}, .background = .black, .animations = &.{} };
         frame.timeline = null;
         frame.time = 0;
         frame.text_input = null;
@@ -98,7 +98,7 @@ pub const Frame = struct {
         frame.app = null;
         frame.root = null;
         frame.bounds = &.{};
-        frame.scene = .{ .items = &.{}, .background = .black };
+        frame.scene = .{ .items = &.{}, .background = .black, .animations = &.{} };
         frame.timeline = null;
         frame.time = 0;
         frame.text_input = null;

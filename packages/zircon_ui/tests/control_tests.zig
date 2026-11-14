@@ -76,6 +76,28 @@ test "virtual list range and scrolling keep render work proportional to viewport
     try t.expectEqual(@as(f32, 900), scroll.offset);
     try t.expectError(error.InvalidViewport, ui.controls.visibleRows(1, 0, 0, 100, 1));
 }
+test "variable list uses indexed prefix geometry for million-item ranges" {
+    const Model = struct {
+        fn offset(_: *anyopaque, idx: usize) f32 {
+            return @as(f32, @floatFromInt(idx)) * 20;
+        }
+        fn index(_: *anyopaque, value: f32) usize {
+            return @intFromFloat(@floor(@max(0, value) / 20));
+        }
+        fn paint(_: *anyopaque, _: usize, _: ui.Rect, _: *ui.PaintCx) !void {}
+    };
+    var model: u8 = 0;
+    var list = ui.controls.variableList(1_000_000, 400, 2, &model, Model.offset, Model.index, Model.paint);
+    var metrics: ui.layout.FixedMetrics = .{};
+    var layout_cx: ui.LayoutCx = .{ .allocator = t.allocator, .available = .{ .width = 320, .height = 100 }, .measurer = metrics.measurer() };
+    const layout = try list.requestLayout(&layout_cx);
+    try t.expectEqual(@as(f32, 20_000_000), layout.state.content_height);
+    var state = layout.state;
+    var prepaint_cx: ui.PrepaintCx = .{ .allocator = t.allocator };
+    const prepaint = try list.prepaint(&prepaint_cx, .{ .width = 320, .height = 100 }, &state);
+    try t.expectEqual(@as(usize, 18), prepaint.start);
+    try t.expectEqual(@as(usize, 28), prepaint.end);
+}
 test "typed keymap shares semantic commands and rejects ambiguous bindings" {
     const Action = enum { save, find };
     const Map = ui.Keymap(Action);
@@ -83,6 +105,22 @@ test "typed keymap shares semantic commands and rejects ambiguous bindings" {
     try t.expectEqual(Action.save, map.resolve(.{ .key_down = .{ .key = .s, .modifiers = .{ .command = true } } }).?);
     try t.expect(map.resolve(.{ .key_down = .{ .key = .s } }) == null);
     try t.expectError(error.DuplicateKeyBinding, Map.init(&.{ .{ .chord = .{ .key = .s }, .action = .save }, .{ .chord = .{ .key = .s }, .action = .find } }));
+}
+test "sequence keymap resolves context-aware multi-stroke bindings" {
+    const Action = enum { go_to_file, go_to_line, save };
+    const Map = ui.SequenceMap(Action);
+    const g = [_]ui.Chord{ .{ .key = .g }, .{ .key = .f } };
+    const l = [_]ui.Chord{ .{ .key = .g }, .{ .key = .l } };
+    const bindings = [_]Map.Binding{ .{ .sequence = &g, .action = .go_to_file, .context = "editor" }, .{ .sequence = &l, .action = .go_to_line, .context = "editor" }, .{ .sequence = &.{.{ .key = .s, .modifiers = .{ .command = true } }}, .action = .save } };
+    var map = try Map.init(&bindings);
+    map.setContext("editor");
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .g } }) == .pending);
+    try t.expectEqual(Action.go_to_file, map.resolve(.{ .key_down = .{ .key = .f } }).action);
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .g } }) == .pending);
+    try t.expectEqual(Action.go_to_line, map.resolve(.{ .key_down = .{ .key = .l } }).action);
+    map.setContext("terminal");
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .g } }) == .none);
+    try t.expectEqual(Action.save, map.resolve(.{ .key_down = .{ .key = .s, .modifiers = .{ .command = true } } }).action);
 }
 
 test "shared SVG icons retain filled shapes and source opacity under theme tinting" {

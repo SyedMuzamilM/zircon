@@ -196,7 +196,7 @@ pub const App = struct {
                 continue;
             }
             w.time = time;
-            if (w.animating) w.dirty = true;
+            if (w.animating and !w.scene_animating) w.dirty = true;
             if (w.deadline) |deadline| if (time >= deadline) {
                 w.dirty = true;
             };

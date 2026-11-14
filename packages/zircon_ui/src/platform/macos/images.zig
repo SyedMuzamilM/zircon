@@ -31,6 +31,20 @@ extern "c" fn CGBitmapContextCreate(?*anyopaque, usize, usize, usize, usize, Ref
 extern "c" fn CGContextSetInterpolationQuality(Ref, i32) void;
 extern "c" fn CGContextDrawImage(Ref, objc.CGRect, Ref) void;
 pub const Decoded = struct { width: u32, height: u32, pixels: []u8 };
+/// Decode an SVG through AppKit's native SVG support, then normalize it to the
+/// same premultiplied RGBA8 representation used by ImageIO assets.
+pub fn decodeSvg(a: std.mem.Allocator, bytes: []const u8) !Decoded {
+    if (bytes.len == 0) return error.InvalidImage;
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const data = objc.send(objc.Id, objc.class("NSData"), "dataWithBytes:length:", .{ @as(?*const anyopaque, bytes.ptr), bytes.len }) orelse return error.InvalidImage;
+    const image = objc.send(objc.Id, objc.send(objc.Id, objc.class("NSImage"), "alloc", .{}), "initWithData:", .{data}) orelse return error.InvalidImage;
+    defer objc.release(image);
+    const tiff = objc.send(objc.Id, image, "TIFFRepresentation", .{}) orelse return error.InvalidImage;
+    const bitmap = objc.send(objc.Id, objc.class("NSBitmapImageRep"), "imageRepWithData:", .{tiff}) orelse return error.InvalidImage;
+    const cg = objc.send(?Ref, bitmap, "CGImage", .{}) orelse return error.InvalidImage;
+    return decodeCgImage(a, cg);
+}
 pub fn decode(a: std.mem.Allocator, bytes: []const u8) !Decoded {
     const data = CFDataCreate(null, bytes.ptr, @intCast(bytes.len)) orelse return error.NativeImageAllocationFailed;
     defer CFRelease(data);
@@ -51,6 +65,9 @@ pub fn decode(a: std.mem.Allocator, bytes: []const u8) !Decoded {
     defer CFRelease(options);
     const image = CGImageSourceCreateThumbnailAtIndex(source, 0, options) orelse return error.InvalidImage;
     defer CFRelease(image);
+    return decodeCgImage(a, image);
+}
+fn decodeCgImage(a: std.mem.Allocator, image: Ref) !Decoded {
     const width = std.math.cast(u32, CGImageGetWidth(image)) orelse return error.InvalidImageSize;
     const height = std.math.cast(u32, CGImageGetHeight(image)) orelse return error.InvalidImageSize;
     const length = try images.byteCount(width, height);

@@ -24,3 +24,71 @@ pub fn Keymap(comptime Action: type) type {
         }
     };
 }
+
+/// Context-aware multi-stroke bindings. The map keeps only a small pending
+/// prefix; callers decide how to handle a pending sequence timeout.
+pub fn SequenceMap(comptime Action: type) type {
+    return struct {
+        pub const Binding = struct {
+            sequence: []const Chord,
+            action: Action,
+            context: []const u8 = "",
+        };
+        pub const Result = union(enum) { none, pending, action: Action };
+        bindings: []const Binding,
+        pending: usize = 0,
+        context: []const u8 = "",
+
+        pub fn init(bindings: []const Binding) !@This() {
+            for (bindings, 0..) |binding, i| {
+                if (binding.sequence.len == 0) return error.EmptyKeySequence;
+                for (bindings[0..i]) |other| if (other.sequence.len == binding.sequence.len and sameSequence(other.sequence, binding.sequence) and std.mem.eql(u8, other.context, binding.context)) return error.DuplicateKeyBinding;
+            }
+            return .{ .bindings = bindings };
+        }
+
+        pub fn setContext(self: *@This(), context: []const u8) void {
+            self.context = context;
+            self.pending = 0;
+        }
+
+        pub fn reset(self: *@This()) void {
+            self.pending = 0;
+        }
+
+        pub fn resolve(self: *@This(), input: p.Input) Result {
+            if (input != .key_down) return .none;
+            const key = input.key_down.key;
+            const modifiers = input.key_down.modifiers;
+            const prefix = self.pending;
+            var matched_prefix = false;
+            for (self.bindings) |binding| {
+                if (binding.context.len != 0 and !std.mem.eql(u8, binding.context, self.context)) continue;
+                if (prefix >= binding.sequence.len) continue;
+                if (binding.sequence[prefix].matches(key, modifiers)) matched_prefix = true;
+            }
+            if (!matched_prefix and prefix != 0) {
+                self.pending = 0;
+                return self.resolve(input);
+            }
+            for (self.bindings) |binding| {
+                if (binding.context.len != 0 and !std.mem.eql(u8, binding.context, self.context)) continue;
+                if (prefix + 1 != binding.sequence.len) continue;
+                if (!binding.sequence[prefix].matches(key, modifiers)) continue;
+                self.pending = 0;
+                return .{ .action = binding.action };
+            }
+            if (matched_prefix) {
+                self.pending = prefix + 1;
+                return .pending;
+            }
+            return .none;
+        }
+    };
+}
+
+fn sameSequence(a: []const Chord, b: []const Chord) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |left, right| if (!left.matches(right.key, right.modifiers)) return false;
+    return true;
+}

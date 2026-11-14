@@ -45,10 +45,16 @@ const Instance = extern struct {
     uv: [4]f32,
     radius: f32,
     mode: f32,
-    padding: [2]f32 = .{ 0, 0 },
+    transform_scale: [2]f32 = .{ 1, 1 },
+    transform_translate: [2]f32 = .{ 0, 0 },
+    rotation: f32 = 0,
+    padding: f32 = 0,
+    gradient_color: [4]f32 = .{ 0, 0, 0, 0 },
+    gradient_start: [2]f32 = .{ 0, 0 },
+    gradient_end: [2]f32 = .{ 1, 0 },
 };
 comptime {
-    std.debug.assert(@sizeOf(Instance) == 80);
+    std.debug.assert(@sizeOf(Instance) == 128);
 }
 
 const GlyphKey = struct { font: CFRef, scale: u32, glyph: u16, phase_x: u8, phase_y: u8 };
@@ -233,7 +239,7 @@ pub const Renderer = struct {
         return result;
     }
 
-    fn append(r: *Renderer, rect: Rect, clip: Rect, color: Color, uv: Rect, radius: f32, mode: f32) !void {
+    fn append(r: *Renderer, rect: Rect, clip: Rect, color: Color, uv: Rect, radius: f32, mode: f32, transform: scene.Transform, gradient: ?scene.Gradient) !void {
         if (rect.intersection(clip).width <= 0 or rect.intersection(clip).height <= 0) return;
         if (r.instances.items.len >= max_instances) return error.SceneTooLarge;
         try r.instances.append(r.allocator, .{
@@ -243,6 +249,13 @@ pub const Renderer = struct {
             .uv = .{ uv.x, uv.y, uv.width, uv.height },
             .radius = radius,
             .mode = mode,
+            .transform_scale = .{ transform.scale_x, transform.scale_y },
+            .transform_translate = .{ transform.translate_x, transform.translate_y },
+            .rotation = transform.rotation,
+            .padding = transform.opacity,
+            .gradient_color = if (gradient) |value| .{ value.end_color.r, value.end_color.g, value.end_color.b, value.end_color.a } else .{ 0, 0, 0, 0 },
+            .gradient_start = if (gradient) |value| .{ value.start.x, value.start.y } else .{ 0, 0 },
+            .gradient_end = if (gradient) |value| .{ value.end.x, value.end.y } else .{ 1, 0 },
         });
     }
 
@@ -256,10 +269,11 @@ pub const Renderer = struct {
             switch (item.kind) {
                 .line => {
                     const segment = item.segment orelse return error.InvalidScene;
-                    try r.append(item.rect, item.clip, item.color, .{ .x = segment.start.x, .y = segment.start.y, .width = segment.end.x, .height = segment.end.y }, segment.width / 2, 3);
+                    try r.append(item.rect, item.clip, item.color, .{ .x = segment.start.x, .y = segment.start.y, .width = segment.end.x, .height = segment.end.y }, segment.width / 2, 3, item.transform, null);
                 },
-                .rect => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 0),
-                .image => try r.append(item.rect, item.clip, item.color, item.uv, 0, 2),
+                .rect => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 0, item.transform, null),
+                .image => try r.append(item.rect, item.clip, item.color, item.uv, 0, 2, item.transform, null),
+                .gradient => try r.append(item.rect, item.clip, item.color, .{}, item.radius, 4, item.transform, item.gradient),
                 .text => {
                     if (item.text.len == 0) continue;
                     const layout = try r.text.layout(item.text, item.font_size, item.mono);
@@ -290,7 +304,7 @@ pub const Renderer = struct {
                             const base_y = @floor(pixel_y);
                             const cached = try r.glyph(font, glyph_id, scale, @intFromFloat((pixel_x - base_x) * 4), @intFromFloat((pixel_y - base_y) * 4));
                             const b = cached.bounds;
-                            try r.append(.{ .x = base_x / scale + b.x, .y = base_y / scale - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1);
+                            try r.append(.{ .x = base_x / scale + b.x, .y = base_y / scale - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1, item.transform, null);
                         }
                     }
                 },
@@ -526,6 +540,7 @@ fn validateScene(frame: scene.Frame) !void {
             if (!std.math.isFinite(n) or n < 0 or n > 1) return error.InvalidScene;
         }
         if (!std.math.isFinite(item.radius) or item.radius < 0) return error.InvalidScene;
+        if (!std.math.isFinite(item.transform.scale_x) or !std.math.isFinite(item.transform.scale_y) or item.transform.scale_x <= 0 or item.transform.scale_y <= 0 or !std.math.isFinite(item.transform.translate_x) or !std.math.isFinite(item.transform.translate_y) or !std.math.isFinite(item.transform.rotation) or !std.math.isFinite(item.transform.opacity) or item.transform.opacity < 0 or item.transform.opacity > 1) return error.InvalidScene;
         if (item.kind == .line) {
             const segment = item.segment orelse return error.InvalidScene;
             inline for (.{ segment.start.x, segment.start.y, segment.end.x, segment.end.y, segment.width }) |value| if (!std.math.isFinite(value)) return error.InvalidScene;

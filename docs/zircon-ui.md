@@ -166,7 +166,10 @@ One settlement wave permits 4,096 deliveries before `EffectCycle`. This is an ov
 | `controls.TextInput` | Persistent single-line view with selection, dragging, clipboard, composition, appearance, and an optional leading icon |
 | `controls.Scroll` | `offset` state with `clamp`, `wheel`, and `reveal` methods |
 | `controls.visibleRows(count, height, offset, viewport, overscan)` | Visible range and top offset for fixed-height virtual rows |
+| `controls.UniformList` / `controls.uniformList` | Fixed-height virtual list; paints visible rows plus overscan without per-item nodes |
+| `controls.VariableList` / `controls.variableList` | Variable-height virtual list using caller-supplied prefix/index functions |
 | `controls.icons` | Named icons and drawing helpers generated from repository SVG assets |
+| `controls.Svg` / `graphics.images.Image.loadSvg` | Native macOS SVG rasterization with retained image transforms and scene animation |
 | `controls.metrics` | Shared control dimensions |
 | `typography` | UI/code font choices, installed font names, and `Typography` settings |
 | `TextRange`, `TextSnapshot`, `TextEdit` | UTF-8 byte ranges, revisioned surrounding text, and replacement edits |
@@ -193,9 +196,9 @@ pub fn paint(self: *T, cx: *ui.PaintCx, bounds: ui.Rect, layout: *LayoutState, p
 
 These are signatures, not a complete custom element. Phase state belongs to the frame. Optional `deinit(*T) void` releases retained resources when that frame retires. A successful `custom` call takes ownership of its value. On error, cleanup remains the caller's responsibility.
 
-`PaintCx.painter` is a `graphics.Painter`. It records ordered `fillRect`, `strokeRect`, `strokeLine`, `drawText`, and `drawImage` operations with clipping and opacity. `graphics.Scene` and `graphics.paintTree` expose lower-level scene construction. `PrepaintCx.requestFrameAfter(seconds)` schedules a future redraw, such as a caret-blink boundary.
+`PaintCx.painter` is a `graphics.Painter`. It records ordered `fillRect`, `fillLinearGradient`, layered `shadowRect`, `strokeRect`, `strokeLine`, `drawText`, `drawImage`, transformed images and scene-animated images with clipping and opacity. `graphics.Scene` and `graphics.paintTree` expose lower-level scene construction. `PrepaintCx.requestFrameAfter(seconds)` schedules a future redraw, such as a caret-blink boundary. Scene animation tracks update image transforms during presentation without rebuilding the UI tree.
 
-`graphics.images.Image.fromRgba` copies straight RGBA pixels and premultiplies alpha. `Image.load` decodes encoded images through macOS ImageIO and uses the first frame. Images are immutable retained values with `clone` and `deinit`, used on their creator thread. `drawImage(image, bounds, fit)` accepts `.contain`, `.cover`, or `.stretch`. The custom element retains its image until frame retirement; GPU submission separately retains textures in flight.
+`graphics.images.Image.fromRgba` copies straight RGBA pixels and premultiplies alpha. `Image.load` decodes encoded images through macOS ImageIO and uses the first frame; `Image.loadSvg` rasterizes AppKit SVG data into the same retained format. Images are immutable retained values with `clone` and `deinit`, used on their creator thread. `drawImage(image, bounds, fit)` accepts `.contain`, `.cover`, or `.stretch`. The custom element retains its image until frame retirement; GPU submission separately retains textures in flight.
 
 Decoded assets are limited to 64 MiB and 16,384 pixels per dimension. Cache and retired-frame budgets do not impose a whole-process memory cap. Examples: [painter tests](../packages/zircon_ui/tests/painter_tests.zig), [image tests](../packages/zircon_ui/tests/image_tests.zig), and the [editor canvas](../packages/zircon_editor/src/canvas.zig).
 
@@ -245,11 +248,11 @@ These are framework gaps, separate from the [editor backlog](editor-todo.md). Th
 | --- | --- | --- |
 | Accessibility | Focusable controls and keyboard traversal | OS accessibility tree, roles, names, values, actions, and screen-reader journeys |
 | Text correctness | Revisioned edits, native selector coverage, code-point movement | Real OS IME acceptance, grapheme-aware movement/deletion, broader bidi behavior, and color emoji |
-| Controls | Buttons, a single-line input, scroll math, icons, and custom elements | Reusable lists, toggles, menus, and richer text controls with keyboard and accessibility contracts |
+| Controls | Buttons, a single-line input, scroll math, fixed/variable virtual lists, icons, SVG elements, and custom elements | Toggles, menus, and richer text controls with keyboard and accessibility contracts |
 | Layout | Flex subset, stacks, clipping, and scrolling | Flex wrapping, grid, and baseline alignment with measurement/hit-testing regressions |
-| Graphics | Quads, round-capped lines, text, images, and generated icon drawing | General runtime SVG/path rendering and GPU/device recovery tests |
+| Graphics | Quads, gradients, layered shadows, round-capped lines, text, images, generated icons, runtime SVG rasterization, transforms, and scene animation | General vector path tessellation, color glyphs, and GPU/device recovery tests |
 | Native integration | macOS windows, integrated chrome, child windows, clipboard, and file/folder selection | Native application menus, save dialogs, and a consistent public dialog API |
-| Commands | Typed single-chord keymaps | Broader physical-key vocabulary, multi-stroke bindings, and context-sensitive resolution |
+| Commands | Typed single-chord and context-aware multi-stroke keymaps | Broader physical-key vocabulary, timeout policy, and editor integration |
 | Platforms | macOS native adapter and portable headless runtime | Linux/Windows native windows, input, text, clipboard, and rendering adapters |
 | Validation and performance | Portable and native suites, bounded caches, and frame rollback | Cancellation/load stress, whole-process resource measurements, and reproducible results using the [benchmark method](benchmarks/method.md) |
 | Package adoption | Local path dependency, source examples, and this API map | Release/distribution policy, API compatibility policy, and repeatable standalone consumer checks |

@@ -8,10 +8,13 @@ const scene = @import("scene.zig");
 const TextStyle = text_style.TextStyle;
 pub const Quad = struct { bounds: g.Rect, color: g.Color, radius: f32 = 0 };
 pub const Text = struct { bounds: g.Rect, text: []const u8, style: TextStyle = .{} };
+pub const Transform = scene.Transform;
+pub const Gradient = scene.Gradient;
 pub const Painter = struct {
     allocator: std.mem.Allocator,
     viewport: g.Rect,
     items: std.ArrayList(scene.Primitive) = .empty,
+    animations: std.ArrayList(scene.Animation) = .empty,
     clips: std.ArrayList(g.Rect) = .empty,
     opacity: f32 = 1,
     pub fn init(frame_allocator: std.mem.Allocator, viewport: g.Rect) !Painter {
@@ -38,6 +41,35 @@ pub const Painter = struct {
         var color = quad.color;
         color.a *= painter.opacity;
         try painter.items.append(painter.allocator, .{ .kind = .rect, .rect = quad.bounds, .clip = painter.clip(), .color = color, .radius = quad.radius });
+    }
+    pub fn fillLinearGradient(painter: *Painter, bounds: g.Rect, from: g.Color, to: g.Color, start: g.Point, end: g.Point, radius: f32) !void {
+        try validateRect(bounds);
+        try validateColor(from);
+        try validateColor(to);
+        inline for (.{ start.x, start.y, end.x, end.y, radius }) |value| if (!std.math.isFinite(value)) return error.InvalidDrawCommand;
+        if (radius < 0) return error.InvalidDrawCommand;
+        const clipped = bounds.intersection(painter.clip());
+        if (clipped.width == 0 or clipped.height == 0) return;
+        var color = from;
+        color.a *= painter.opacity;
+        var end_color = to;
+        end_color.a *= painter.opacity;
+        try painter.items.append(painter.allocator, .{ .kind = .gradient, .rect = bounds, .clip = clipped, .color = color, .radius = radius, .gradient = .{ .start = start, .end = end, .end_color = end_color } });
+    }
+    /// Emits a small layered approximation of a blurred shadow. It keeps the
+    /// scene representation batchable and avoids a separate blur texture.
+    pub fn shadowRect(painter: *Painter, bounds: g.Rect, color: g.Color, radius: f32, blur: f32, offset: g.Point) !void {
+        try validateRect(bounds);
+        try validateColor(color);
+        if (!std.math.isFinite(blur) or blur < 0 or !std.math.isFinite(offset.x) or !std.math.isFinite(offset.y) or !std.math.isFinite(radius) or radius < 0) return error.InvalidDrawCommand;
+        const layers: usize = @max(1, @as(usize, @intFromFloat(@ceil(blur / 2))));
+        for (0..layers) |layer| {
+            const t: f32 = @as(f32, @floatFromInt(layer + 1)) / @as(f32, @floatFromInt(layers));
+            var layer_color = color;
+            layer_color.a *= 1 - t;
+            const spread = blur * t;
+            try painter.fillRect(.{ .bounds = .{ .x = bounds.x + offset.x - spread, .y = bounds.y + offset.y - spread, .width = bounds.width + spread * 2, .height = bounds.height + spread * 2 }, .color = layer_color, .radius = radius + spread });
+        }
     }
     pub fn strokeRect(painter: *Painter, bounds: g.Rect, color: g.Color, width: f32) !void {
         try validateRect(bounds);
@@ -80,9 +112,14 @@ pub const Painter = struct {
     /// Records a borrowed asset view. An owning Image must remain alive until
     /// this scene has been submitted; custom elements retain it in frame cleanup.
     pub fn drawImage(painter: *Painter, asset: images.Image, bounds: g.Rect, fit: images.Fit) !void {
+        return painter.drawImageTransformed(asset, bounds, fit, .identity);
+    }
+    /// Draw an image with a transform carried in the scene instance.
+    pub fn drawImageTransformed(painter: *Painter, asset: images.Image, bounds: g.Rect, fit: images.Fit, transform: Transform) !void {
         try validateRect(bounds);
         const view = asset.view();
         try view.validate();
+        if (!std.math.isFinite(transform.scale_x) or !std.math.isFinite(transform.scale_y) or transform.scale_x <= 0 or transform.scale_y <= 0 or !std.math.isFinite(transform.translate_x) or !std.math.isFinite(transform.translate_y) or !std.math.isFinite(transform.rotation) or !std.math.isFinite(transform.opacity) or transform.opacity < 0 or transform.opacity > 1) return error.InvalidDrawCommand;
         if (bounds.width == 0 or bounds.height == 0) return;
         const clipped = bounds.intersection(painter.clip());
         if (clipped.width == 0 or clipped.height == 0) return;
@@ -107,12 +144,18 @@ pub const Painter = struct {
                 uv.y = (1 - uv.height) / 2;
             },
         }
-        try painter.items.append(painter.allocator, .{ .kind = .image, .rect = rect, .clip = clipped, .color = .{ .r = 1, .g = 1, .b = 1, .a = painter.opacity }, .image = view, .uv = uv });
+        try painter.items.append(painter.allocator, .{ .kind = .image, .rect = rect, .clip = clipped, .color = .{ .r = 1, .g = 1, .b = 1, .a = painter.opacity }, .image = view, .uv = uv, .transform = transform });
+    }
+    pub fn drawAnimatedImage(painter: *Painter, asset: images.Image, bounds: g.Rect, fit: images.Fit, spec: scene.AnimationSpec) !void {
+        if (!std.math.isFinite(spec.duration) or spec.duration <= 0) return error.InvalidAnimation;
+        const index = painter.items.items.len;
+        try painter.drawImageTransformed(asset, bounds, fit, spec.from);
+        try painter.animations.append(painter.allocator, .{ .item_index = index, .spec = spec });
     }
     pub fn finish(painter: *const Painter, background: g.Color) !scene.Frame {
         if (painter.clips.items.len != 0) return error.UnbalancedClip;
         try validateColor(background);
-        return .{ .items = painter.items.items, .background = background };
+        return .{ .items = painter.items.items, .background = background, .animations = painter.animations.items };
     }
 };
 fn validateRect(rect: g.Rect) !void {

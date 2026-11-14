@@ -515,7 +515,8 @@ fn contains(rect: ui.Rect, point: ui.Point) bool {
 }
 
 fn loadImage(a: std.mem.Allocator, bytes: []const u8) anyerror!Image {
-    return Image.load(a, bytes);
+    const prefix = bytes[0..@min(bytes.len, 256)];
+    return if (std.mem.indexOf(u8, prefix, "<svg") != null) Image.loadSvg(a, bytes) else Image.load(a, bytes);
 }
 
 fn onScreen(rect: ui.Rect, height: f32, scroll: f32) bool {

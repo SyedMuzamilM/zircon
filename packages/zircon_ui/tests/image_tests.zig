@@ -64,6 +64,34 @@ test "image fit geometry clips contain cover and stretch without copying pixels"
     try t.expectEqual(@as(f32, 0.5), frame.items[0].color.a);
     try t.expectEqual(image.view().pixels.ptr, frame.items[0].image.?.pixels.ptr);
 }
+test "transformed images and gradients stay in the scene without per-row expansion" {
+    var image = try images.Image.fromRgba(t.allocator, 1, 1, &.{ 255, 0, 0, 255 });
+    defer image.deinit();
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var painter = try ui.graphics.Painter.init(arena.allocator(), .{ .width = 100, .height = 100 });
+    try painter.drawImageTransformed(image, .{ .x = 10, .y = 10, .width = 20, .height = 20 }, .stretch, .{ .scale_x = 0.5, .scale_y = 2, .translate_x = 3, .rotation = 0.25 });
+    try painter.fillLinearGradient(.{ .x = 0, .y = 40, .width = 100, .height = 20 }, .black, .white, .{ .x = 0, .y = 40 }, .{ .x = 100, .y = 40 }, 4);
+    const frame = try painter.finish(.black);
+    try t.expectEqual(@as(usize, 2), frame.items.len);
+    try t.expectEqual(@as(f32, 0.5), frame.items[0].transform.scale_x);
+    try t.expect(frame.items[1].kind == .gradient);
+    try t.expectEqual(ui.Color.white, frame.items[1].gradient.?.end_color);
+}
+test "scene image animation advances without rebuilding the painter" {
+    var image = try images.Image.fromRgba(t.allocator, 1, 1, &.{ 255, 0, 0, 255 });
+    defer image.deinit();
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var painter = try ui.graphics.Painter.init(arena.allocator(), .{ .width = 40, .height = 40 });
+    try painter.drawAnimatedImage(image, .{ .width = 10, .height = 10 }, .stretch, .{ .from = .{}, .to = .{ .translate_x = 20, .opacity = 0.5 }, .duration = 1 });
+    var frame = try painter.finish(.black);
+    frame.startAnimations(0);
+    try t.expect(frame.advance(0.5));
+    try t.expectApproxEqAbs(@as(f32, 10), frame.items[0].transform.translate_x, 0.001);
+    try t.expectApproxEqAbs(@as(f32, 0.75), frame.items[0].transform.opacity, 0.001);
+    try t.expect(!frame.advance(1.1));
+}
 test "image construction allocation failure leaves source ownership unchanged" {
     try t.checkAllAllocationFailures(t.allocator, allocationCase, .{});
 }

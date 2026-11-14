@@ -11,7 +11,7 @@ pub const Asset = struct {
     pub fn init(a: std.mem.Allocator, io: std.Io, path: []const u8) !Asset {
         const encoded = try std.Io.Dir.cwd().readFileAlloc(io, path, a, .limited(ui.graphics.images.max_bytes));
         defer a.free(encoded);
-        var image = try Image.load(a, encoded);
+        var image = if (std.ascii.eqlIgnoreCase(std.fs.path.extension(path), ".svg")) try Image.loadSvg(a, encoded) else try Image.load(a, encoded);
         errdefer image.deinit();
         return .{ .image = image, .path = try a.dupe(u8, path) };
     }
@@ -22,7 +22,7 @@ pub const Asset = struct {
 };
 pub fn supported(path: []const u8) bool {
     const extension = std.fs.path.extension(path);
-    for ([_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff", ".bmp", ".webp" }) |candidate| if (std.ascii.eqlIgnoreCase(extension, candidate)) return true;
+    for ([_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff", ".bmp", ".webp", ".svg" }) |candidate| if (std.ascii.eqlIgnoreCase(extension, candidate)) return true;
     return false;
 }
 

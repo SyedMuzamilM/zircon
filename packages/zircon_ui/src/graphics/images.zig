@@ -58,6 +58,14 @@ pub const Image = struct {
         errdefer a.free(decoded.pixels);
         return adopt(a, decoded.width, decoded.height, decoded.pixels);
     }
+    /// Rasterizes SVG bytes through the native macOS SVG decoder.
+    pub fn loadSvg(a: std.mem.Allocator, encoded: []const u8) !Image {
+        if (comptime builtin.os.tag != .macos or !zircon_options.native) return error.ImageDecodingUnavailable;
+        if (encoded.len == 0 or encoded.len > max_bytes) return error.InvalidImage;
+        const decoded = try images.decodeSvg(a, encoded);
+        errdefer a.free(decoded.pixels);
+        return adopt(a, decoded.width, decoded.height, decoded.pixels);
+    }
     fn adopt(a: std.mem.Allocator, width: u32, height: u32, pixels: []u8) !Image {
         const identity = try reserveIdentity();
         const storage = try a.create(Storage);
@@ -91,6 +99,7 @@ pub const Image = struct {
     }
 };
 pub const load = Image.load;
+pub const loadSvg = Image.loadSvg;
 pub fn byteCount(width: u32, height: u32) !usize {
     if (width == 0 or height == 0 or width > max_dimension or height > max_dimension) return error.InvalidImageSize;
     const pixels = std.math.mul(usize, width, height) catch return error.InvalidImageSize;

@@ -53,6 +53,7 @@ pub const Window = struct {
     animations: animation_timeline.Timeline,
     time: f64 = 0,
     animating: bool = false,
+    scene_animating: bool = false,
     deadline: ?f64 = null,
     pub fn create(app: runtime.App, a: std.mem.Allocator, comptime T: type, options: Options, value: T) !*Window {
         comptime adapter.requireView(T);
@@ -92,7 +93,14 @@ pub const Window = struct {
         return 0;
     }
     pub fn draw(w: *Window) !bool {
-        if (w.closed or !w.dirty) return false;
+        if (w.closed) return false;
+        if (!w.dirty) {
+            if (!w.scene_animating) return false;
+            const active = w.frames.committed.scene.advance(w.time);
+            if (!try w.surface.?.present(w.frames.committed.scene)) return false;
+            w.scene_animating = active;
+            return true;
+        }
         const staging = try w.frames.begin();
         errdefer staging.discard();
         try w.animations.beginFrame(w.time);
@@ -132,6 +140,8 @@ pub const Window = struct {
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
         try tree_paint.paint(staging, &layout, &painter, metrics);
         staging.scene = try painter.finish(w.background);
+        staging.scene.startAnimations(w.time);
+        _ = staging.scene.advance(w.time);
         const profile_painted = w.profileNow();
         if (!try surface.present(staging.scene)) {
             staging.discard();
@@ -153,6 +163,7 @@ pub const Window = struct {
         if (w.pointer_position != null or w.capture != null) w.updateCursor();
         w.animations.commitFrame();
         w.animating = w.animations.active(w.time);
+        w.scene_animating = w.frames.committed.scene.animations.len != 0 and w.frames.committed.scene.advance(w.time);
         w.deadline = w.frames.committed.next_deadline;
         w.dirty = false;
         w.frame_count += 1;

@@ -52,6 +52,19 @@ test "ImageIO preserves premultiplied alpha and rejects decode allocation failur
         try t.expectError(error.OutOfMemory, native.images.Image.load(allocator.allocator(), encoded));
     }
 }
+test "AppKit rasterizes SVG assets into the shared premultiplied image format" {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"12\"><rect width=\"20\" height=\"12\" fill=\"#ff0000\"/></svg>";
+    var image = try native.images.Image.loadSvg(t.allocator, svg);
+    defer image.deinit();
+    try t.expectEqual(@as(u32, 20), image.view().width);
+    try t.expectEqual(@as(u32, 12), image.view().height);
+    try t.expect(image.view().pixels[0] > 240);
+    try t.expect(image.view().pixels[1] < 8);
+    try t.expect(image.view().pixels[2] < 8);
+    try t.expectEqual(@as(u8, 255), image.view().pixels[3]);
+}
 fn bitmapFromBytes(bytes: []const u8) !objc.Id {
     const data = objc.send(objc.Id, objc.class("NSData"), "dataWithBytes:length:", .{ @as(*const anyopaque, bytes.ptr), bytes.len });
     return objc.send(objc.Id, objc.class("NSBitmapImageRep"), "imageRepWithData:", .{data}) orelse error.BitmapUnavailable;
@@ -129,6 +142,33 @@ test "Metal image sampling preserves orientation alpha clipping and painter orde
     const second = native.metal.stats(renderer);
     try t.expectEqual(first.image_uploads, second.image_uploads);
     try t.expect(second.image_hits > first.image_hits);
+}
+test "Metal gradients and transformed image instances produce visible output" {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    var image = try native.images.Image.fromRgba(t.allocator, 1, 1, &.{ 255, 0, 0, 255 });
+    defer image.deinit();
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var painter = try native.Painter.init(arena.allocator(), .{ .width = 100, .height = 60 });
+    try painter.fillLinearGradient(.{ .x = 0, .y = 0, .width = 100, .height = 20 }, .black, .white, .{ .x = 0, .y = 0 }, .{ .x = 100, .y = 0 }, 0);
+    try painter.drawImageTransformed(image, .{ .x = 10, .y = 30, .width = 20, .height = 20 }, .stretch, .{ .scale_x = 0.5, .scale_y = 0.5, .translate_x = 2, .opacity = 0.8 });
+    const frame = try painter.finish(.black);
+    const renderer = try native.metal.create(t.allocator);
+    defer native.metal.destroy(renderer);
+    var dir = t.tmpDir(.{});
+    defer dir.cleanup();
+    const parent = try dir.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(parent);
+    const path = try std.fs.path.join(t.allocator, &.{ parent, "gradient-transform.png" });
+    defer t.allocator.free(path);
+    try native.metal.snapshot(renderer, frame, .{ .width = 100, .height = 60 }, path);
+    const bytes = try dir.dir.readFileAlloc(t.io, "gradient-transform.png", t.allocator, .limited(1024 * 1024));
+    defer t.allocator.free(bytes);
+    const bitmap = try bitmapFromBytes(bytes);
+    try pixel(bitmap, 2, 10, .{ 0, 0, 0 });
+    try pixel(bitmap, 97, 10, .{ 1, 1, 1 });
+    try pixel(bitmap, 22, 40, .{ 0.8, 0, 0 });
 }
 
 extern "c" const kCGImagePropertyOrientation: *const anyopaque;

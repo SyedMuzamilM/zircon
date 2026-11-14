@@ -139,6 +139,8 @@ pub fn build(b: *std.Build) void {
     const import_check = b.addSystemCommand(&.{ "python3", "tools/hoist_zig_imports.py", "--check", "apps", "packages", "examples", "tools", "build.zig" });
     examples_compile.dependOn(&import_check.step);
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);
+    const list_bench = b.addExecutable(.{ .name = "zircon-ui-list-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_ui_list.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "zircon_ui", .module = module }} }) });
+    b.step("build-bench-list", "Build the million-item virtual list benchmark").dependOn(&b.addInstallArtifact(list_bench, .{}).step);
     const extension_host_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
     extension_host_build.addFileArg(b.path("tools/zed-extension-host/Cargo.toml"));
     if (target.result.os.tag == .macos) app_run.step.dependOn(&extension_host_build.step);

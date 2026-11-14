@@ -2,6 +2,9 @@
 const std = @import("std");
 const animation_timeline = @import("../animation/timeline.zig");
 const runtime = @import("../app/app.zig");
+const controls_list = @import("../controls/list.zig");
+const controls_scroll = @import("../controls/scroll.zig");
+const controls_svg = @import("../controls/svg.zig");
 const identity = @import("../entity/entity.zig");
 const event = @import("../event/event.zig");
 const geometry = @import("../layout/geometry.zig");
@@ -129,6 +132,30 @@ pub const Ui = struct {
         ui.frame.cleanups.appendAssumeCapacity(.{ .object = custom_value.object, .destroy = custom_value.destroy });
         ui.frame.nodes.appendAssumeCapacity(.{ .style = style, .kind = .{ .custom = custom_value } });
         return .{ .index = @intCast(ui.frame.nodes.items.len - 1), .frame_epoch = ui.frame.epoch };
+    }
+    /// Add a fixed-height virtual list. Only visible rows plus overscan are
+    /// painted; item count never determines frame allocation.
+    pub fn uniformList(ui: *Ui, value: controls_list.UniformList, style: styles.Style) !elements.Element {
+        return ui.custom(controls_list.UniformList, value, style);
+    }
+    pub fn variableList(ui: *Ui, value: controls_list.VariableList, style: styles.Style) !elements.Element {
+        return ui.custom(controls_list.VariableList, value, style);
+    }
+    /// Compose only the visible fixed-height children into the frame tree.
+    /// `context` is borrowed for the duration of the callback calls.
+    pub fn virtualList(ui: *Ui, style: styles.Style, item_count: usize, item_height: f32, offset: f32, viewport_height: f32, overscan: usize, context: anytype, comptime build: anytype) !elements.Element {
+        const visible = try controls_scroll.visibleRows(item_count, item_height, offset, viewport_height, overscan);
+        const rows = try ui.allocator().alloc(elements.Element, visible.end - visible.start);
+        for (rows, visible.start..) |*row_element, index| row_element.* = try @call(.auto, build, .{ context, index, ui });
+        var actual = style;
+        actual.scroll_y = @max(0, -visible.top);
+        actual.overflow = .hidden;
+        return ui.container(actual, rows);
+    }
+    /// Add a retained SVG image element. The image reference is transferred
+    /// into the frame and released when that frame retires.
+    pub fn svg(ui: *Ui, value: controls_svg.Svg, style: styles.Style) !elements.Element {
+        return ui.custom(controls_svg.Svg, value, style);
     }
     pub fn allocator(ui: *const Ui) std.mem.Allocator {
         return ui.frame.allocator();
