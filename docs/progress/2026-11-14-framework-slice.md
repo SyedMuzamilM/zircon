@@ -16,6 +16,7 @@ This slice implements the first macOS/headless framework gaps identified in the 
 - The project sidebar now uses the compositional virtual-list API, preserving its existing row buttons, selection keys, drag handlers, and scroll state while composing only visible rows.
 - The image viewer and Markdown image loader accept `.svg` assets through the native SVG decoder.
 - Explicit keyed subtrees can opt into persistent scene-range replay. Rect/text/line/gradient ranges are fingerprinted by style, content, hover state, inherited opacity, bounds, and clip; image/custom ranges remain uncached unless they provide a stable fingerprint contract.
+- The same keyed leaf contract now feeds an intrinsic layout cache for text and custom leaves. Repeated frames reuse measured leaf sizes when available constraints and fingerprints match; parent arrangement remains fully validated.
 
 ## Verification
 
@@ -31,4 +32,4 @@ The list runs painted 9,198 rows over 200 iterations and emitted 8,390 scene ite
 
 ## Remaining high-value work
 
-The retained scene path now covers compositor-only image transforms and explicit keyed scene-range replay. Dirty-subtree layout, accessibility semantics, vector path tessellation, richer text/emoji, native menus/dialogs, and editor-side incremental wrapping/LSP/Git work remain separate slices. The next benchmark work should add an equivalent GPUI Rust driver for the list, then compare both implementations on identical million-row, editor, text, image, and SVG workloads.
+The retained scene path now covers compositor-only image transforms and explicit keyed scene-range replay. Layout reuse currently covers keyed leaf intrinsic measurement; full subtree arrangement reuse, accessibility semantics, vector path tessellation, richer text/emoji, native menus/dialogs, and editor-side incremental wrapping/LSP/Git work remain separate slices. The next benchmark work should add an equivalent GPUI Rust driver for the list, then compare both implementations on identical million-row, editor, text, image, and SVG workloads.

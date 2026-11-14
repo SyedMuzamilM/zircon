@@ -6,6 +6,7 @@ const ui_custom = @import("../ui/custom.zig");
 const elements = @import("../ui/element.zig");
 const styles = @import("../ui/style.zig");
 const tree = @import("../ui/tree.zig");
+const layout_cache = @import("cache.zig");
 const geometry = @import("geometry.zig");
 const measure_module = @import("measure.zig");
 const Measurer = measure_module.Measurer;
@@ -25,6 +26,9 @@ pub const Layout = struct {
     }
 };
 pub fn calculate(a: std.mem.Allocator, frame: *const tree.Frame, root: elements.Element, constraints: Constraints, measurer: Measurer) !Layout {
+    return calculateWithCache(a, frame, root, constraints, measurer, null);
+}
+pub fn calculateWithCache(a: std.mem.Allocator, frame: *const tree.Frame, root: elements.Element, constraints: Constraints, measurer: Measurer, cache: ?*layout_cache.LayoutCache) !Layout {
     if (!valid(constraints.viewport.width) or !valid(constraints.viewport.height) or !valid(constraints.rem) or constraints.rem == 0) return error.InvalidConstraints;
     _ = try frame.get(root);
     const bounds = try a.alloc(geometry.Rect, frame.nodes.items.len);
@@ -34,7 +38,7 @@ pub fn calculate(a: std.mem.Allocator, frame: *const tree.Frame, root: elements.
     defer arena.deinit();
     const intrinsic = try arena.allocator().alloc(geometry.Size, frame.nodes.items.len);
     @memset(intrinsic, .{ .width = 0, .height = 0 });
-    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a };
+    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a, .cache = cache };
     try engine.measureNode(root.index, constraints.viewport, 0);
     const style = frame.nodes.items[root.index].style;
     const size = try engine.resolveSize(style, constraints.viewport, .{ .width = @max(0, constraints.viewport.width - style.margin.horizontal()), .height = @max(0, constraints.viewport.height - style.margin.vertical()) });
@@ -49,6 +53,7 @@ const Engine = struct {
     intrinsic: []geometry.Size,
     scratch: std.mem.Allocator,
     frame_allocator: std.mem.Allocator,
+    cache: ?*layout_cache.LayoutCache,
     fn length(e: *Engine, value: styles.Length, parent: f32) ?f32 {
         return switch (value) {
             .auto => null,
@@ -78,6 +83,12 @@ const Engine = struct {
         const style = node.style;
         const declared = try e.resolveSize(style, available, available);
         const content: geometry.Size = .{ .width = @max(0, declared.width - style.padding.horizontal()), .height = @max(0, declared.height - style.padding.vertical()) };
+        const cache_key = if (node.cache) if (node.key) |key| layout_cache.keyHash(key) else null else null;
+        const cache_fingerprint = if (cache_key != null) fingerprintNode(e.frame, index) else 0;
+        if (cache_key) |key| if (e.cache) |store| if (cache_fingerprint != 0 and node.children.len == 0) if (store.lookup(key, cache_fingerprint, available)) |cached| {
+            e.intrinsic[index] = cached;
+            return;
+        };
         var natural: geometry.Size = .{ .width = 0, .height = 0 };
         switch (node.kind) {
             .custom => |custom| {
@@ -121,6 +132,7 @@ const Engine = struct {
         natural.width += style.padding.horizontal();
         natural.height += style.padding.vertical();
         e.intrinsic[index] = try e.resolveSize(style, available, natural);
+        if (cache_key) |key| if (e.cache) |store| if (cache_fingerprint != 0 and node.children.len == 0) try store.put(key, cache_fingerprint, available, e.intrinsic[index]);
     }
     fn arrange(e: *Engine, index: u32, rect: geometry.Rect, depth: usize) anyerror!void {
         if (depth > 128) return error.LayoutDepthExceeded;
@@ -222,6 +234,20 @@ const Engine = struct {
         }
     }
 };
+fn fingerprintNode(frame: *const tree.Frame, index: u32) u64 {
+    const node = frame.nodes.items[index];
+    var hash: u64 = std.hash.Wyhash.hash(0, std.mem.asBytes(&node.style));
+    switch (node.kind) {
+        .custom => |custom| {
+            const own = custom.fingerprint(custom.object);
+            return std.hash.Wyhash.hash(hash, std.mem.asBytes(&own));
+        },
+        .text => |text| hash = std.hash.Wyhash.hash(hash, text),
+        .button => |button| hash = std.hash.Wyhash.hash(hash, button.label),
+        .container => {},
+    }
+    return hash;
+}
 fn valid(n: f32) bool {
     return std.math.isFinite(n) and n >= 0;
 }

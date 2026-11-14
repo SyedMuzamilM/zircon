@@ -9,6 +9,7 @@ const events = @import("../event/event.zig");
 const graphics_cache = @import("../graphics/cache.zig");
 const graphics_painter = @import("../graphics/painter.zig");
 const tree_paint = @import("../graphics/tree_paint.zig");
+const layout_cache = @import("../layout/cache.zig");
 const flex = @import("../layout/flex.zig");
 const g = @import("../layout/geometry.zig");
 const headless = @import("../platform/headless.zig");
@@ -53,6 +54,7 @@ pub const Window = struct {
     frame_count: u64 = 0,
     animations: animation_timeline.Timeline,
     scene_cache: graphics_cache.SceneCache,
+    layout_cache: layout_cache.LayoutCache,
     time: f64 = 0,
     animating: bool = false,
     scene_animating: bool = false,
@@ -72,7 +74,7 @@ pub const Window = struct {
         };
         const window = try a.create(Window);
         errdefer a.destroy(window);
-        window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a), .scene_cache = .init(a) };
+        window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a), .scene_cache = .init(a), .layout_cache = .init(a) };
         errdefer window.frames.deinit();
         window.surface = try backend.open(a, options, .{ .context = window, .event = receive, .drag_region = dragRegion });
         errdefer window.surface.?.deinit();
@@ -88,6 +90,7 @@ pub const Window = struct {
         w.frames.deinit();
         w.animations.deinit();
         w.scene_cache.deinit();
+        w.layout_cache.deinit();
         w.app.destroyScope(w.scope) catch {};
         w.allocator.destroy(w);
     }
@@ -118,7 +121,7 @@ pub const Window = struct {
         const surface = w.surface.?;
         const metrics = surface.measurer();
         const profile_built = w.profileNow();
-        const layout = try flex.calculate(staging.allocator(), staging, root, .{ .viewport = w.dimensions }, metrics);
+        const layout = try flex.calculateWithCache(staging.allocator(), staging, root, .{ .viewport = w.dimensions }, metrics, &w.layout_cache);
         staging.bounds = layout.bounds;
         if (w.pointer_position) |position| staging.hovered_node = hitTest(staging, modalRoot(staging) orelse root.index, position, .{ .width = w.dimensions.width, .height = w.dimensions.height });
         const profile_laid_out = w.profileNow();

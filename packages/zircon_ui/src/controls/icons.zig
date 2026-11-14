@@ -20,7 +20,7 @@ const Icon = struct {
     pub const LayoutState = void;
     pub const PrepaintState = void;
     pub fn cacheFingerprint(self: *const Icon) u64 {
-        var hash: u64 = @intFromEnum(self.name);
+        var hash: u64 = @backingInt(self.name);
         hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&self.color));
         hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&self.size));
         return hash;
