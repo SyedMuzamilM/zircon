@@ -244,6 +244,11 @@ pub const Chain = struct {
         if (options.focusable) |value| node.focusable = value;
         return self;
     }
+    pub fn cache(self: Chain) Chain {
+        const record = self.draft(true) catch |err| return self.fail(err);
+        self.factory.ui.frame.nodes.items[record.element.index].cache = true;
+        return self;
+    }
     pub fn focusable(self: Chain) Chain {
         return self.listeners(.{ .focusable = true });
     }

@@ -10,7 +10,7 @@ Evidence checked:
 - Zircon UI source: [`packages/zircon_ui`](../../packages/zircon_ui), [`docs/zircon-ui.md`](../zircon-ui.md), [`docs/status.md`](../status.md)
 - Existing performance evidence: [`current lifecycle baseline`](../benchmarks/editor-2026-11-07-lifecycle-current-git/README.md)
 
-Implementation follow-up: the current worktree now includes the first macOS/headless slice from this audit—fixed and variable virtual lists, AppKit SVG rasterization, transformed scene images, compositor-only image animation, gradients, layered shadows, and context-aware sequence keymaps. See the [implementation progress note](../progress/2026-11-14-framework-slice.md). The remaining gaps in this document still describe work not yet implemented, especially general subtree cache/replay, accessibility, advanced layout, vector path tessellation, and editor-side incremental services.
+Implementation follow-up: the current worktree now includes the first macOS/headless slice from this audit—fixed and variable virtual lists, AppKit SVG rasterization, transformed scene images, compositor-only image animation, explicit keyed scene-range replay, gradients, layered shadows, and context-aware sequence keymaps. See the [implementation progress note](../progress/2026-11-14-framework-slice.md). The remaining gaps in this document still describe work not yet implemented, especially dirty-subtree layout, accessibility, advanced layout, vector path tessellation, and editor-side incremental services.
 
 ## The answer in one paragraph
 

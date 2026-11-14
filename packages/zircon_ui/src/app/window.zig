@@ -6,6 +6,7 @@ const animation_timeline = @import("../animation/timeline.zig");
 const entity = @import("../entity/entity.zig");
 const entity_scope = @import("../entity/scope.zig");
 const events = @import("../event/event.zig");
+const graphics_cache = @import("../graphics/cache.zig");
 const graphics_painter = @import("../graphics/painter.zig");
 const tree_paint = @import("../graphics/tree_paint.zig");
 const flex = @import("../layout/flex.zig");
@@ -51,6 +52,7 @@ pub const Window = struct {
     pending_native_blur: bool = false,
     frame_count: u64 = 0,
     animations: animation_timeline.Timeline,
+    scene_cache: graphics_cache.SceneCache,
     time: f64 = 0,
     animating: bool = false,
     scene_animating: bool = false,
@@ -70,7 +72,7 @@ pub const Window = struct {
         };
         const window = try a.create(Window);
         errdefer a.destroy(window);
-        window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a) };
+        window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a), .scene_cache = .init(a) };
         errdefer window.frames.deinit();
         window.surface = try backend.open(a, options, .{ .context = window, .event = receive, .drag_region = dragRegion });
         errdefer window.surface.?.deinit();
@@ -85,6 +87,7 @@ pub const Window = struct {
         if (w.surface) |surface| surface.deinit();
         w.frames.deinit();
         w.animations.deinit();
+        w.scene_cache.deinit();
         w.app.destroyScope(w.scope) catch {};
         w.allocator.destroy(w);
     }
@@ -138,7 +141,7 @@ pub const Window = struct {
         }
         staging.focused_node = if (w.active) next_focus else null;
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
-        try tree_paint.paint(staging, &layout, &painter, metrics);
+        try tree_paint.paintWithCache(staging, &layout, &painter, metrics, &w.scene_cache);
         staging.scene = try painter.finish(w.background);
         staging.scene.startAnimations(w.time);
         _ = staging.scene.advance(w.time);

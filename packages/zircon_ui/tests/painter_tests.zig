@@ -1,6 +1,21 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const t = std.testing;
+
+test "explicit keyed scene cache replays stable text and rect primitives" {
+    var cache = ui.graphics.SceneCache.init(t.allocator);
+    defer cache.deinit();
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var painter = try ui.graphics.Painter.init(arena.allocator(), .{ .width = 120, .height = 40 });
+    try painter.fillRect(.{ .bounds = .{ .x = 4, .y = 4, .width = 50, .height = 20 }, .color = .white });
+    try painter.drawText(.{ .bounds = .{ .x = 8, .y = 8, .width = 40, .height = 16 }, .text = "cached" });
+    const source = painter.items.items;
+    try cache.put(7, 99, .{ .x = 4, .y = 4, .width = 50, .height = 20 }, .{ .width = 120, .height = 40 }, source);
+    const hit = cache.lookup(7, 99, .{ .x = 4, .y = 4, .width = 50, .height = 20 }, .{ .width = 120, .height = 40 }) orelse return error.CacheMiss;
+    try t.expectEqual(@as(usize, 2), hit.len);
+    try t.expectEqualStrings("cached", hit[1].text);
+}
 test "painter copies UTF8 applies nested clipping opacity and rejects invalid commands" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();

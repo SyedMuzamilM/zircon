@@ -98,6 +98,12 @@ pub const Ui = struct {
         if (options.focusable) |focusable| node.focusable = focusable;
         return element;
     }
+    pub fn cache(ui: *Ui, value: anytype) !elements.Element {
+        const element = try resolveElement(value);
+        _ = try ui.frame.get(element);
+        ui.frame.nodes.items[element.index].cache = true;
+        return element;
+    }
     /// Takes focus when this logical element first enters a committed frame.
     pub fn autofocus(ui: *Ui, value: anytype) !elements.Element {
         const element = try resolveElement(value);

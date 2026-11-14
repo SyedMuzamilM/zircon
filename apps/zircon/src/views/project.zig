@@ -84,5 +84,7 @@ fn buildProjectRow(context: *ProjectRows, index: usize, b: *ui.Ui) !ui.Element {
         .hover_bg(if (selected) c.selected else c.hover)
         .on_click(b.onClickWith(Shell.onTree, @as(u32, @intCast(index))))
         .on_input(b.onInputWith(Shell.onTreeDrag, @intCast(index)))
-        .children(children.items).build();
+        .children(children.items)
+        .cache()
+        .build();
 }

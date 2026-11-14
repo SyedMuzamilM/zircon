@@ -1,6 +1,7 @@
 //! Shared assets/icons SVG geometry, baked into native strokes and fill spans.
 //! Drawing and hit targets remain Zircon UI; no icon font or SVG parsing runs
 //! during a frame. Source SVGs, attribution and the offline generator are kept.
+const std = @import("std");
 const graphics_painter = @import("../graphics/painter.zig");
 const g = @import("../layout/geometry.zig");
 const custom = @import("../ui/custom.zig");
@@ -18,6 +19,12 @@ const Icon = struct {
     size: f32,
     pub const LayoutState = void;
     pub const PrepaintState = void;
+    pub fn cacheFingerprint(self: *const Icon) u64 {
+        var hash: u64 = @intFromEnum(self.name);
+        hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&self.color));
+        hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&self.size));
+        return hash;
+    }
     pub fn requestLayout(self: *Icon, _: *custom.LayoutCx) !custom.LayoutResult(void) {
         return .{ .size = .{ .width = self.size, .height = self.size }, .state = {} };
     }

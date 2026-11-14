@@ -34,6 +34,7 @@ pub fn LayoutResult(comptime State: type) type {
 }
 pub const Custom = struct {
     object: *anyopaque,
+    fingerprint: *const fn (*anyopaque) u64,
     measure: *const fn (*anyopaque, *LayoutCx) anyerror!g.Size,
     paint: *const fn (*anyopaque, *PaintCx, g.Rect) anyerror!void,
     destroy: *const fn (*anyopaque) void,
@@ -62,8 +63,13 @@ pub fn create(comptime T: type, a: std.mem.Allocator, value: T) !Custom {
             const self: *@This() = @ptrCast(@alignCast(raw));
             if (@hasDecl(T, "deinit")) self.value.deinit();
         }
+        fn fingerprint(raw: *anyopaque) u64 {
+            const self: *@This() = @ptrCast(@alignCast(raw));
+            if (@hasDecl(T, "cacheFingerprint")) return self.value.cacheFingerprint();
+            return 0;
+        }
     };
     const object = try a.create(Adapter);
     object.* = .{ .value = value };
-    return .{ .object = object, .measure = Adapter.measure, .paint = Adapter.paint, .destroy = Adapter.destroy };
+    return .{ .object = object, .fingerprint = Adapter.fingerprint, .measure = Adapter.measure, .paint = Adapter.paint, .destroy = Adapter.destroy };
 }
