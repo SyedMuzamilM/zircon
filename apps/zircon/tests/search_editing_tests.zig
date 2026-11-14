@@ -225,3 +225,158 @@ test "project search remaps separated excerpts after source edits and preserves 
     defer t.allocator.free(saved);
     try t.expect(std.mem.startsWith(u8, saved, "split from tab\nprefix\nneedle first\n"));
 }
+
+const SelectionOps = struct {
+    fn crossSource(self: *const zircon.Shell) !void {
+        const selected = self.search.editing.selection[0] orelse return error.SelectionMissing;
+        try t.expect(!std.meta.eql(selected.anchor.excerpt, selected.head.excerpt));
+    }
+};
+
+test "project search selects copies and replaces across files with shared source undo" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = "needle one\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "two.zig", .data = "needle two\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "one.zig"));
+    const owner = try app.windowEntity(zircon.Shell, handle);
+    try app.update(owner, zircon.Shell.bootstrap, .{handle});
+    try settle(&app);
+    try app.update(owner, Ops.command, .{.project_search});
+    try app.update(owner, Ops.query, .{});
+    try settle(&app);
+    const first = try excerptBounds(&app, handle, "search-excerpt:0:0:0");
+    const second = try excerptBounds(&app, handle, "search-excerpt:0:1:0");
+    const start: ui.Point = .{ .x = first.x + 76, .y = first.y + 10 };
+    const end: ui.Point = .{ .x = second.x + 76, .y = second.y + 10 };
+    try app.dispatch(handle, .{ .pointer_down = .{ .position = start } });
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .pointer_move = .{ .position = end } });
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .pointer_up = .{ .position = end } });
+    _ = try app.step(0);
+    try app.read(owner, SelectionOps.crossSource, .{});
+    try app.dispatch(handle, .{ .key_down = .{ .key = .a, .modifiers = .{ .command = true } } });
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .action = @backingInt(zircon.Command.copy) });
+    const event: ui.Event(ui.Input) = .{ .data = .{ .text = "" }, ._surface = (try app.window(handle)).surface };
+    const clipboard = try event.readClipboard(t.allocator);
+    defer t.allocator.free(clipboard);
+    try t.expectEqualStrings("needle one\n\nneedle two\n", clipboard);
+    if (comptime ui.testing.native != void) try (try app.window(handle)).snapshot("/tmp/zircon-search-cross-source-selection.png");
+    try app.dispatch(handle, .{ .text = "replacement" });
+    _ = try app.step(0);
+    try app.read(owner, Ops.source, .{ "one.zig", "replacement" });
+    try app.read(owner, Ops.source, .{ "two.zig", "" });
+    try app.update(owner, Ops.command, .{.save});
+    try settle(&app);
+    const disk_one = try tmp.dir.readFileAlloc(t.io, "one.zig", t.allocator, .limited(128));
+    defer t.allocator.free(disk_one);
+    const disk_two = try tmp.dir.readFileAlloc(t.io, "two.zig", t.allocator, .limited(128));
+    defer t.allocator.free(disk_two);
+    try t.expectEqualStrings("replacement", disk_one);
+    try t.expectEqualStrings("", disk_two);
+    // The ordinary tab participates in the same history, even after Search is hidden.
+    try app.update(owner, ExcerptOps.sourceEdit, .{});
+    try app.update(owner, Ops.command, .{.undo});
+    _ = try app.step(0);
+    try app.read(owner, Ops.source, .{ "one.zig", "needle one\n" });
+    try app.read(owner, Ops.source, .{ "two.zig", "needle two\n" });
+    try app.update(owner, ExcerptOps.search, .{});
+    _ = try app.step(0);
+    try clickExcerpt(&app, handle, "search-excerpt:0:1:0");
+    try app.update(owner, Ops.command, .{.redo});
+    _ = try app.step(0);
+    try app.read(owner, Ops.source, .{ "one.zig", "replacement" });
+    try app.read(owner, Ops.source, .{ "two.zig", "" });
+}
+
+test "project search shift navigation extends across files and cut retains exact source undo" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = "needle one\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "two.zig", .data = "needle two\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const handle = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "one.zig"));
+    const owner = try app.windowEntity(zircon.Shell, handle);
+    try app.update(owner, zircon.Shell.bootstrap, .{handle});
+    try settle(&app);
+    try app.update(owner, Ops.command, .{.project_search});
+    try app.update(owner, Ops.query, .{});
+    try settle(&app);
+    try clickExcerpt(&app, handle, "search-excerpt:0:0:0");
+    try app.dispatch(handle, .{ .key_down = .{ .key = .down, .modifiers = .{ .command = true, .shift = true } } });
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .key_down = .{ .key = .down, .modifiers = .{ .shift = true } } });
+    _ = try app.step(0);
+    try app.dispatch(handle, .{ .key_down = .{ .key = .right, .modifiers = .{ .command = true, .shift = true } } });
+    _ = try app.step(0);
+    try app.read(owner, SelectionOps.crossSource, .{});
+    try app.dispatch(handle, .{ .key_down = .{ .key = .x, .modifiers = .{ .command = true } } });
+    _ = try app.step(0);
+    const event: ui.Event(ui.Input) = .{ .data = .{ .text = "" }, ._surface = (try app.window(handle)).surface };
+    const clipboard = try event.readClipboard(t.allocator);
+    defer t.allocator.free(clipboard);
+    try t.expectEqualStrings("needle one\n\nneedle two", clipboard);
+    try app.read(owner, Ops.source, .{ "one.zig", "" });
+    try app.read(owner, Ops.source, .{ "two.zig", "\n" });
+    try app.update(owner, Ops.command, .{.undo});
+    _ = try app.step(0);
+    try app.read(owner, Ops.source, .{ "one.zig", "needle one\n" });
+    try app.read(owner, Ops.source, .{ "two.zig", "needle two\n" });
+}
+
+test "project search captured selection autoscrolls while the pointer stays outside" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(t.allocator);
+    for (0..200) |index| try bytes.print(t.allocator, "needle {d}\n", .{index});
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = bytes.items });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "one.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    try settle(&app);
+    try app.update(owner, Ops.command, .{.project_search});
+    try app.update(owner, Ops.query, .{});
+    try settle(&app);
+    const row = try excerptBounds(&app, h, "search-excerpt:0:0:0");
+    const bounds = try excerptBounds(&app, h, "search-excerpts");
+    const first: ui.Point = .{ .x = row.x + 76, .y = row.y + 10 };
+    const outside: ui.Point = .{ .x = first.x, .y = bounds.y + bounds.height + 50 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = first } });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = outside } });
+    const Check = struct {
+        fn offset(self: *const zircon.Shell) f32 {
+            return self.search.editing.scroll[0].offset;
+        }
+        fn scrolling(self: *const zircon.Shell, before: f32) !void {
+            try t.expect(self.search.editing.scroll[0].offset > before + 50);
+            try t.expect(self.search.editing.selection[0].?.head.offset > 100);
+        }
+        fn stopped(self: *const zircon.Shell, before: f32) !void {
+            try t.expectEqual(before, self.search.editing.scroll[0].offset);
+            try t.expect(!self.search.editing.dragging[0]);
+            try t.expectEqual(null, self.search.editing.autoscroll[0]);
+        }
+    };
+    const before = try app.read(owner, Check.offset, .{});
+    for (1..13) |tick| _ = try app.step(@as(f64, @floatFromInt(tick)) / 60);
+    try app.read(owner, Check.scrolling, .{before});
+    try app.dispatch(h, .{ .pointer_up = .{ .position = outside } });
+    const end = try app.read(owner, Check.offset, .{});
+    _ = try app.step(0.5);
+    try app.read(owner, Check.stopped, .{end});
+}

@@ -1,0 +1,82 @@
+[
+  {
+    "variant": "baseline",
+    "run": 1,
+    "expansion_ms": 16.651500001898967,
+    "expansion_dispatch_ms": 0.4273129889043048,
+    "typing_ms": 13.186583993956447,
+    "typing_dispatch_ms": 8.379479011637159
+  },
+  {
+    "variant": "current",
+    "run": 1,
+    "expansion_ms": 16.585687000770122,
+    "expansion_dispatch_ms": 0.4388124943943694,
+    "typing_ms": 11.160853988258168,
+    "typing_dispatch_ms": 6.2597500073025
+  },
+  {
+    "variant": "current",
+    "run": 2,
+    "expansion_ms": 16.591562496614642,
+    "expansion_dispatch_ms": 0.42254148866049945,
+    "typing_ms": 11.375937509001233,
+    "typing_dispatch_ms": 6.356479512760416
+  },
+  {
+    "variant": "baseline",
+    "run": 2,
+    "expansion_ms": 16.721396008506417,
+    "expansion_dispatch_ms": 0.46602099610026926,
+    "typing_ms": 13.378604504396208,
+    "typing_dispatch_ms": 8.37424948986154
+  },
+  {
+    "variant": "baseline",
+    "run": 3,
+    "expansion_ms": 16.642333517665975,
+    "expansion_dispatch_ms": 0.4536244960036129,
+    "typing_ms": 13.32529098726809,
+    "typing_dispatch_ms": 8.363395492779091
+  },
+  {
+    "variant": "current",
+    "run": 3,
+    "expansion_ms": 16.68866649561096,
+    "expansion_dispatch_ms": 0.4531039885478094,
+    "typing_ms": 11.418458496336825,
+    "typing_dispatch_ms": 6.353833508910611
+  },
+  {
+    "variant": "current",
+    "run": 4,
+    "expansion_ms": 16.23739600472618,
+    "expansion_dispatch_ms": 0.4380210011731833,
+    "typing_ms": 11.370812499080785,
+    "typing_dispatch_ms": 6.310042008408345
+  },
+  {
+    "variant": "baseline",
+    "run": 4,
+    "expansion_ms": 16.614541498711333,
+    "expansion_dispatch_ms": 0.4338959843153134,
+    "typing_ms": 13.368813015404157,
+    "typing_dispatch_ms": 8.387479480006732
+  },
+  {
+    "variant": "baseline",
+    "run": 5,
+    "expansion_ms": 16.277499991701916,
+    "expansion_dispatch_ms": 0.4752500099129975,
+    "typing_ms": 13.448291501845233,
+    "typing_dispatch_ms": 8.402666499023326
+  },
+  {
+    "variant": "current",
+    "run": 5,
+    "expansion_ms": 16.587666992563754,
+    "expansion_dispatch_ms": 0.45731298450846225,
+    "typing_ms": 11.593645511311479,
+    "typing_dispatch_ms": 6.417520504328422
+  }
+]

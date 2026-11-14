@@ -3,16 +3,19 @@
 const std = @import("std");
 const editor = @import("zircon_editor");
 const zircon_extensions = @import("zircon_extensions");
+const multibuffer = @import("zircon_multibuffer");
 const zircon_text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const workspace = @import("zircon_workspace");
 const actions = @import("actions.zig");
 const command = @import("commands.zig");
 const errors = @import("errors.zig");
+const git_selection = @import("git_selection.zig");
 const key_bindings_module = @import("key_bindings.zig");
 const panes = @import("panes.zig");
 const projects = @import("projects.zig");
 const recent_module = @import("recent.zig");
+const search_selection = @import("search_selection.zig");
 const services_agents = @import("services/agents.zig");
 const buffer_find = @import("services/buffer_find.zig");
 const services_catalog = @import("services/catalog.zig");
@@ -127,6 +130,7 @@ pub const Shell = struct {
     git: services_git.Model = .{},
     recovery: ?services_recovery.Model = null,
     search: services_search.Model = .{},
+    multibuffer_history: multibuffer.Transactions = .init(std.heap.page_allocator),
     find: buffer_find.Model = .{},
     catalog: services_catalog.Model = .{},
     extension_host_path: ?[]const u8 = null,
@@ -183,6 +187,7 @@ pub const Shell = struct {
         if (self.recovery) |*recovery| recovery.deinit(self.allocator);
         self.git.deinit();
         self.search.deinit();
+        self.multibuffer_history.deinit();
         self.find.deinit(self.allocator);
         self.catalog.deinit();
         self.agents.deinit(self.allocator);
@@ -376,7 +381,7 @@ pub const Shell = struct {
         for (self.git.editing.views.items) |*view| {
             const record = self.workspace.getConst(view.document) catch continue;
             self.configureEditor(&view.editor, record.path orelse "");
-            view.editor.soft_wrap = .none;
+            view.editor.soft_wrap = values.soft_wrap;
             view.editor.show_fold_controls = false;
             view.editor.show_git_gutters = false;
             view.editor.show_indent_guides = false;
@@ -724,6 +729,8 @@ pub const Shell = struct {
             else => return err,
         };
         try services_recovery.poll(self, cx);
+        try git_selection.poll(self, cx);
+        try search_selection.poll(self, cx);
         try terminal_module.poll(self, cx);
         try buffer_find.poll(self, cx);
         try services_language.poll(self, cx);

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 250" role="img" aria-label="Typing through native frame submission before and after skipping hidden editor preparation">
+<rect width="680" height="250" fill="#20252d"/>
+<g font-family="system-ui,sans-serif" fill="#e7eaf0"><text x="24" y="34" font-size="18">Skip hidden editor preparation</text><text x="24" y="58" font-size="12" fill="#b8c1d1">Typing to native frame submission · 5 fresh runs per variant</text>
+<text x="24" y="112" font-size="13">Before visibility gate</text><rect x="190" y="94" width="300.80" height="28" rx="3" fill="#8f9aaa"><title>Median of run medians: 13.369 ms</title></rect><text x="500.80" y="113" font-size="14">13.37 ms</text>
+<text x="24" y="170" font-size="13">After visibility gate</text><rect x="190" y="152" width="255.96" height="28" rx="3" fill="#78b8fa"><title>Median of run medians: 11.376 ms</title></rect><text x="455.96" y="171" font-size="14">11.38 ms</text>
+<text x="24" y="225" font-size="11" fill="#b8c1d1">8 files · 32,000 lines · 312 hunks · exact edits and painted text verified</text></g></svg>

@@ -23,7 +23,10 @@ const native_enabled = zircon_options.native;
 const backend = if (native_enabled) macos_window else headless;
 pub const Handle = struct { app_id: u32, slot: u32, generation: u32 = 1 };
 pub const Options = platform.WindowOptions;
+pub const FrameTimings = struct { build_ms: f64 = 0, layout_ms: f64 = 0, paint_ms: f64 = 0, present_ms: f64 = 0 };
 pub const Window = struct {
+    profile_frames: bool = false,
+    last_frame_timings: FrameTimings = .{},
     parent: ?Handle = null,
     app: runtime.App,
     allocator: std.mem.Allocator,
@@ -84,6 +87,10 @@ pub const Window = struct {
         w.app.destroyScope(w.scope) catch {};
         w.allocator.destroy(w);
     }
+    fn profileNow(w: *const Window) f64 {
+        if (comptime native_enabled) if (w.profile_frames) return backend.now();
+        return 0;
+    }
     pub fn draw(w: *Window) !bool {
         if (w.closed or !w.dirty) return false;
         const staging = try w.frames.begin();
@@ -94,13 +101,16 @@ pub const Window = struct {
         staging.time = w.time;
         staging.hover_started = w.hover_started;
         staging.viewport = w.dimensions;
+        const profile_start = w.profileNow();
         const root = try w.render_root(&w.app, w.root, staging);
         try staging.setRoot(root);
         const surface = w.surface.?;
         const metrics = surface.measurer();
+        const profile_built = w.profileNow();
         const layout = try flex.calculate(staging.allocator(), staging, root, .{ .viewport = w.dimensions }, metrics);
         staging.bounds = layout.bounds;
         if (w.pointer_position) |position| staging.hovered_node = hitTest(staging, modalRoot(staging) orelse root.index, position, .{ .width = w.dimensions.width, .height = w.dimensions.height });
+        const profile_laid_out = w.profileNow();
         var next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, null, false);
         var next_restore = reconcile(&w.frames.committed, staging, w.restore_focus);
         if (modalRoot(&w.frames.committed) == null and modalRoot(staging) != null) next_restore = reconcile(&w.frames.committed, staging, w.focus);
@@ -122,11 +132,13 @@ pub const Window = struct {
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
         try tree_paint.paint(staging, &layout, &painter, metrics);
         staging.scene = try painter.finish(w.background);
+        const profile_painted = w.profileNow();
         if (!try surface.present(staging.scene)) {
             staging.discard();
             w.animations.discardFrame();
             return false;
         }
+        if (w.profile_frames) w.last_frame_timings = .{ .build_ms = (profile_built - profile_start) * 1000, .layout_ms = (profile_laid_out - profile_built) * 1000, .paint_ms = (profile_painted - profile_laid_out) * 1000, .present_ms = (w.profileNow() - profile_painted) * 1000 };
         // All validation and submission encoding succeeded. No fallible work
         // remains between target reconciliation and the CPU generation swap.
         w.focus = next_focus;

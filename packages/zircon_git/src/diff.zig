@@ -1,11 +1,14 @@
 //! Unified patch parsing and bounded line diff for unsaved-buffer gutters.
 const std = @import("std");
 pub const Line = struct { kind: enum { context, addition, deletion, metadata }, text: []const u8, old_line: ?usize = null, new_line: ?usize = null };
-pub const Hunk = struct { old_start: usize, old_count: usize, new_start: usize, new_count: usize, header: []const u8, lines: []const Line, path: []const u8 = "" };
+pub const OriginalRange = struct { old_start: usize, old_count: usize, new_start: usize, new_count: usize };
+pub const Hunk = struct { old_start: usize, old_count: usize, new_start: usize, new_count: usize, header: []const u8, lines: []const Line, path: []const u8 = "", original: ?OriginalRange = null };
+pub const ContextSource = struct { path: []const u8, bytes: []const u8, lines: []const []const u8 };
 pub const Diff = struct {
     arena: std.heap.ArenaAllocator,
     text: []const u8,
     hunks: []const Hunk,
+    context_sources: []ContextSource = &.{},
     pub fn deinit(self: *Diff) void {
         self.arena.deinit();
         self.* = undefined;

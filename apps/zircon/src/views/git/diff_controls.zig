@@ -5,6 +5,7 @@ const git = @import("zircon_git");
 const zircon_git_ui = @import("zircon_git_ui");
 const ui = @import("zircon_ui");
 const commands = @import("../../commands.zig");
+const git_selection = @import("../../git_selection.zig");
 const services_git = @import("../../services/git.zig");
 const shell = @import("../../shell.zig");
 const v = @import("../components.zig");
@@ -13,58 +14,51 @@ const Shell = shell.Shell;
 const Command = commands.Command;
 const a = std.heap.page_allocator;
 pub const Target = struct { file: usize, generation: u64 };
-const HunkTarget = struct { index: usize, generation: u64, side: zircon_git_ui.hunks.Side };
 
-pub fn hunkHeader(self: *const Shell, b: *ui.Ui, index: usize) !ui.Element {
-    const hunk = self.git.diff.?.hunks[index];
-    var added = false;
-    var deleted = false;
-    for (hunk.lines) |line| {
-        added = added or line.kind == .addition;
-        deleted = deleted or line.kind == .deletion;
-    }
+const ContextTarget = struct { hunk: usize, generation: u64, direction: layout.Direction };
+pub fn hunkHeader(self: *const Shell, b: *ui.Ui, index: usize, direction: layout.Direction) !ui.Element {
+    const diff = self.git.diff.?;
+    const hunk = diff.hunks[index];
     const c = self.colors;
+    const start = if (hunk.new_count == 0) hunk.new_start else hunk.new_start -| 1;
+    const previous_end = if (index > 0 and std.mem.eql(u8, diff.hunks[index - 1].path, hunk.path)) (diff.hunks[index - 1].new_start -| 1) + diff.hunks[index - 1].new_count else 0;
+    var total: usize = start + hunk.new_count;
+    for (diff.context_sources) |source| if (std.mem.eql(u8, source.path, hunk.path)) {
+        total = source.lines.len;
+        break;
+    };
+    const above = start > previous_end;
+    if (index + 1 < diff.hunks.len and std.mem.eql(u8, diff.hunks[index + 1].path, hunk.path)) total = @min(total, layout.hunkStart(diff.hunks[index + 1]));
+    const below = start + hunk.new_count < total;
     var children: std.ArrayList(ui.Element) = .empty;
-    try children.append(b.allocator(), try v.text(b, hunk.header, c.muted, 11));
-    try children.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
-    inline for (.{ zircon_git_ui.hunks.Side.added, zircon_git_ui.hunks.Side.deleted }) |side| {
-        if (if (side == .added) added else deleted) {
-            const label = if (side == .added) "Copy added lines" else "Copy deleted lines";
-            try children.append(b.allocator(), try b.fluent().button(.{
-                .label = label,
-                .tooltip = label,
-            })
-                .flex()
-                .gap_px(4)
-                .items_center()
-                .h(.{ .px = 22 })
-                .padding(.{ .left = 5, .right = 5 })
-                .hover_background(c.hover)
-                .on_click(b.onClickWith(copyHunk, HunkTarget{ .index = index, .generation = self.git.diff_generation, .side = side }))
-                .children(&.{
-                    try v.icon(b, .copy, if (side == .added) c.added else c.deleted, 13),
-                    try v.text(b, if (side == .added) "Copy added" else "Copy deleted", c.muted, 11),
-                }).build());
-        }
+    const show = if (direction == .up) above else below;
+    if (show) {
+        const title = if (direction == .up) "Expand context above" else "Expand context below";
+        try children.append(b.allocator(), try b.fluent().button(.{
+            .label = try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ title, hunk.path }),
+            .tooltip = if (direction == .up) "Expand 5 lines above" else "Expand 5 lines below",
+        })
+            .w_px(28).h_px(24).items_center().justify_center().hover_background(c.hover)
+            .on_click(b.onClickWith(expand, ContextTarget{ .hunk = index, .generation = self.git.diff_generation, .direction = direction }))
+            .child(v.icon(b, if (direction == .up) .expand_up else .expand_down, c.muted, 16))
+            .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-context:{s}:{s}:{d}", .{ @tagName(direction), hunk.path, if (hunk.original) |original| original.old_start else hunk.old_start }) })
+            .build());
     }
-    return b.fluent().row()
-        .h_px(layout.context_height)
-        .shrink_0()
-        .items_center()
-        .gap_px(5)
-        .padding(.{ .left = 76, .right = 8 })
-        .background(c.sidebar)
-        .children(children.items)
-        .build();
+    return b.fluent().row().h_px(layout.context_height).shrink_0().items_center().padding(.{ .left = 8 }).background(c.document).children(children.items).build();
 }
 
-fn copyHunk(self: *Shell, e: *ui.Event(ui.Click), _: *ui.Context(Shell), target: HunkTarget) !void {
+fn expand(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: ContextTarget) !void {
     if (target.generation != self.git.diff_generation) return;
-    const diff = self.git.diff orelse return;
-    if (target.index >= diff.hunks.len) return;
-    const bytes = try zircon_git_ui.hunks.copyText(self.allocator, diff.hunks[target.index], target.side);
-    defer self.allocator.free(bytes);
-    try e.writeClipboard(bytes);
+    const diff = if (self.git.diff) |*value| value else return;
+    if (target.hunk >= diff.hunks.len) return;
+    try self.git.diff_view.expandContext(a, diff.hunks[target.hunk], target.direction);
+    const path = diff.hunks[target.hunk].path;
+    try zircon_git_ui.context.applyFile(diff, &self.git.diff_view, path);
+    if (self.git.projection) |*projection| try projection.updateFile(diff.*, path);
+    self.git.diff_generation +%= 1;
+    try services_git.expandEditable(self, diff.*, path);
+    try git_selection.rebuild(self);
+    cx.notify();
 }
 
 fn resolve(self: *const Shell, target: Target) ?layout.File {
@@ -84,6 +78,7 @@ fn toggle(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: 
     const file = resolve(self, target) orelse return;
     try selectFile(self, file);
     try self.git.diff_view.toggle(a, file.path);
+    try git_selection.rebuild(self);
     clampScroll(self);
     cx.notify();
 }
@@ -132,7 +127,19 @@ pub fn header(self: *const Shell, b: *ui.Ui, file: layout.File, index: usize) !u
         .children(&.{
             try v.icon(b, if (value.staged and value.unstaged) .square_mixed else if (value.staged) .square_checked else .square, c.muted, 16),
         }).build());
-    try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13), try b.fluent().adopt(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12))
+    try children.appendSlice(b.allocator(), &.{ try v.fileGlyph(self, b, file.path, false, false, 15), try v.text(b, std.fs.path.basename(file.path), c.text, 13) });
+    if (self.git.selected_commit.len == 0 and !self.git.staged_diff and !self.git.stash_view) {
+        const absolute = try std.fs.path.resolve(b.allocator(), &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, file.path });
+        for (self.git.editing.views.items) |view| {
+            const record = try self.workspace.getConst(view.document);
+            if (record.path != null and std.mem.eql(u8, record.path.?, absolute) and record.dirty()) {
+                try children.append(b.allocator(), try b.fluent().div().w_px(6).h_px(6).shrink_0().rounded_px(3).background(c.accent)
+                    .id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-dirty:{s}", .{file.path}) }).build());
+                break;
+            }
+        }
+    }
+    try children.appendSlice(b.allocator(), &.{ try b.fluent().adopt(try v.text(b, std.fs.path.dirname(file.path) orelse "", c.muted, 12))
         .style(.{
             .flex_grow = 1,
             .flex_shrink = 1,
@@ -161,6 +168,7 @@ pub fn header(self: *const Shell, b: *ui.Ui, file: layout.File, index: usize) !u
         .build();
     return b.fluent().div()
         .h(.{ .px = layout.file_height })
+        .background(c.document)
         .padding(.{ .top = 5, .bottom = 5, .left = 6, .right = 6 })
         .shrink_0()
         .flex_col()
@@ -183,6 +191,7 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
         if (self.git.diff_view.active_hunk) |hunk| self.git.diff_scroll.offset = projection.hunkOffset(&self.git.diff_view, hunk, self.editor_options.font_size * self.editor_options.line_height) orelse 0;
     }
     clampScroll(self);
+    try git_selection.rebuild(self);
     cx.notify();
 }
 
@@ -199,6 +208,7 @@ pub fn navigate(self: *Shell, cx: *ui.Context(Shell), which: Command) !void {
         break;
     };
     self.git.diff_scroll.offset = projection.hunkOffset(&self.git.diff_view, index, self.editor_options.font_size * self.editor_options.line_height) orelse 0;
+    try git_selection.rebuild(self);
     cx.notify();
 }
 
@@ -209,6 +219,7 @@ fn clampScroll(self: *Shell) void {
 /// header padding have the same hover/active behavior as the visible surface.
 pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (e.data == .scroll) {
+        self.git.editing.horizontal = @max(0, self.git.editing.horizontal - e.data.scroll.x);
         const height = if (self.git.projection) |projection| projection.contentHeight(&self.git.diff_view, self.editor_options.font_size * self.editor_options.line_height) else 0;
         self.git.diff_scroll.wheel(e.data.scroll.y, height, e.bounds.height);
         e.preventDefault();

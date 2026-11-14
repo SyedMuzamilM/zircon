@@ -683,19 +683,29 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
     self.language.syntax_waiting = false;
     const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
     const snapshot = self.extension_snapshot orelse return;
-    for (self.tabs.items, 0..) |tab, tab_index| {
-        var visible = tab_index == self.active or (self.secondary != null and std.meta.eql(self.secondary.?.document, tab.document));
-        for (self.search.editing.panes) |pane| if (pane.active) |id| if (std.meta.eql(id, tab.document)) {
+    for (self.workspace.slots.items, 0..) |slot, slot_index| {
+        const record = slot.record orelse continue;
+        const id: ws.DocumentId = .{ .workspace = self.workspace.identity, .slot = @intCast(slot_index), .generation = slot.generation };
+        var visible = self.tabs.items.len > 0 and std.meta.eql(self.tabs.items[self.active].document, id);
+        if (self.secondary) |pane| if (std.meta.eql(pane.document, id)) {
             visible = true;
         };
-        if (self.git.editing.active) |id| if (std.meta.eql(id, tab.document)) {
+        for (self.search.editing.panes) |pane| if (pane.active) |active_id| if (std.meta.eql(active_id, id)) {
             visible = true;
+        };
+        if (self.git.editing.active) |active_id| if (std.meta.eql(active_id, id)) {
+            visible = true;
+        };
+        if (self.currentTool(0) == .git_diff or self.currentTool(1) == .git_diff) if (self.git.editable) |projection| {
+            for (projection.sources.items) |source| if (std.meta.eql(source.id, id)) {
+                visible = true;
+                break;
+            };
         };
         if (!visible) continue;
-        const record = try self.workspace.getConst(tab.document);
-        const language = snapshot.languageForPath(self.languagePath(tab.document, record.path orelse "")) orelse continue;
+        const language = snapshot.languageForPath(self.languagePath(id, record.path orelse "")) orelse continue;
         const grammar = language.grammar orelse continue;
-        const i = try syntaxDocument(self, tab.document);
+        const i = try syntaxDocument(self, id);
         const tracked = &self.language.syntax_documents.items[i];
         if (tracked.revision == record.doc.revision()) continue;
         if (tracked.observed != record.doc.revision()) {
@@ -719,7 +729,7 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
         const bytes = try source.copy(self.allocator, .{ .start = 0, .end = source.byteLen() });
         defer self.allocator.free(bytes);
         if (tracked.attempts == 0) tracked.status_sequence = self.status_sequence;
-        try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = tab.document, .revision = source.revision(), .index = i }, highlighted);
+        try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = id, .revision = source.revision(), .index = i }, highlighted);
         self.language.syntax_jobs +%= 1;
         tracked.pending = true;
         tracked.attempts += 1;

@@ -162,13 +162,16 @@ test "completion additional edits keep one caret at the primary edit" {
     try t.expectEqual(@as(usize, 1), try fixture.app.read(fixture.owner, Ops.selectionCount, .{}));
 }
 
-test "symbol information renders language-server Markdown and dismisses on edit" {
+const HoverCheck = enum { edit, leave_symbol, leave_below, leave_window, layout, layout_long };
+fn hoverJourney(comptime check: HoverCheck) !void {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
     defer t.allocator.free(root);
     try tmp.dir.createDirPath(t.io, "extensions/org.zircon.hover");
-    try tmp.dir.writeFile(t.io, .{ .sub_path = "server.py", .data = @embedFile("language_fixture") });
+    const fixture_source = try std.mem.replaceOwned(u8, t.allocator, @embedFile("language_fixture"), "Returns the answer.", if (check == .layout_long) "Returns the answer with details about ownership, parameters, memory allocation, error handling, and the lifetime of the returned value. This documentation ends here." else "Returns the answer.");
+    defer t.allocator.free(fixture_source);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "server.py", .data = fixture_source });
     try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = "const answer = 42;\n" });
     const server = try std.fs.path.join(t.allocator, &.{ root, "server.py" });
     defer t.allocator.free(server);
@@ -189,20 +192,62 @@ test "symbol information renders language-server Markdown and dismisses on edit"
         if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.HoverReadinessTimeout;
         try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
     }
-    try app.update(owner, Ops.command, .{.show_symbol_info});
+    const frame = &(try app.window(h)).frames.committed;
+    const editor_bounds = for (frame.nodes.items, 0..) |node, index| {
+        if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "primary-editor")) break frame.bounds[index];
+    } else return error.MissingEditor;
+    const symbol: ui.Point = .{ .x = editor_bounds.x + 140, .y = editor_bounds.y + 11 };
+    if (check == .edit) try app.update(owner, Ops.command, .{.show_symbol_info}) else {
+        try app.dispatch(h, .{ .pointer_move = .{ .position = symbol } });
+        _ = try app.step(0.4);
+    }
     while (!try app.read(owner, Ops.hoverVisible, .{})) {
-        _ = try app.step(0);
+        _ = try app.step(0.4);
         if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.HoverPresentationTimeout;
         try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
     }
-    _ = try app.step(0);
+    _ = try app.step(0.4);
     var card = false;
     for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "symbol-hover")) {
         card = true;
     };
     try t.expect(card);
-    try app.dispatch(h, .{ .text = "x" });
+    switch (check) {
+        .edit => try app.dispatch(h, .{ .text = "x" }),
+        .leave_symbol => try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = editor_bounds.x + 450, .y = editor_bounds.y + 300 } } }),
+        .leave_below => try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = symbol.x, .y = editor_bounds.y + 300 } } }),
+        .leave_window => try app.dispatch(h, .pointer_leave),
+        .layout, .layout_long => {
+            if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-symbol-hover-before.png");
+            const popup = for (frame.nodes.items, 0..) |node, index| {
+                if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "symbol-hover")) break frame.bounds[index];
+            } else return error.MissingHover;
+            var description = false;
+            for (frame.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, if (check == .layout_long) "here." else "Returns")) {
+                description = item.rect.y >= popup.y + 8 and item.rect.y + item.rect.height <= popup.y + popup.height - 8;
+            };
+            try t.expect(description);
+            return;
+        },
+    }
     try t.expect(!try app.read(owner, Ops.hoverVisible, .{}));
+}
+
+test "symbol information renders language-server Markdown and dismisses on edit" {
+    try hoverJourney(.edit);
+}
+test "symbol hover dismisses when the pointer leaves its source symbol" {
+    try hoverJourney(.leave_symbol);
+}
+test "symbol hover dismisses when the pointer leaves the window" {
+    try hoverJourney(.leave_window);
+}
+test "symbol hover fits the rendered signature and documentation" {
+    try hoverJourney(.layout);
+}
+
+test "symbol hover sizes wrapped documentation from rendered content" {
+    try hoverJourney(.layout_long);
 }
 fn waitReady(app: *ui.App, owner: ui.Entity(zircon.Shell)) !void {
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
@@ -464,4 +509,8 @@ test "retired resolver callbacks cannot restart reused slots or strand another d
     try waitJobs(&app, 0);
     try waitReady(&app, owner);
     try t.expect(try app.read(owner, ResolverOps.noErrors, .{}));
+}
+
+test "symbol hover does not remain over blank space below the last source line" {
+    try hoverJourney(.leave_below);
 }

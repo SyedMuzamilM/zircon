@@ -22,13 +22,13 @@ pub fn gutterWidth(lines: usize, font_size: f32) f32 {
     while (remaining >= 10) : (remaining /= 10) digits += 1;
     return @max(76, @as(f32, @floatFromInt(digits)) * font_size * 0.62 + 46);
 }
-pub fn render(state: *const editor.Editor, document: *const text.Document, b: *ui.Ui) !ui.Element {
+pub fn render(state: *const editor.Editor, document: *const text.Document, b: *ui.Ui, row_limit: usize) !ui.Element {
     var snapshot = document.snapshot();
     errdefer snapshot.deinit();
     const selections = try b.allocator().dupe(selection.Selection, state.selections.items.items);
     const first = state.rowAt(state.scroll.offset, snapshot.revision());
     const start = first -| 2;
-    const count = @min(1024, snapshot.lineCount() - @min(start, snapshot.lineCount()));
+    const count = @min(row_limit, snapshot.lineCount() - @min(start, snapshot.lineCount()));
     const states = try b.allocator().alloc(?syntax.State, count);
     for (states, 0..) |*item, i| item.* = state.syntax_cache.state(snapshot, start + i);
     const changes = try b.allocator().dupe(annotations.GitChange, state.visibleChanges(snapshot.revision()));
@@ -48,10 +48,12 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
         while (hi < state.grammar_spans.len and state.grammar_spans[hi].start < end) hi += 1;
         break :blk try b.allocator().dupe(syntax.Span, state.grammar_spans[lo..hi]);
     } else null;
-    const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else state.primary().head, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
+    const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else if (state.selections.items.items.len > 0) state.primary().head else 0, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
     var canvas = value;
-    canvas.scope = try state.bracket_cache.get(state, snapshot, b.allocator());
-    canvas.scope_guide = state.bracket_cache.guide;
+    if (state.selections.items.items.len > 0) {
+        canvas.scope = try state.bracket_cache.get(state, snapshot, b.allocator());
+        canvas.scope_guide = state.bracket_cache.guide;
+    }
     canvas.show_scrollbars = state.show_scrollbars;
     return b.custom(Canvas, canvas, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
@@ -115,38 +117,45 @@ const Canvas = struct {
             const visual_row = visible.start + i;
             const segment: ?wrap.Row = if (self.soft_wrap) self.wrap_cache.rows.items[visual_row] else null;
             const row = if (segment) |part| part.line else visual_row;
-            const range = try self.snapshot.lineRange(row);
-            const oversized = range.end - range.start > line_limit;
-            const original = if (oversized) "[Line exceeds the 64 KiB display limit]" else try self.snapshot.copy(cx.allocator, range);
-            const expanded = try display.Line.build(cx.allocator, original, self.tab_width);
-            content_width = @max(content_width, (try metrics.text(metrics.context, expanded.bytes, style)).width);
-            const initial = if (row >= self.state_start and row - self.state_start < self.states.len) self.states[row - self.state_start] else null;
-            const lexed = if (self.profile != null and !oversized) try profile_module.lex(cx.allocator, original, self.profile.?, initial orelse .{}) else try syntax.lex(cx.allocator, original, if (initial != null and !oversized) self.language else .plain, initial orelse .{});
-            var spans = lexed.spans;
-            if (!oversized) if (self.grammar_spans) |external| {
-                var classified: std.ArrayList(syntax.Span) = .empty;
-                var classified_end: usize = 0;
-                var first_span: usize = 0;
-                var span_limit = external.len;
-                while (first_span < span_limit) {
-                    const mid = first_span + (span_limit - first_span) / 2;
-                    if (external[mid].end <= range.start) first_span = mid + 1 else span_limit = mid;
-                }
-                for (external[first_span..]) |span| {
-                    if (span.start >= range.end) break;
-                    const begin = @max(span.start, range.start) - range.start;
-                    const end = @min(span.end, range.end) - range.start;
-                    if (end <= begin) continue;
-                    try appendLexical(cx.allocator, &classified, lexed.spans, classified_end, begin);
-                    try classified.append(cx.allocator, .{ .start = begin, .end = end, .kind = span.kind });
-                    classified_end = end;
-                }
-                try appendLexical(cx.allocator, &classified, lexed.spans, classified_end, original.len);
-                spans = classified.items;
-            };
-            line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = spans, .y = bounds.y + (if (self.soft_wrap) self.wrap_cache.rowY(visual_row, self.line_height, self.git_changes) else annotations.rowY(row, self.line_height, self.git_changes)) - self.scroll, .oversized = oversized, .height = self.line_height, .segment = segment };
+            const y = bounds.y + (if (self.soft_wrap) self.wrap_cache.rowY(visual_row, self.line_height, self.git_changes) else annotations.rowY(row, self.line_height, self.git_changes)) - self.scroll;
+            if (i > 0 and lines[i - 1].row == row) {
+                line.* = lines[i - 1];
+                line.y = y;
+                line.segment = segment;
+            } else {
+                const range = try self.snapshot.lineRange(row);
+                const oversized = range.end - range.start > line_limit;
+                const original = if (oversized) "[Line exceeds the 64 KiB display limit]" else try self.snapshot.copy(cx.allocator, range);
+                const expanded = try display.Line.build(cx.allocator, original, self.tab_width);
+                content_width = @max(content_width, (try metrics.text(metrics.context, expanded.bytes, style)).width);
+                const initial = if (row >= self.state_start and row - self.state_start < self.states.len) self.states[row - self.state_start] else null;
+                const lexed = if (self.profile != null and !oversized) try profile_module.lex(cx.allocator, original, self.profile.?, initial orelse .{}) else try syntax.lex(cx.allocator, original, if (initial != null and !oversized) self.language else .plain, initial orelse .{});
+                var spans = lexed.spans;
+                if (!oversized) if (self.grammar_spans) |external| {
+                    var classified: std.ArrayList(syntax.Span) = .empty;
+                    var classified_end: usize = 0;
+                    var first_span: usize = 0;
+                    var span_limit = external.len;
+                    while (first_span < span_limit) {
+                        const mid = first_span + (span_limit - first_span) / 2;
+                        if (external[mid].end <= range.start) first_span = mid + 1 else span_limit = mid;
+                    }
+                    for (external[first_span..]) |span| {
+                        if (span.start >= range.end) break;
+                        const begin = @max(span.start, range.start) - range.start;
+                        const end = @min(span.end, range.end) - range.start;
+                        if (end <= begin) continue;
+                        try appendLexical(cx.allocator, &classified, lexed.spans, classified_end, begin);
+                        try classified.append(cx.allocator, .{ .start = begin, .end = end, .kind = span.kind });
+                        classified_end = end;
+                    }
+                    try appendLexical(cx.allocator, &classified, lexed.spans, classified_end, original.len);
+                    spans = classified.items;
+                };
+                line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = spans, .y = y, .oversized = oversized, .height = self.line_height, .segment = segment };
+            }
             if (self.selections.len > 0 and (try self.snapshot.pointAt(self.selections[0].head)).line == row and (segment == null or self.wrap_cache.atOffset(self.selections[0].head) == visual_row)) {
-                caret.x = bounds.x + gutter - self.horizontal - (if (segment) |part| part.x else 0) + if (oversized) @as(f32, 0) else expanded.caret(metrics.*, style, @min(self.selections[0].head - range.start, original.len));
+                caret.x = bounds.x + gutter - self.horizontal - (if (segment) |part| part.x else 0) + if (line.oversized) @as(f32, 0) else line.display.caret(metrics.*, style, @min(self.selections[0].head - line.range.start, line.original.len));
                 caret.y = line.y + 3;
             }
         }

@@ -1,0 +1,15 @@
+{
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "driver_sha256": "2c7142f40513995815989ca95832a87e539b03cdb06163f7088e6c129ef0ddb6",
+  "runs": 5,
+  "files": 8,
+  "lines_per_file": 4000,
+  "hunks": 312,
+  "source_hashes": {
+    "tools/bench_git_interactions.zig": "be3f403b6d48c8ac488743553b262b7cc0959172fb80ff08e2cb6656fcc3da66",
+    "apps/zircon/src/services/git.zig": "16d9b64042c0f89eb9f74a46fb5566c579dc2af58a6e04642a59409667656902",
+    "packages/zircon_git_ui/src/layout.zig": "1bc1c88097a0945de5502a8f6d287068f0d1786bde2ff456cc3f10b6e8ee08eb",
+    "packages/zircon_editor/src/wrap.zig": "576df48f64a099e65db165cb39d6db05524d654382c5a73af3db103d198e7609"
+  },
+  "uptime": "21:35  up 7 days,  3:02, 6 users, load averages: 3.53 3.59 3.34"
+}

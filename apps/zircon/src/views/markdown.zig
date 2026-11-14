@@ -60,6 +60,7 @@ pub const Preview = struct {
     scroll: ui.controls.Scroll = .{},
     follow_end: bool = false,
     colors: Colors = .{},
+    compact: bool = false,
     pub fn init(a: std.mem.Allocator, io: std.Io, path: ?[]const u8, snapshot: text.Snapshot) !Preview {
         return .{ .allocator = a, .io = io, .generation = try prepare(a, io, path, snapshot, null) };
     }
@@ -85,16 +86,19 @@ pub const Preview = struct {
         return self.generation.revision;
     }
     pub fn render(self: *const Preview, builder: *ui.Ui) !ui.Element {
-        const value: Canvas = .{ .generation = self.generation.retain(), .scroll = self.scroll.offset, .follow_end = self.follow_end, .colors = self.colors };
+        const value: Canvas = .{ .generation = self.generation.retain(), .scroll = self.scroll.offset, .follow_end = self.follow_end, .colors = self.colors, .compact = self.compact };
         errdefer value.generation.release();
         return builder.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = self.colors.background });
+    }
+    pub fn contentHeight(self: *const Preview, metrics: ui.layout.Measurer, width: f32) !f32 {
+        return (try cachedLayout(self.generation, metrics, width, self.colors, self.compact)).prepared.height;
     }
     /// Link paths/URLs are borrowed from this preview generation until refresh.
     /// Source offsets let the host reveal the actual editable Markdown document.
     pub fn handle(self: *Preview, event: *ui.Event(ui.Input)) !Outcome {
         switch (event.data) {
             .scroll => |wheel| {
-                const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors)).prepared;
+                const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors, self.compact)).prepared;
                 if (self.follow_end) self.scroll.offset = @max(0, prepared.height - event.bounds.height);
                 self.follow_end = false;
                 self.scroll.wheel(wheel.y, prepared.height, event.bounds.height);
@@ -103,7 +107,7 @@ pub const Preview = struct {
             },
             .pointer_down => |pointer| {
                 if (pointer.button != .primary) return .{};
-                const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors)).prepared;
+                const prepared = (try cachedLayout(self.generation, try event.textMetrics(), event.bounds.width, self.colors, self.compact)).prepared;
                 const point: ui.Point = .{ .x = pointer.position.x - event.bounds.x, .y = pointer.position.y - event.bounds.y + self.scroll.offset };
                 for (prepared.hits) |hit| if (contains(hit.bounds, point)) {
                     event.preventDefault();
@@ -228,6 +232,7 @@ const Layout = struct {
     width: f32,
     metrics: ui.layout.Measurer,
     colors: Colors,
+    compact: bool,
     prepared: Prepared,
     fn retain(self: *Layout) *Layout {
         self.refs += 1;
@@ -241,15 +246,15 @@ const Layout = struct {
         a.destroy(self);
     }
 };
-fn cachedLayout(generation: *Generation, metrics: ui.layout.Measurer, width: f32, colors: Colors) !*Layout {
-    if (generation.cached) |cached| if (cached.width == width and std.meta.eql(cached.colors, colors) and cached.metrics.context == metrics.context and cached.metrics.text == metrics.text and cached.metrics.generation == metrics.generation) return cached;
+fn cachedLayout(generation: *Generation, metrics: ui.layout.Measurer, width: f32, colors: Colors, compact: bool) !*Layout {
+    if (generation.cached) |cached| if (cached.width == width and cached.compact == compact and std.meta.eql(cached.colors, colors) and cached.metrics.context == metrics.context and cached.metrics.text == metrics.text and cached.metrics.generation == metrics.generation) return cached;
     const a = generation.allocator;
     const result = try a.create(Layout);
     errdefer a.destroy(result);
     var arena = std.heap.ArenaAllocator.init(a);
     errdefer arena.deinit();
-    const prepared = try layout(arena.allocator(), generation, metrics, width, colors);
-    result.* = .{ .allocator = a, .arena = arena, .width = width, .metrics = metrics, .colors = colors, .prepared = prepared };
+    const prepared = try layout(arena.allocator(), generation, metrics, width, colors, compact);
+    result.* = .{ .allocator = a, .arena = arena, .width = width, .metrics = metrics, .colors = colors, .compact = compact, .prepared = prepared };
     if (generation.cached) |old| old.release();
     generation.cached = result;
     return result;
@@ -350,55 +355,59 @@ const Flow = struct {
         }
     }
 };
-fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Measurer, width: f32, colors: Colors) !Prepared {
+fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Measurer, width: f32, colors: Colors, compact: bool) !Prepared {
     generation.layout_builds += 1;
-    var flow: Flow = .{ .allocator = a, .generation = generation, .metrics = metrics, .colors = colors, .right = @max(64, width - 30) };
+    const inset: f32 = if (compact) 8 else 30;
+    const body_size: f32 = if (compact) 13 else 15;
+    const line_height: f32 = if (compact) 20 else 24;
+    const gap: f32 = if (compact) 6 else 12;
+    var flow: Flow = .{ .allocator = a, .generation = generation, .metrics = metrics, .colors = colors, .right = @max(inset + 1, width - inset), .y = if (compact) 8 else 24 };
     for (generation.document.blocks) |block| {
-        flow.left = 30;
-        flow.x = 30;
-        flow.line_height = 24;
+        flow.left = inset;
+        flow.x = inset;
+        flow.line_height = line_height;
         const block_top = flow.y;
         switch (block.kind) {
             .heading => {
                 const sizes = [_]f32{ 32, 27, 23, 20, 18, 16 };
-                const size = sizes[@min(5, block.level -| 1)];
+                const size = if (compact) @min(17, sizes[@min(5, block.level -| 1)]) else sizes[@min(5, block.level -| 1)];
                 flow.line_height = size + 10;
                 try flow.inlineSpans(block.inlines, size);
                 flow.newline();
-                if (block.level <= 2) try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = flow.y + 2, .width = @max(0, flow.right - 30), .height = 1 }, .color = colors.border });
-                flow.y += 12;
+                if (block.level <= 2) try flow.fills.append(a, .{ .bounds = .{ .x = inset, .y = flow.y + 2, .width = @max(0, flow.right - inset), .height = 1 }, .color = colors.border });
+                flow.y += gap;
             },
             .paragraph => {
-                try flow.inlineSpans(block.inlines, 15);
+                try flow.inlineSpans(block.inlines, body_size);
                 if (flow.x > flow.left) flow.newline();
-                flow.y += 12;
+                flow.y += gap;
             },
             .list_item => {
                 flow.left = 48 + @as(f32, @floatFromInt(block.level)) * 20;
                 flow.x = flow.left;
                 const bullet = if (block.ordered) try std.fmt.allocPrint(a, "{d}.", .{block.number}) else "•";
                 try flow.texts.append(a, .{ .bounds = .{ .x = flow.left - 20, .y = flow.y, .width = 24, .height = 24 }, .text = bullet, .style = .{ .size = 15, .color = colors.muted } });
-                try flow.inlineSpans(block.inlines, 15);
+                try flow.inlineSpans(block.inlines, body_size);
                 flow.newline();
                 flow.y += 4;
             },
             .quote => {
                 flow.left = 48;
                 flow.x = 48;
-                try flow.inlineSpans(block.inlines, 15);
+                try flow.inlineSpans(block.inlines, body_size);
                 flow.newline();
                 try flow.fills.append(a, .{ .bounds = .{ .x = 32, .y = block_top, .width = 3, .height = flow.y - block_top }, .color = colors.accent });
                 flow.y += 8;
             },
             .rule => {
-                try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = flow.y + 8, .width = @max(0, flow.right - 30), .height = 1 }, .color = colors.border });
+                try flow.fills.append(a, .{ .bounds = .{ .x = inset, .y = flow.y + 8, .width = @max(0, flow.right - inset), .height = 1 }, .color = colors.border });
                 flow.y += 26;
             },
             .code => {
-                flow.left = 44;
-                flow.x = 44;
-                flow.y += 12;
-                flow.line_height = 22;
+                flow.left = inset + (if (compact) @as(f32, 8) else 14);
+                flow.x = flow.left;
+                flow.y += gap;
+                flow.line_height = if (compact) 20 else 22;
                 const language: syntax.Language = if (std.mem.startsWith(u8, block.info, "zig")) .zig else if (std.mem.startsWith(u8, block.info, "rust") or std.mem.startsWith(u8, block.info, "rs")) .rust else if (std.mem.startsWith(u8, block.info, "json")) .json else .plain;
                 var lexical: syntax.State = .{};
                 var iterator = std.mem.splitScalar(u8, block.content, '\n');
@@ -409,23 +418,23 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
                     lexical = lexed.state;
                     var at: usize = 0;
                     for (lexed.spans) |span| {
-                        if (span.start > at) try flow.textRun(line[at..span.start], .{ .size = 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
+                        if (span.start > at) try flow.textRun(line[at..span.start], .{ .size = if (compact) 13 else 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
                         const color = tokenColor(span.kind, colors);
-                        try flow.textRun(line[span.start..span.end], .{ .size = 14, .mono = true, .color = color }, block.source.start, null, false, true);
+                        try flow.textRun(line[span.start..span.end], .{ .size = if (compact) 13 else 14, .mono = true, .color = color }, block.source.start, null, false, true);
                         at = span.end;
                     }
-                    if (at < line.len) try flow.textRun(line[at..], .{ .size = 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
+                    if (at < line.len) try flow.textRun(line[at..], .{ .size = if (compact) 13 else 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
                     flow.newline();
                 }
                 flow.y += 8;
-                try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = block_top, .width = @max(1, flow.right - 30), .height = flow.y - block_top }, .color = colors.code, .radius = ui.controls.metrics.control_radius });
-                flow.y += 14;
+                try flow.fills.append(a, .{ .bounds = .{ .x = inset, .y = block_top, .width = @max(1, flow.right - inset), .height = flow.y - block_top }, .color = colors.code, .radius = ui.controls.metrics.control_radius });
+                flow.y += if (compact) @as(f32, 8) else 14;
             },
             .table => {
                 const table = block.table.?;
                 var columns: usize = table.alignments.len;
                 for (table.rows) |row| columns = @max(columns, row.cells.len);
-                const cell_width = @max(40, (flow.right - 30) / @as(f32, @floatFromInt(@max(1, columns))));
+                const cell_width = @max(40, (flow.right - inset) / @as(f32, @floatFromInt(@max(1, columns))));
                 for (table.rows, 0..) |row, ri| {
                     const top = flow.y;
                     var bottom = top + 34;
@@ -438,11 +447,11 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
                         flow.newline();
                         bottom = @max(bottom, flow.y + 5);
                     }
-                    flow.left = 30;
+                    flow.left = inset;
                     flow.right = @max(64, width - 30);
                     flow.y = bottom;
-                    if (ri == 0) try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = top, .width = @max(1, flow.right - 30), .height = bottom - top }, .color = colors.code });
-                    try flow.fills.append(a, .{ .bounds = .{ .x = 30, .y = bottom, .width = @max(1, flow.right - 30), .height = 1 }, .color = colors.border });
+                    if (ri == 0) try flow.fills.append(a, .{ .bounds = .{ .x = inset, .y = top, .width = @max(1, flow.right - inset), .height = bottom - top }, .color = colors.code });
+                    try flow.fills.append(a, .{ .bounds = .{ .x = inset, .y = bottom, .width = @max(1, flow.right - inset), .height = 1 }, .color = colors.border });
                     for (0..columns + 1) |ci| try flow.fills.append(a, .{ .bounds = .{ .x = 30 + @as(f32, @floatFromInt(ci)) * cell_width, .y = top, .width = 1, .height = bottom - top }, .color = colors.border });
                 }
                 flow.y += 18;
@@ -450,7 +459,7 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
         }
         try flow.hits.append(a, .{ .bounds = .{ .x = 20, .y = block_top, .width = @max(1, width - 40), .height = @max(1, flow.y - block_top) }, .source = block.source.start });
     }
-    return .{ .texts = flow.texts.items, .fills = flow.fills.items, .images = flow.images.items, .hits = flow.hits.items, .height = flow.y + 20 };
+    return .{ .texts = flow.texts.items, .fills = flow.fills.items, .images = flow.images.items, .hits = flow.hits.items, .height = flow.y + if (compact) @as(f32, 8) else 20 };
 }
 
 fn tokenColor(kind: syntax.Kind, colors: Colors) ui.Color {
@@ -462,6 +471,7 @@ const Canvas = struct {
     scroll: f32,
     follow_end: bool,
     colors: Colors,
+    compact: bool,
     pub const LayoutState = ui.layout.Measurer;
     pub const PrepaintState = Prepared;
     pub fn requestLayout(_: *Canvas, cx: *ui.LayoutCx) !ui.LayoutResult(LayoutState) {
@@ -469,7 +479,7 @@ const Canvas = struct {
     }
     pub fn prepaint(self: *Canvas, cx: *ui.PrepaintCx, bounds: ui.Rect, metrics: *LayoutState) !Prepared {
         _ = cx;
-        const cached = (try cachedLayout(self.generation, metrics.*, bounds.width, self.colors)).retain();
+        const cached = (try cachedLayout(self.generation, metrics.*, bounds.width, self.colors, self.compact)).retain();
         if (self.retained_layout) |old| old.release();
         self.retained_layout = cached;
         self.scroll = if (self.follow_end) @max(0, cached.prepared.height - bounds.height) else std.math.clamp(self.scroll, 0, @max(0, cached.prepared.height - bounds.height));

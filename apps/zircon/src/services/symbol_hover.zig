@@ -112,10 +112,13 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), session: usize, message: @Fi
     defer snapshot.deinit();
     var preview = try markdown.Preview.init(self.allocator, self.workspace.io, null, snapshot);
     preview.colors = self.previewColors();
+    preview.colors.background = self.colors.panel;
+    preview.compact = true;
     if (self.symbol_hover.preview) |*old| old.deinit();
     self.symbol_hover.preview = preview;
-    const lines = std.mem.count(u8, value.contents, "\n") + 1;
-    self.symbol_hover.height = std.math.clamp(@as(f32, @floatFromInt(lines)) * 22 + 48, 100, 320);
+    const window = try cx.app.window(self.window orelse return);
+    const width = @min(480, @max(80, window.dimensions.width - 16));
+    self.symbol_hover.height = std.math.clamp(try preview.contentHeight(window.surface.?.measurer(), width - 16) + 16, 56, 320);
     cx.notify();
 }
 
@@ -131,7 +134,7 @@ fn overPopup(self: *const Shell, cx: *ui.Context(Shell), point: ui.Point) bool {
     if (self.symbol_hover.preview == null) return false;
     const window = cx.app.window(self.window orelse return false) catch return false;
     var area = bounds(self, window.dimensions);
-    area.y -= 6;
+    if (area.y > self.symbol_hover.target.?.anchor.y) area.y -= 6;
     area.height += 6;
     return editing.annotations.contains(area, point);
 }
@@ -141,6 +144,7 @@ pub fn dismissOutside(self: *Shell, cx: *ui.Context(Shell), event: ui.Input) voi
     if (event == .pointer_down and !overPopup(self, cx, event.pointer_down.position)) return clear(self, cx);
     if (event == .scroll and !overPopup(self, cx, event.scroll.position)) return clear(self, cx);
     if (event == .focus and !event.focus) return clear(self, cx);
+    if (event == .pointer_leave) return clear(self, cx);
     if (event == .pointer_move) if (self.symbol_hover.target) |target| {
         if (!editing.annotations.contains(target.editor_bounds, event.pointer_move.position) and !overPopup(self, cx, event.pointer_move.position)) clear(self, cx);
     };
@@ -153,7 +157,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
     const area = bounds(self, b.viewport());
     const content = try b.fluent().adopt(try preview.render(b)).listeners(.{ .on_input = b.onInput(input) }).build();
     const card = try v.floatingPanel(b, self.colors, .{ .width = area.width, .height = area.height }, ui.Insets.all(8), 0, &.{content});
-    return try b.fluent().div().padding(.{ .top = area.y, .left = area.x }).items(.start).stack().children(.{card}).id(.{ .string = "symbol-hover" }).build();
+    return try b.fluent().adopt(card).margin(.{ .top = area.y, .left = area.x }).id(.{ .string = "symbol-hover" }).build();
 }
 
 fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {

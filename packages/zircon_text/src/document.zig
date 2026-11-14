@@ -168,6 +168,48 @@ pub const Document = struct {
         std.debug.assert(rope.summary(candidate).bytes == size);
         return .{ .allocator = self.allocator, .document = self, .expected = expected, .group = group, .candidate = candidate, .changed = true, .change = .{ .allocator = self.allocator, .before = self.revision_value, .after = self.revision_value + 1, .state = self.next_state, .mappings = mappings } };
     }
+    pub const HistoryDirection = enum { undo, redo };
+
+    /// Reserve the reverse stack without moving a root. Several documents can
+    /// prepare history travel before any of them changes content.
+    pub const PreparedHistory = struct {
+        document: *Document,
+        revision: u64,
+        target: u64,
+        direction: HistoryDirection,
+        committed: bool = false,
+
+        pub fn commit(self: *PreparedHistory) !void {
+            const doc = self.document;
+            doc.check();
+            if (self.committed) return error.HistoryAlreadyCommitted;
+            if (doc.revision() != self.revision or doc.historyTarget(self.direction) != self.target) return error.StaleHistory;
+            const current: history.State = .{ .root = doc.root, .id = doc.state_value };
+            const next = (switch (self.direction) {
+                .undo => doc.history.undo(doc.allocator, current),
+                .redo => doc.history.redo(doc.allocator, current),
+            } catch unreachable).?;
+            doc.root = next.root;
+            doc.state_value = next.id;
+            doc.revision_value += 1;
+            self.committed = true;
+        }
+    };
+
+    pub fn historyTarget(self: *const Document, direction: HistoryDirection) ?u64 {
+        self.check();
+        const states = if (direction == .undo) self.history.backward.items else self.history.forward.items;
+        return if (states.len == 0) null else states[states.len - 1].id;
+    }
+
+    pub fn prepareHistory(self: *Document, direction: HistoryDirection, target: u64) !PreparedHistory {
+        self.check();
+        if (self.historyTarget(direction) != target) return error.StaleHistory;
+        if (self.revision_value == std.math.maxInt(u64)) return error.RevisionExhausted;
+        if (direction == .undo) try self.history.forward.ensureUnusedCapacity(self.allocator, 1) else try self.history.backward.ensureUnusedCapacity(self.allocator, 1);
+        return .{ .document = self, .revision = self.revision_value, .target = target, .direction = direction };
+    }
+
     pub fn undo(self: *Document) !bool {
         self.check();
         if (self.history.backward.items.len == 0) return false;

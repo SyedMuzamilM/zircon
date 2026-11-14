@@ -522,3 +522,69 @@ test "unavailable recovery remains visible and does not trap an explicitly disca
     _ = try app.step(0.2);
     try t.expectError(error.WindowNotFound, app.window(handle));
 }
+
+test "recovery retains dirty Git buffers without creating source tabs" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const home = try std.fs.path.join(t.allocator, &.{ root, "recovery" });
+    defer t.allocator.free(home);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "main" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "hidden.txt", .data = "disk" });
+    const Hidden = struct {
+        fn edit(self: *Shell, cx: *ui.Context(Shell)) !void {
+            const id = try self.workspace.open("hidden.txt");
+            const Editor = @FieldType(@TypeOf(self.tabs.items[0]), "editor");
+            var editor = try Editor.init(self.allocator);
+            errdefer editor.deinit();
+            const record = try self.workspace.get(id);
+            var change = try record.doc.apply(record.doc.revision(), &.{.{ .range = .{ .start = 0, .end = 0 }, .text = "unsaved 日本語 " }}, 0);
+            defer change.deinit();
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            editor.synchronize(snapshot);
+            try self.git.editing.views.append(std.heap.page_allocator, .{ .document = id, .editor = editor });
+            cx.notify();
+        }
+        fn check(self: *const Shell) !void {
+            try t.expectEqual(@as(usize, 1), self.tabs.items.len);
+            try t.expectEqual(@as(usize, 1), self.git.editing.views.items.len);
+            const record = try self.workspace.getConst(self.git.editing.views.items[0].document);
+            try t.expect(record.dirty());
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            const bytes = try snapshot.copy(t.allocator, .{ .start = 0, .end = snapshot.byteLen() });
+            defer t.allocator.free(bytes);
+            try t.expectEqualStrings("unsaved 日本語 disk", bytes);
+        }
+        fn closing(self: *Shell, cx: *ui.Context(Shell)) !void {
+            var event: ui.Event(ui.Input) = .{ .data = .close };
+            try self.onRoot(&event, cx);
+            try t.expect(event.prevented);
+            try t.expectEqual(.dirty, self.overlay);
+            try Ops.command(self, cx, .dismiss);
+        }
+    };
+    {
+        var app = try ui.App.init(.{ .allocator = t.allocator });
+        defer app.deinit();
+        const h = try open(&app, root, home, "main.txt");
+        const owner = try app.windowEntity(Shell, h);
+        try app.update(owner, Hidden.edit, .{});
+        try settle(&app, owner, 1);
+        try app.read(owner, Hidden.check, .{});
+    }
+    {
+        var app = try ui.App.init(.{ .allocator = t.allocator });
+        defer app.deinit();
+        const h = try open(&app, root, home, "main.txt");
+        const owner = try app.windowEntity(Shell, h);
+        try settle(&app, owner, 1);
+        try app.read(owner, Hidden.check, .{});
+        try app.update(owner, Hidden.closing, .{});
+    }
+    const bytes = try tmp.dir.readFileAlloc(t.io, "hidden.txt", t.allocator, .limited(100));
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings("disk", bytes);
+}

@@ -3,6 +3,7 @@
 const std = @import("std");
 const zircon_git_ui = @import("zircon_git_ui");
 const ui = @import("zircon_ui");
+const zircon_widgets = @import("zircon_widgets");
 const commands = @import("../../commands.zig");
 const git_editing = @import("../../git_editing.zig");
 const shell = @import("../../shell.zig");
@@ -12,10 +13,17 @@ const controls = @import("diff_controls.zig");
 const Shell = shell.Shell;
 const Command = commands.Command;
 
-pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
+pub fn render(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
+    if (self.git.selection_drag != null) try b.requestFrameAfter(1.0 / 60.0);
     const c = self.colors;
     const font = self.editor_options.font_size;
     const line_height = font * self.editor_options.line_height;
+    if (self.git.projection) |projection| if (self.git.diff) |diff| {
+        const handle = self.window orelse return error.NoWindow;
+        const metrics = (try b.frame.app.?.window(handle)).surface.?.measurer();
+        const layout_changed = try projection.ensureLayout(diff, &self.git.diff_view, width, font, self.editor_options.tab_width, self.editor_options.soft_wrap != .none, self.editor_options.line_numbers, metrics);
+        if (layout_changed) if (self.git.review) |*review| review.reflow(projection, &self.git.diff_view);
+    };
     var rows: std.ArrayList(ui.Element) = .empty;
     var tools: std.ArrayList(ui.Element) = .empty;
     if (self.git.projection != null) {
@@ -78,13 +86,22 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .scroll = self.git.diff_scroll.offset,
         .font = font,
         .line_height = line_height,
+        .tab_width = self.editor_options.tab_width,
+        .horizontal = if (self.editor_options.soft_wrap == .none) self.git.editing.horizontal else 0,
+        .width = width,
+        .line_numbers = self.editor_options.line_numbers,
         .theme = self.editor_options.theme,
         .colors = c,
+        .review = if (self.git.review) |*review| review else null,
     }).render(b, self, Hooks) else try message(b, c, "Select a changed file or choose View diff.");
     diff_lines = try b.fluent().adopt(diff_lines).listeners(.{
+        .focusable = true,
         .on_input = b.onInput(Shell.onGitScroll),
         .on_capture = b.onInput(capture),
     }).build();
+    if (self.git.review) |review| if (review.focused and self.git.editing.active == null) {
+        diff_lines = try b.fluent().adopt(diff_lines).request_focus(self.editor_focus_request).build();
+    };
     try rows.append(b.allocator(), diff_lines);
     return b.fluent().div()
         .grow()
@@ -125,5 +142,6 @@ fn message(b: *ui.Ui, c: v.Palette, bytes: []const u8) !ui.Element {
 
 fn capture(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     try controls.input(self, event, cx);
+    if (self.window) |handle| if (zircon_widgets.sticky_header.hit(&(try cx.app.window(handle)).frames.committed, event.data, "diff-file:")) return;
     if (!event.stopped) try git_editing.surface(self, event, cx);
 }

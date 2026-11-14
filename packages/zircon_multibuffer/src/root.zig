@@ -3,6 +3,11 @@
 const std = @import("std");
 const text = @import("zircon_text");
 const workspace = @import("zircon_workspace");
+const transactions = @import("transactions.zig");
+pub const Transactions = transactions.Transactions;
+pub const Batch = transactions.Batch;
+pub const Position = struct { excerpt: ExcerptId, offset: usize };
+pub const Selection = struct { anchor: Position, head: Position };
 pub const SourceId = workspace.DocumentId;
 pub const Bias = enum { before, after };
 pub const Anchor = struct { source: SourceId, offset: usize, bias: Bias = .after };
@@ -171,6 +176,90 @@ pub const MultiBuffer = struct {
         if (!std.unicode.utf8ValidateSlice(replacement)) return error.InvalidUtf8;
         return .{ .source = mapped.source, .source_revision = try self.sourceRevision(mapped.source), .range = mapped.range, .replacement = replacement };
     }
+    pub fn byteLen(self: *const MultiBuffer) usize {
+        return if (self.excerpts.items.len == 0) 0 else self.excerpts.items[self.excerpts.items.len - 1].projection_end;
+    }
+
+    pub fn projectedOffset(self: *const MultiBuffer, position: Position) !usize {
+        for (self.excerpts.items) |item| if (std.meta.eql(item.value.id, position.excerpt)) {
+            if (position.offset < item.value.source_range.start or position.offset > item.value.source_range.end) return error.InvalidAnchor;
+            const source = self.sourceConst(item.value.source) orelse return error.SourceNotFound;
+            try source.snapshot.validateRange(.{ .start = position.offset, .end = position.offset });
+            return item.projection_start + position.offset - item.value.source_range.start;
+        };
+        return error.ExcerptNotFound;
+    }
+
+    pub fn positionAt(self: *const MultiBuffer, at: usize, bias: Bias) !Position {
+        if (at > self.byteLen()) return error.InvalidProjectedRange;
+        for (self.excerpts.items, 0..) |item, index| {
+            if (at <= item.projection_end) {
+                const source = self.sourceConst(item.value.source) orelse return error.SourceNotFound;
+                const source_offset = item.value.source_range.start + at - item.projection_start;
+                try source.snapshot.validateRange(.{ .start = source_offset, .end = source_offset });
+                return .{ .excerpt = item.value.id, .offset = source_offset };
+            }
+            if (index + 1 < self.excerpts.items.len and at < self.excerpts.items[index + 1].projection_start) {
+                const next = self.excerpts.items[index + 1];
+                return if (bias == .before) .{ .excerpt = item.value.id, .offset = item.value.source_range.end } else .{ .excerpt = next.value.id, .offset = next.value.source_range.start };
+            }
+        }
+        return error.ExcerptNotFound;
+    }
+
+    pub fn selectionRange(self: *const MultiBuffer, selection: Selection) !ProjectedRange {
+        const anchor = try self.projectedOffset(selection.anchor);
+        const head = try self.projectedOffset(selection.head);
+        return .{ .start = @min(anchor, head), .end = @max(anchor, head) };
+    }
+
+    pub fn copy(self: *const MultiBuffer, a: std.mem.Allocator, range: ProjectedRange) ![]u8 {
+        if (range.start > range.end or range.end > self.byteLen()) return error.InvalidProjectedRange;
+        _ = try self.positionAt(range.start, .after);
+        _ = try self.positionAt(range.end, .before);
+        var bytes: std.ArrayList(u8) = .empty;
+        errdefer bytes.deinit(a);
+        for (self.excerpts.items, 0..) |item, index| {
+            const start = @max(range.start, item.projection_start);
+            const end = @min(range.end, item.projection_end);
+            if (start < end) {
+                const source = self.sourceConst(item.value.source).?;
+                const part = try source.snapshot.copy(a, .{ .start = item.value.source_range.start + start - item.projection_start, .end = item.value.source_range.start + end - item.projection_start });
+                defer a.free(part);
+                try bytes.appendSlice(a, part);
+            }
+            if (index + 1 < self.excerpts.items.len) {
+                const separator_start = @max(range.start, item.projection_end);
+                const separator_end = @min(range.end, item.projection_end + self.separator.len);
+                if (separator_start < separator_end) try bytes.appendSlice(a, self.separator[separator_start - item.projection_end .. separator_end - item.projection_end]);
+            }
+        }
+        return bytes.toOwnedSlice(a);
+    }
+
+    /// Only visible source bytes participate. The replacement is inserted in
+    /// the first excerpt; hidden source ranges and synthetic separators survive.
+    pub fn edits(self: *const MultiBuffer, a: std.mem.Allocator, range: ProjectedRange, replacement: []const u8) ![]SourceEdit {
+        if (range.start > range.end or range.end > self.byteLen()) return error.InvalidProjectedRange;
+        if (!std.unicode.utf8ValidateSlice(replacement)) return error.InvalidUtf8;
+        const first = try self.positionAt(range.start, .after);
+        const last = try self.positionAt(range.end, .before);
+        var result: std.ArrayList(SourceEdit) = .empty;
+        errdefer result.deinit(a);
+        var inside = false;
+        for (self.excerpts.items) |item| {
+            const starts = std.meta.eql(item.value.id, first.excerpt);
+            const ends = std.meta.eql(item.value.id, last.excerpt);
+            if (starts) inside = true;
+            if (!inside) continue;
+            const source = self.sourceConst(item.value.source).?;
+            const mapped: text.Range = .{ .start = if (starts) first.offset else item.value.source_range.start, .end = if (ends) last.offset else item.value.source_range.end };
+            if (mapped.start < mapped.end or (starts and replacement.len > 0)) try result.append(a, .{ .source = item.value.source, .source_revision = source.snapshot.revision(), .range = mapped, .replacement = if (starts) replacement else "" });
+            if (ends) break;
+        }
+        return result.toOwnedSlice(a);
+    }
+
     pub fn excerptList(self: *const MultiBuffer) []const ExcerptView {
         return self.excerpts.items;
     }

@@ -116,7 +116,11 @@ pub const Editor = struct {
     }
     pub fn render(self: *const Editor, document: *const text.Document, builder: *ui.Ui) !ui.Element {
         try self.validate();
-        return canvas.render(self, document, builder);
+        return canvas.render(self, document, builder, 1024);
+    }
+    pub fn renderExcerpt(self: *const Editor, document: *const text.Document, builder: *ui.Ui, rows: usize) !ui.Element {
+        try self.validate();
+        return canvas.render(self, document, builder, rows +| 4);
     }
     pub fn offsetAtPoint(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input), point: ui.Point) !usize {
         return navigation.position(self, snapshot, event, point);

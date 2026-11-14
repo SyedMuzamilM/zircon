@@ -1,0 +1,12 @@
+{
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "driver_sha256": "bacc8f0cf54ea30c6a0266cf603853cf9d08f944176b3f47477a206882d8a24d",
+  "runs": 3,
+  "source_hashes": {
+    "tools/bench_scroll.zig": "296f48a9da3b9b330aecc4e157300d9d9a65105f97b7fcc4c49675b74db3638e",
+    "packages/zircon_editor/src/canvas.zig": "45986f9e61a2d7c174a70a17b579281db234e5f74d073327ee205f0e34a280d2",
+    "apps/zircon/src/search_editing.zig": "cfdad5b9c665afe11f510b6f23305b93c9898090548bef95a3cefd1fab0d6391",
+    "packages/zircon_git_ui/src/review.zig": "8923a82ad15892d2b58a2e97dc3b0248adb35c19ed9bec875ec2e2b64eb3e12c"
+  }
+}

@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
         test_module.addImport(feature.name, feature.module);
         test_module.addImport("zircon_text", text_module);
         if (std.mem.eql(u8, feature.name, "zircon_git_ui")) {
+            test_module.addImport("zircon_ui", module);
             test_module.addImport("zircon_git", git_module);
             test_module.addImport("zircon_workspace", workspace_module);
             test_module.addImport("zircon_multibuffer", multibuffer_module);
@@ -165,6 +166,10 @@ pub fn build(b: *std.Build) void {
         recovery_run.has_side_effects = true;
         b.step("verify-recovery", "Kill and restart native recovery sessions and verify exact restored state").dependOn(&recovery_run.step);
         b.step("build-bench-editor", "Build native input-to-frame submission baseline driver").dependOn(&b.addInstallArtifact(editor_bench, .{}).step);
+        const scroll_bench = b.addExecutable(.{ .name = "zircon-scroll-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_scroll.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
+        b.step("build-bench-scroll", "Build native scroll-to-frame submission driver").dependOn(&b.addInstallArtifact(scroll_bench, .{}).step);
+        const git_bench = b.addExecutable(.{ .name = "zircon-git-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_git_interactions.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
+        b.step("build-bench-git", "Build native Git expansion and typing driver").dependOn(&b.addInstallArtifact(git_bench, .{}).step);
         const agent_journey = b.addExecutable(.{ .name = "zircon-agent-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_agent_workspace.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
         const agent_journey_run = b.addRunArtifact(agent_journey);
         agent_journey_run.addArgs(&.{ b.option([]const u8, "agent-config", "Read-only installed provider configuration") orelse "/tmp/zircon-agents.json", b.option([]const u8, "agent-output", "Disposable native provider workspace") orelse "/tmp/zircon-agent-native" });

@@ -1077,6 +1077,38 @@ test "wrapped Git deletion blocks map to the changed source and unwrap clamps sc
     try t.expectEqual(@as(f32, 0), state.scroll.offset);
 }
 
+test "composite wrapping shapes displayed excerpts and maps newline edits" {
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(t.allocator);
+    for (0..1000) |_| try bytes.appendSlice(t.allocator, "long source line with 日本語 and enough words to wrap\n");
+    var doc = try text.Document.init(t.allocator, bytes.items);
+    defer doc.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    var before = doc.snapshot();
+    defer before.deinit();
+    try state.wrap_cache.setExcerpts(&.{
+        .{ .start = try before.lineStart(100), .end = try before.lineStart(103) },
+        .{ .start = try before.lineStart(500), .end = try before.lineStart(502) },
+    });
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try state.wrap_cache.ensure(before, 160, 14, 4, fixed.measurer());
+    try t.expectEqual(@as(usize, 5), state.wrap_cache.shaped_lines);
+    const at = try before.lineStart(101);
+    var outcome = try state.applyEdits(&doc, &.{.{ .range = .{ .start = at, .end = at }, .text = "inserted\n" }}, 0);
+    defer release(&outcome);
+    var after = doc.snapshot();
+    defer after.deinit();
+    try state.wrap_cache.ensure(after, 160, 14, 4, fixed.measurer());
+    try t.expectEqual(@as(usize, 7), state.wrap_cache.shaped_lines);
+    const fresh = try editor.wrap.Cache.init(t.allocator);
+    defer fresh.release();
+    try fresh.setExcerpts(state.wrap_cache.excerpt_ranges.?.items);
+    try fresh.ensure(after, 160, 14, 4, fixed.measurer());
+    try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
+    try t.expectEqualSlices(usize, fresh.starts.items, state.wrap_cache.starts.items);
+}
+
 test "Cmd slash toggles selected lines with indentation and undo while gcc comments the current line" {
     var document = try text.Document.init(t.allocator, "    const x = 1;\n    const y = 2;\nnext\n");
     defer document.deinit();

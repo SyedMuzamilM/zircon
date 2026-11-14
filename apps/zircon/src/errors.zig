@@ -10,6 +10,8 @@ pub fn message(err: anyerror) []const u8 {
         error.NoDocument => "Open or create a file first.",
         error.InvalidPath => "Enter a valid file path.",
         error.StaleTextSnapshot, error.StaleRevision, error.StaleWorkspaceEdit => "The document changed before that edit. Try the edit again.",
+        error.HistoryDiverged => "Another file in this edit has newer changes. Undo those changes first, then retry the grouped edit.",
+        error.CrossSourceCompositionUnsupported => "Start text composition within one result. Cross-file selections support typing and paste.",
         error.OutOfMemory => "There is not enough memory to complete the operation.",
         error.UnsavedBlame => "Save this file before requesting Git blame.",
         error.NoBlameRepository => "Git blame requires a file in a Git repository.",

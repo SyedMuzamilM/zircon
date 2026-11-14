@@ -97,3 +97,31 @@ test "editor context menu preserves selected code copies trimmed text and target
     try t.expect(try app.read(owner, Ops.closed, .{}));
     try app.read(owner, Ops.selection, .{ @as(usize, 9), @as(usize, 9), @as(u8, 1) });
 }
+
+fn menuPersistence() !void {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "  alpha beta\nsecond line\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    const at = try point(&app, h, 0, 3);
+    try app.dispatch(h, .{ .pointer_down = .{ .position = at, .button = .secondary } });
+    _ = try app.step(0);
+    try t.expect(!try app.read(owner, Ops.closed, .{}));
+    try app.dispatch(h, .{ .pointer_up = .{ .position = at, .button = .secondary } });
+    _ = try app.step(0.01);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = at.x + 20, .y = at.y + 25 } } });
+    _ = try app.step(0.1);
+    try t.expect(!try app.read(owner, Ops.closed, .{}));
+    _ = try bounds(&app, h, "editor-context-menu");
+}
+
+test "editor context menu stays open across press release movement and redraw" {
+    try menuPersistence();
+}

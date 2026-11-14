@@ -166,7 +166,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             .image => try views_image.render(self, b),
             .extensions => try views_extensions.render(self, b),
             .search => try views_search.render(self, b, 0),
-            .git_diff => try views_git_diff.render(self, b),
+            .git_diff => try views_git_diff.render(self, b, width),
             .diagnostics => try views_diagnostics.render(self, b, 0),
             .language_results => try views_language_results.render(self, b, 0),
             else => unreachable,
@@ -196,7 +196,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         const tab = &self.tabs.items[@min(self.active, self.tabs.items.len - 1)];
         const primary_record = try self.workspace.getConst(tab.document);
         const primary_source = self.panel == .editor or self.panel == .markdown;
-        var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0), 0);
+        var primary = if (primary_source) try tab.editor.render(&primary_record.doc, b) else try panelBody(self, b, self.currentTool(0), 0, primary_width);
         primary = try b.fluent().adopt(primary).style(.{
             .width = .{ .px = primary_width },
             .flex_grow = 1,
@@ -213,7 +213,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         if (self.currentTool(0) == .git_diff) primary = try b.fluent().adopt(primary)
             .id(.{ .string = "primary-tool" })
             .listeners(.{ .focusable = true })
-            .request_focus(if (self.active_pane == .primary) self.editor_focus_request else 0)
+            .request_focus(if (self.active_pane == .primary and self.git.editing.active == null) self.editor_focus_request else 0)
             .build();
         if (primary_source) primary = try b.fluent().adopt(try b.fluent().adopt(primary)
             .autofocus()
@@ -263,7 +263,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             try panes.append(b.allocator(), try divider(b, colors, 1, vertical));
             const record = try self.workspace.getConst(secondary.document);
             const secondary_source = self.secondary_tool == null;
-            var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool, 1);
+            var secondary_canvas = if (secondary_source) try secondary.editor.render(&record.doc, b) else try panelBody(self, b, self.secondary_tool, 1, if (vertical) width else available - primary_width);
             secondary_canvas = try b.fluent().adopt(secondary_canvas)
                 .style(.{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden })
                 .build();
@@ -276,7 +276,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             if (self.secondary_tool == .git_diff) secondary_canvas = try b.fluent().adopt(secondary_canvas)
                 .id(.{ .string = "secondary-tool" })
                 .listeners(.{ .focusable = true })
-                .request_focus(if (self.active_pane == .secondary) self.editor_focus_request else 0)
+                .request_focus(if (self.active_pane == .secondary and self.git.editing.active == null) self.editor_focus_request else 0)
                 .build();
             if (secondary_source) secondary_canvas = try b.fluent().adopt(secondary_canvas)
                 .request_focus(if (self.active_pane == .secondary) self.editor_focus_request else 0)
@@ -312,9 +312,9 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         .build();
 }
 
-fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool, pane: u8) !ui.Element {
+fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool, pane: u8, width: f32) !ui.Element {
     if (tool) |which| return switch (which) {
-        .git_diff => views_git_diff.render(self, b),
+        .git_diff => views_git_diff.render(self, b, width),
         .search => views_search.render(self, b, pane),
         .language_results => views_language_results.render(self, b, pane),
         .diagnostics => views_diagnostics.render(self, b, pane),

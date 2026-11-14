@@ -8,9 +8,12 @@ const ws = @import("zircon_workspace");
 const commands_module = @import("commands.zig");
 const editor_git = @import("editor_git.zig");
 const git_editing = @import("git_editing.zig");
+const git_selection = @import("git_selection.zig");
+const multibuffer_editing = @import("multibuffer_editing.zig");
 const panes = @import("panes.zig");
 const project_index = @import("project_index.zig");
 const search_editing = @import("search_editing.zig");
+const search_selection = @import("search_selection.zig");
 const buffer_find = @import("services/buffer_find.zig");
 const catalog = @import("services/catalog.zig");
 const services_extensions = @import("services/extensions.zig");
@@ -110,6 +113,7 @@ pub fn refreshExternalDocuments(self: *Shell) !bool {
         };
         if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) pane.editor.synchronize(snapshot);
         for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) view.editor.synchronize(snapshot);
+        try git_selection.changed(self, id);
         try search_editing.changed(self, id, null, 255);
         services_language.invalidateDocument(self, id) catch |err| try self.reportError(err);
         changed = true;
@@ -265,6 +269,11 @@ pub fn activeOrigin(self: *const Shell) u8 {
     return pane;
 }
 
+pub fn firstDirtyDocument(self: *const Shell) ?ws.DocumentId {
+    for (self.workspace.slots.items, 0..) |slot, index| if (slot.record) |record| if (record.dirty()) return .{ .workspace = self.workspace.identity, .slot = @intCast(index), .generation = slot.generation };
+    return null;
+}
+
 fn firstDirty(self: *const Shell) ?usize {
     for (self.tabs.items, 0..) |tab, i| {
         if (self.workspace.dirty(tab.document) catch false) return i;
@@ -340,7 +349,7 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.pending) |pending| switch (pending) {
         .tab => |i| try closeTab(self, cx, i, .if_clean),
         .window => {
-            if (firstDirty(self) != null) {
+            if (firstDirtyDocument(self) != null) {
                 try overlays.show(self, cx, .dirty);
             } else {
                 if (services_recovery.enabled(self)) try services_recovery.requestClose(self, cx, .window_save) else {
@@ -360,6 +369,7 @@ pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pan
     if (outcome.change == null and !outcome.reset) return;
     defer cx.notify();
     self.language.clearCompletion();
+    try git_selection.changed(self, id);
     try search_editing.changed(self, id, if (outcome.change) |*change| change else null, pane);
     var snapshot = try self.workspace.snapshot(id);
     defer snapshot.deinit();
@@ -375,8 +385,8 @@ pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pan
         if (outcome.change) |*change| other.editor.mapChange(change);
         other.editor.synchronize(snapshot);
     };
-    for (self.tabs.items, 0..) |*tab, index| if (std.meta.eql(tab.document, id) and index == self.active) try prepareEditor(self, cx, &tab.editor, snapshot, "primary-editor");
-    if (self.secondary) |*other| if (std.meta.eql(other.document, id)) try prepareEditor(self, cx, &other.editor, snapshot, "secondary-editor");
+    if (self.currentTool(0) == null) for (self.tabs.items, 0..) |*tab, index| if (std.meta.eql(tab.document, id) and index == self.active) try prepareEditor(self, cx, &tab.editor, snapshot, "primary-editor");
+    if (self.currentTool(1) == null) if (self.secondary) |*other| if (std.meta.eql(other.document, id)) try prepareEditor(self, cx, &other.editor, snapshot, "secondary-editor");
     for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) {
         if (pane != 2) {
             if (outcome.change) |*change| view.editor.mapChange(change);
@@ -391,6 +401,13 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (pane == 0 and self.tabs.items.len == 0) return false;
     if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
+    const history_command = self.key_bindings.resolve(e.data);
+    if (history_command == .undo or history_command == .redo) {
+        if (try multibuffer_editing.travel(self, cx, selected.id, if (history_command == .undo) .undo else .redo)) {
+            e.preventDefault();
+            return true;
+        }
+    }
     const record = try self.workspace.get(selected.id);
     if (try editor_context_menu.pointer(self, cx, selected.editor, &record.doc, selected.id, pane, e)) return true;
     try symbol_hover.pointer(self, cx, selected.editor, &record.doc, selected.id, e);
@@ -745,6 +762,16 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             };
         },
         .save_dirty => {
+            if (self.pending != null and self.pending.? == .window) {
+                for (self.git.editing.views.items) |view| {
+                    const record = try self.workspace.getConst(view.document);
+                    if (record.path != null and record.dirty()) try self.workspace.save(view.document, null);
+                }
+                if (firstDirtyDocument(self) == null) {
+                    try finishPending(self, cx);
+                    return;
+                }
+            }
             const index = try saveTarget(self);
             const id = self.tabs.items[index].document;
             const record = try self.workspace.getConst(id);
@@ -802,6 +829,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .toggle_comment, .delete_line, .undo, .redo, .select_all => {
             const current = try active(self);
+            if (which == .undo or which == .redo) if (try multibuffer_editing.travel(self, cx, current.id, if (which == .undo) .undo else .redo)) return;
             const record = try self.workspace.get(current.id);
             var result = try current.editor.execute(&record.doc, switch (which) {
                 .delete_line => .delete_line,
@@ -823,7 +851,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
 
 pub fn rootInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (e.data == .close) try services_recovery.validateClose(self, cx);
-    if (e.data == .close and !self.allow_close and firstDirty(self) != null) {
+    if (e.data == .close and !self.allow_close and firstDirtyDocument(self) != null) {
         self.pending = .window;
         try overlays.show(self, cx, .dirty);
         e.preventDefault();
@@ -870,7 +898,11 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         }
     }
     editor_git.dismissOutside(self, cx, e);
-    if (e.data == .focus and !e.data.focus) self.dragging = .none;
+    if (e.data == .focus and !e.data.focus) {
+        self.dragging = .none;
+        git_selection.cancel(self);
+        search_selection.cancel(self);
+    }
     if (e.data == .appearance) {
         if (self.system_dark == e.data.appearance) return;
         self.system_dark = e.data.appearance;

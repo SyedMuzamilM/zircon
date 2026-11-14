@@ -22,8 +22,33 @@ pub const Cache = struct {
     starts: std.ArrayList(usize) = .empty,
     builds: usize = 0,
     shaped_lines: usize = 0,
+    excerpt_ranges: ?std.ArrayList(text.Range) = null,
     pending: ?struct { after: u64, first: usize, end_after: usize, delta: i64 } = null,
+    /// Composite editors shape only their displayed source ranges. Singleton
+    /// editors retain the full-document cache.
+    pub fn setExcerpts(self: *Cache, ranges: []const text.Range) !void {
+        if (self.excerpt_ranges) |old| {
+            var same = old.items.len == ranges.len;
+            if (same) for (old.items, ranges) |left, right| {
+                if (!std.meta.eql(left, right)) {
+                    same = false;
+                    break;
+                }
+            };
+            if (same) return;
+        } else self.excerpt_ranges = .empty;
+        const list = &self.excerpt_ranges.?;
+        try list.ensureTotalCapacity(self.allocator, ranges.len);
+        list.clearRetainingCapacity();
+        list.appendSliceAssumeCapacity(ranges);
+        self.revision = null;
+        self.pending = null;
+    }
     pub fn noteChange(self: *Cache, change: *const text.Change) void {
+        if (self.excerpt_ranges) |*ranges| for (ranges.items) |*range| {
+            range.start = change.map(range.start, .before);
+            range.end = change.map(range.end, .after);
+        };
         self.folding.noteChange(change);
         if (self.folding.collapsed.items.len > 0 or self.revision != change.before or self.rows.items.len == 0 or change.mappings.len == 0) {
             self.pending = null;
@@ -51,6 +76,7 @@ pub const Cache = struct {
             self.folding.deinit(a);
             self.rows.deinit(a);
             self.starts.deinit(a);
+            if (self.excerpt_ranges) |*ranges| ranges.deinit(a);
             a.destroy(self);
         }
     }
@@ -66,13 +92,24 @@ pub const Cache = struct {
         const pending = if (self.revision != null and self.pending != null and self.pending.?.after == s.revision() and self.width == available and self.font_size == font_size and self.tab_width == tabs) self.pending else null;
         const new_last = if (pending) |change| (try s.pointAt(change.end_after)).line else 0;
         const delta_lines = @as(i64, @intCast(s.lineCount())) - @as(i64, @intCast(self.starts.items.len -| 1));
-        const style: ui.TextStyle = .{ .size = font_size, .mono = true };
-        try self.folding.ensure(self.allocator, s, tabs);
+        if (self.excerpt_ranges == null) try self.folding.ensure(self.allocator, s, tabs);
+        var excerpt_index: usize = 0;
+        const excerpts = if (self.excerpt_ranges) |ranges| ranges.items else &.{};
+        const LineRange = struct { first: usize, end: usize };
+        const excerpt_rows = try self.allocator.alloc(LineRange, excerpts.len);
+        defer self.allocator.free(excerpt_rows);
+        for (excerpts, excerpt_rows) |range, *rows_range| {
+            rows_range.* = .{ .first = (try s.pointAt(range.start)).line, .end = (try s.pointAt(range.end -| @intFromBool(range.end > range.start))).line + 1 };
+        }
         var fold_index: usize = 0;
         var hidden_end: ?usize = null;
         for (0..s.lineCount()) |line| {
             _ = arena.reset(.retain_capacity);
             try starts.append(self.allocator, rows.items.len);
+            if (self.excerpt_ranges != null) {
+                while (excerpt_index < excerpt_rows.len and line >= excerpt_rows[excerpt_index].end) : (excerpt_index += 1) {}
+                if (excerpt_index >= excerpt_rows.len or line < excerpt_rows[excerpt_index].first) continue;
+            }
             const line_start = try s.lineStart(line);
             while (fold_index < self.folding.collapsed.items.len and self.folding.collapsed.items[fold_index].start < line_start) : (fold_index += 1) hidden_end = @max(hidden_end orelse 0, self.folding.collapsed.items[fold_index].end);
             if (hidden_end != null and line_start <= hidden_end.?) continue;
@@ -96,29 +133,12 @@ pub const Cache = struct {
             // Retain the existing oversized-line policy rather than shaping an
             // unbounded source line on the UI thread.
             const original = if (range.end - range.start > 64 * 1024) "" else try s.copy(arena.allocator(), range);
-            const expanded = try display.Line.build(arena.allocator(), original, tabs);
-            var leading: usize = 0;
-            while (leading < original.len and (original[leading] == ' ' or original[leading] == '\t')) leading += 1;
-            const indent = if (leading == original.len) 0 else @min(expanded.caret(metrics, style, leading), available / 2);
-            var start: usize = 0;
-            while (true) {
-                const x = expanded.caret(metrics, style, start);
-                const hanging = if (start == 0) 0 else indent;
-                const row_width = available - hanging;
-                var end = expanded.index(metrics, style, x + row_width);
-                end = @min(original.len, end);
-                // Hit testing chooses nearest; wrapping needs the last fitting
-                // boundary, otherwise a glyph can cross the pane edge.
-                while (end > start and expanded.caret(metrics, style, end) - x > row_width) end = previous(original, end);
-                if (end <= start and start < original.len) end = start + (std.unicode.utf8ByteSequenceLength(original[start]) catch 1);
-                if (end < original.len) {
-                    var word = end;
-                    while (word > start and original[word - 1] != ' ' and original[word - 1] != '\t') word = previous(original, word);
-                    if (word > @max(start, leading)) end = word;
-                }
-                try rows.append(self.allocator, .{ .line = line, .start = range.start + start, .end = if (original.len == 0) range.end else range.start + end, .x = x - hanging, .first = start == 0 });
-                if (end >= original.len) break;
-                start = end;
+            const pieces = try segments(arena.allocator(), original, range.start, available, font_size, tabs, metrics);
+            for (pieces) |piece| {
+                var mapped = piece;
+                mapped.line = line;
+                if (original.len == 0) mapped.end = range.end;
+                try rows.append(self.allocator, mapped);
             }
         }
         try starts.append(self.allocator, rows.items.len);
@@ -173,4 +193,37 @@ fn previous(bytes: []const u8, at: usize) usize {
     var i = at -| 1;
     while (i > 0 and bytes[i] & 0xc0 == 0x80) i -= 1;
     return i;
+}
+
+/// Shape one logical line using the same wrapping rules as a source editor.
+pub fn segments(a: std.mem.Allocator, original: []const u8, source_start: usize, width: f32, font_size: f32, tabs: usize, metrics: ui.layout.Measurer) ![]Row {
+    const available = @max(font_size * 2, width);
+    const style: ui.TextStyle = .{ .size = font_size, .mono = true };
+    var rows: std.ArrayList(Row) = .empty;
+    errdefer rows.deinit(a);
+    const expanded = try display.Line.build(a, original, tabs);
+    var leading: usize = 0;
+    while (leading < original.len and (original[leading] == ' ' or original[leading] == '\t')) leading += 1;
+    const indent = if (leading == original.len) 0 else @min(expanded.caret(metrics, style, leading), available / 2);
+    var start: usize = 0;
+    while (true) {
+        const x = expanded.caret(metrics, style, start);
+        const hanging = if (start == 0) 0 else indent;
+        const row_width = available - hanging;
+        var end = expanded.index(metrics, style, x + row_width);
+        end = @min(original.len, end);
+        // Hit testing chooses nearest; wrapping needs the last fitting
+        // boundary, otherwise a glyph can cross the pane edge.
+        while (end > start and expanded.caret(metrics, style, end) - x > row_width) end = previous(original, end);
+        if (end <= start and start < original.len) end = start + (std.unicode.utf8ByteSequenceLength(original[start]) catch 1);
+        if (end < original.len) {
+            var word = end;
+            while (word > start and original[word - 1] != ' ' and original[word - 1] != '\t') word = previous(original, word);
+            if (word > @max(start, leading)) end = word;
+        }
+        try rows.append(a, .{ .line = 0, .start = source_start + start, .end = if (original.len == 0) source_start + original.len else source_start + end, .x = x - hanging, .first = start == 0 });
+        if (end >= original.len) break;
+        start = end;
+    }
+    return try rows.toOwnedSlice(a);
 }

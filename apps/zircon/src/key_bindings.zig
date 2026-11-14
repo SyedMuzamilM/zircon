@@ -12,6 +12,19 @@ pub const Overrides = struct {
         const map: ui.Keymap(catalogue.Command) = .{ .bindings = &catalogue.bindings };
         return map.resolve(input);
     }
+    /// Clipboard chords are normally handled inside Editor. Projected views
+    /// must resolve them before dispatching to an individual source editor.
+    pub fn resolveEditor(self: *const Overrides, input: ui.Input) ?catalogue.Command {
+        if (self.resolve(input)) |command| return command;
+        if (input != .key_down or !input.key_down.modifiers.command) return null;
+        return switch (input.key_down.key) {
+            .a => .select_all,
+            .c => .copy,
+            .x => .cut,
+            .v => .paste,
+            else => null,
+        };
+    }
     pub fn shortcut(self: *const Overrides, a: std.mem.Allocator, action: catalogue.Command) ![]const u8 {
         for (self.items[0..self.len]) |item| if (!item.disabled and item.chord.action == action) return format(a, item.chord);
         for (catalogue.bindings) |binding| if (binding.action == action) {

@@ -6,6 +6,7 @@ const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
 const actions = @import("../actions.zig");
+const git_editing = @import("../git_editing.zig");
 const panes = @import("../panes.zig");
 const shell = @import("../shell.zig");
 const handoff = @import("handoff.zig");
@@ -145,6 +146,12 @@ fn restore(self: *Shell, model: *Model, loaded: *storage.Loaded) !void {
             }
         else
             try restored.workspace.restore(content.bytes, metadata.path, metadata.dirty, metadata.disk, metadata.untitled_name);
+        if (!metadata.primary and !metadata.secondary) {
+            const source_view = try git_editing.getView(&restored, id);
+            restoreView(&source_view.editor, (try restored.workspace.getConst(id)).doc.snapshot(), metadata.view);
+            model.documents.appendAssumeCapacity(.{ .runtime = id, .id = metadata.id });
+            continue;
+        }
         var editor = try editing.Editor.init(self.allocator);
         errdefer editor.deinit();
         self.configureEditor(&editor, metadata.language_path orelse metadata.path orelse "");
@@ -164,14 +171,18 @@ fn restore(self: *Shell, model: *Model, loaded: *storage.Loaded) !void {
         model.documents.appendAssumeCapacity(.{ .runtime = id, .id = metadata.id });
         if (loaded.index.active == metadata.id) restored.active = restored.tabs.items.len - 1;
     }
-    if (loaded.index.secondary_active) |active| for (model.documents.items, 0..) |doc, index| {
+    if (loaded.index.secondary_active) |active| for (model.documents.items) |doc| {
         if (doc.id == active) {
-            try panes.selectSecondary(&restored, index);
+            for (restored.tabs.items, 0..) |tab, tab_index| if (std.meta.eql(tab.document, doc.runtime)) {
+                try panes.selectSecondary(&restored, tab_index);
+                break;
+            };
             break;
         }
     };
     panes.normalizePrimary(&restored);
     restored.active_pane = if (loaded.index.focus_secondary and restored.secondary != null) .secondary else .primary;
+    std.mem.swap(@TypeOf(self.git.editing), &self.git.editing, &restored.git.editing);
     std.mem.swap(ws.Workspace, &self.workspace, &restored.workspace);
     std.mem.swap(std.ArrayList(shell.Tab), &self.tabs, &restored.tabs);
     std.mem.swap(?shell.Pane, &self.secondary, &restored.secondary);
@@ -228,6 +239,19 @@ pub fn fingerprint(self: *const Shell) !u64 {
         if (self.secondary) |*pane| if (std.meta.eql(pane.document, tab.document)) hashView(&hash, view(&pane.editor));
         if (tab.secondary_state) |*editor| hashView(&hash, view(editor));
     }
+    for (self.git.editing.views.items) |*source| {
+        var tabbed = false;
+        for (self.tabs.items) |tab| if (std.meta.eql(tab.document, source.document)) {
+            tabbed = true;
+            break;
+        };
+        if (tabbed) continue;
+        const record = try self.workspace.getConst(source.document);
+        if (!record.dirty()) continue;
+        inline for (.{ source.document, record.doc.stateId(), record.saved_state, record.disk }) |value| std.hash.autoHash(&hash, value);
+        hashView(&hash, view(&source.editor));
+        hashString(&hash, record.path);
+    }
     return hash.final();
 }
 
@@ -251,6 +275,21 @@ fn capture(self: *Shell, stamp: u64) !Capture {
         };
         if (position == self.active) index.active = tracked.id;
         try metadata.append(allocator, .{ .id = tracked.id, .path = if (record.path) |path| try allocator.dupe(u8, path) else null, .untitled_name = try allocator.dupe(u8, record.untitled_name), .dirty = record.dirty(), .disk = record.disk, .primary = tab.primary, .secondary = tab.secondary, .view = view(&tab.editor), .secondary_view = secondary_view, .language_path = if (tab.language_path) |path| try allocator.dupe(u8, path) else null, .language_name = if (tab.language_name) |name| try allocator.dupe(u8, name) else null, .content = if (unchanged) tracked.content else null });
+        try documents.ensureUnusedCapacity(allocator, 1);
+        documents.appendAssumeCapacity(.{ .id = tracked.id, .state = record.doc.stateId(), .snapshot = if (unchanged) null else record.doc.snapshot(), .content = if (unchanged) tracked.content else null });
+    }
+    for (self.git.editing.views.items) |*source| {
+        var tabbed = false;
+        for (self.tabs.items) |tab| if (std.meta.eql(tab.document, source.document)) {
+            tabbed = true;
+            break;
+        };
+        if (tabbed) continue;
+        const record = try self.workspace.getConst(source.document);
+        if (!record.dirty()) continue;
+        const tracked = try model.track(self.allocator, source.document);
+        const unchanged = tracked.state == record.doc.stateId() and tracked.content != null;
+        try metadata.append(allocator, .{ .id = tracked.id, .path = if (record.path) |path| try allocator.dupe(u8, path) else null, .untitled_name = "", .dirty = true, .disk = record.disk, .primary = false, .secondary = false, .view = view(&source.editor), .content = if (unchanged) tracked.content else null });
         try documents.ensureUnusedCapacity(allocator, 1);
         documents.appendAssumeCapacity(.{ .id = tracked.id, .state = record.doc.stateId(), .snapshot = if (unchanged) null else record.doc.snapshot(), .content = if (unchanged) tracked.content else null });
     }
@@ -411,13 +450,10 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), output: anyerror!*Box) !void {
                 cx.notify();
                 return;
             }
-            if (model.close != null and model.close.? == .window_save) for (self.tabs.items) |tab| {
-                if (try self.workspace.dirty(tab.document)) {
-                    model.close = null;
-                    try cx.app.requestCloseWindow(self.window.?);
-                    break;
-                }
-            };
+            if (model.close != null and model.close.? == .window_save and actions.firstDirtyDocument(self) != null) {
+                model.close = null;
+                try cx.app.requestCloseWindow(self.window.?);
+            }
         },
         .exclude => |target| {
             model.close = null;

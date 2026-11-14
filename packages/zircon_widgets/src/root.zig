@@ -2,6 +2,7 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const palette = @import("palette.zig");
+pub const sticky_header = @import("sticky_header.zig");
 pub const Palette = palette.Palette;
 pub const Icon = ui.controls.icons.Name;
 pub const metrics = struct {

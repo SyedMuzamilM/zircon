@@ -8,7 +8,10 @@ const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
 const actions = @import("actions.zig");
 const commands = @import("commands.zig");
+const autoscroll = @import("excerpt_autoscroll.zig");
+const multibuffer_editing = @import("multibuffer_editing.zig");
 const panes = @import("panes.zig");
+const search_selection = @import("search_selection.zig");
 const git = @import("services/git.zig");
 const language = @import("services/language.zig");
 const search_service = @import("services/search.zig");
@@ -19,7 +22,7 @@ const overlays = @import("views/overlays.zig");
 const Shell = shell.Shell;
 const a = std.heap.page_allocator;
 const Sources = editing.SourceEditors(ws.DocumentId);
-const File = struct { document: ?ws.DocumentId = null, excerpts: []multibuffer.ExcerptId = &.{}, matches: []text.Range = &.{} };
+const File = struct { document: ?ws.DocumentId = null, excerpts: []Excerpt = &.{}, matches: []text.Range = &.{}, revision: u64 = 0, rows: usize = 0 };
 pub const Model = struct {
     projection: multibuffer.MultiBuffer = .init(a),
     files: std.ArrayList(File) = .empty,
@@ -28,6 +31,9 @@ pub const Model = struct {
     scroll: [2]ui.controls.Scroll = @splat(.{}),
     viewport: [2]?f32 = @splat(null),
     generation: u64 = 0,
+    selection: [2]?multibuffer.Selection = @splat(null),
+    dragging: [2]bool = @splat(false),
+    autoscroll: [2]?autoscroll.Drag = @splat(null),
 
     pub fn deinit(self: *Model) void {
         for (self.files.items) |file| {
@@ -40,6 +46,9 @@ pub const Model = struct {
         self.* = .{};
     }
     pub fn remove(self: *Model, id: ws.DocumentId) void {
+        self.selection = @splat(null);
+        self.dragging = @splat(false);
+        self.autoscroll = @splat(null);
         self.projection.removeSource(id) catch {};
         for (&self.panes) |*pane| pane.remove(id);
         for (self.files.items) |*file| if (file.document != null and std.meta.eql(file.document.?, id)) {
@@ -68,10 +77,12 @@ pub fn install(self: *Shell, results: search.Results) !void {
         for (group.excerpts, ranges) |item, *range| range.* = item.source_range;
         try next.projection.setExcerpts(id, ranges);
         file.document = id;
-        file.excerpts = try a.alloc(multibuffer.ExcerptId, group.excerpts.len);
+        file.excerpts = try a.alloc(Excerpt, group.excerpts.len);
+        file.revision = snapshot.revision();
         var index: usize = 0;
         for (next.projection.excerpts.items) |item| if (std.meta.eql(item.value.source, id)) {
-            file.excerpts[index] = item.value.id;
+            file.excerpts[index] = try describe(snapshot, id, item.value.id, item.value.source_range);
+            file.rows += file.excerpts[index].rows;
             index += 1;
         };
         file.matches = try a.alloc(text.Range, group.matches.len);
@@ -119,27 +130,34 @@ fn resolve(self: *Shell, group: search.Group) !ws.DocumentId {
     }
 }
 
-pub fn excerpt(self: *const Shell, group: usize, index: usize) !?Excerpt {
-    const model = &self.search.editing;
-    if (group >= model.files.items.len) return null;
-    const file = model.files.items[group];
-    const id = file.document orelse return null;
-    if (index >= file.excerpts.len) return null;
-    const record = self.workspace.getConst(id) catch return null;
-    if ((model.projection.sourceRevision(id) catch return null) != record.doc.revision()) return null;
-    for (model.projection.excerpts.items) |value| if (std.meta.eql(value.value.id, file.excerpts[index])) {
-        var snapshot = record.doc.snapshot();
-        defer snapshot.deinit();
-        const range = value.value.source_range;
-        const first = (try snapshot.pointAt(range.start)).line;
-        const last = (try snapshot.pointAt(range.end)).line;
-        const trailing_row = range.end == range.start or range.end == snapshot.byteLen() or (try snapshot.lineRange(last)).start != range.end;
-        return .{ .document = id, .id = value.value.id, .range = range, .first_row = first, .rows = last - first + @as(usize, @intFromBool(trailing_row)) };
-    };
-    return null;
+fn describe(snapshot: text.Snapshot, document: ws.DocumentId, id: multibuffer.ExcerptId, range: text.Range) !Excerpt {
+    const first = (try snapshot.pointAt(range.start)).line;
+    const last = (try snapshot.pointAt(range.end)).line;
+    const trailing_row = range.end == range.start or range.end == snapshot.byteLen() or (try snapshot.lineRange(last)).start != range.end;
+    return .{ .document = document, .id = id, .range = range, .first_row = first, .rows = last - first + @as(usize, @intFromBool(trailing_row)) };
 }
 
-fn view(self: *Shell, pane: u8, id: ws.DocumentId) !*Sources.View {
+pub fn currentFile(self: *const Shell, group: usize) bool {
+    if (group >= self.search.editing.files.items.len) return false;
+    const file = self.search.editing.files.items[group];
+    const record = self.workspace.getConst(file.document orelse return false) catch return false;
+    return file.revision == record.doc.revision();
+}
+
+pub fn groupHeight(self: *const Shell, group: usize, line_height: f32, count: usize) f32 {
+    if (!currentFile(self, group)) return @as(f32, @floatFromInt(count)) * 40;
+    const file = self.search.editing.files.items[group];
+    return @as(f32, @floatFromInt(file.rows)) * line_height + @as(f32, @floatFromInt(file.excerpts.len)) * 12;
+}
+
+pub fn excerpt(self: *const Shell, group: usize, index: usize) !?Excerpt {
+    if (!currentFile(self, group)) return null;
+    const file = self.search.editing.files.items[group];
+    if (index >= file.excerpts.len) return null;
+    return file.excerpts[index];
+}
+
+pub fn view(self: *Shell, pane: u8, id: ws.DocumentId) !*Sources.View {
     for (self.search.editing.panes[pane].views.items) |*item| if (std.meta.eql(item.document, id)) return item;
     return error.StaleSearchResult;
 }
@@ -154,7 +172,14 @@ pub fn render(self: *const Shell, b: *ui.Ui, target: Target, source: Excerpt, fi
     const active = pane_active and self.search.editing.active_excerpt[target.pane] != null and std.meta.eql(self.search.editing.active_excerpt[target.pane].?, source.id);
     state.highlight_active_line = active and self.editor_options.active_line;
     state.show_indent_guides = self.editor_options.indent_guides;
-    var canvas = try state.render(&record.doc, b);
+    var selected: [1]editing.Selection = undefined;
+    if (search_selection.paint(self, target.pane, source)) |range| {
+        selected[0] = .{ .anchor = range.start, .head = range.end };
+        state.selections.items = .empty;
+        state.selections.items.items = &selected;
+        state.selections.items.capacity = 1;
+    }
+    var canvas = try state.renderExcerpt(&record.doc, b, row_count);
     if (active) canvas = try b.fluent().adopt(canvas).id(.{ .string = "search-result-editor" }).build();
     return b.fluent().div()
         .h(.{ .px = @as(f32, @floatFromInt(row_count)) * state.line_height })
@@ -173,9 +198,17 @@ fn onInput(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), tar
 
 fn handle(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), target: Target) !void {
     if (event.data == .scroll) return;
+    if (event.data == .pointer_down and event.data.pointer_down.button == .primary) return;
+    if (event.data == .pointer_move and self.search.editing.dragging[target.pane]) return;
     if (target.generation != self.search.editing.generation) return;
     const source = try excerpt(self, target.group, target.excerpt) orelse return;
     const record = try self.workspace.get(source.document);
+    if (try search_selection.input(self, cx, target.pane, event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        cx.notify();
+        return;
+    }
     if (try navigate(self, event, cx, target, source)) return;
     if (event.data == .pointer_down and target.revision != record.doc.revision()) return;
     const current = try view(self, target.pane, source.document);
@@ -215,6 +248,7 @@ fn handle(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), targ
                 else => try self.reportError(err),
             };
         }
+        if (edited or event.data == .key_down) try search_selection.sync(self, target.pane, source, event.data == .key_down and event.data.key_down.modifiers.shift);
         if (edited or event.data == .key_down) try reveal(self, cx, target, current.editor.primary().head);
         event.preventDefault();
         event.stopPropagation();
@@ -242,7 +276,22 @@ pub fn changed(self: *Shell, id: ws.DocumentId, change: ?*const text.Change, ori
     };
     defer if (change == null) fallback.deinit();
     if (actual.before != revision) return;
+    for (&model.selection) |*selected| if (selected.*) |*value| {
+        for (model.projection.excerpts.items) |item| if (std.meta.eql(item.value.source, id)) {
+            if (std.meta.eql(value.anchor.excerpt, item.value.id)) value.anchor.offset = actual.map(value.anchor.offset, .before);
+            if (std.meta.eql(value.head.excerpt, item.value.id)) value.head.offset = actual.map(value.head.offset, .after);
+        };
+    };
     try model.projection.updateSource(id, actual, snapshot);
+    for (model.files.items) |*file| if (file.document != null and std.meta.eql(file.document.?, id)) {
+        file.rows = 0;
+        for (file.excerpts) |*item| {
+            const range: text.Range = .{ .start = actual.map(item.range.start, .before), .end = actual.map(item.range.end, .after) };
+            item.* = try describe(snapshot, id, item.id, range);
+            file.rows += item.rows;
+        }
+        file.revision = snapshot.revision();
+    };
     for (model.files.items) |*file| if (file.document != null and std.meta.eql(file.document.?, id)) for (file.matches) |*range| {
         range.start = actual.map(range.start, .before);
         range.end = actual.map(range.end, .after);
@@ -297,9 +346,12 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !b
         cx.notify();
         return true;
     }
+    var projected_event: ui.Event(ui.Input) = .{ .data = .{ .key_down = .{ .key = .unknown } }, ._surface = (try cx.app.window(self.window.?)).surface };
+    if (try search_selection.command(self, cx, pane, which, &projected_event)) return true;
     if (which != .undo and which != .redo and which != .select_all and which != .delete_line and which != .toggle_comment and which != .cut and which != .copy and which != .paste) return false;
     const current = self.search.editing.panes[pane].current() orelse return true;
     const id = current.document;
+    if (which == .undo or which == .redo) if (try multibuffer_editing.travel(self, cx, id, if (which == .undo) .undo else .redo)) return true;
     const state = try view(self, pane, id);
     const record = try self.workspace.get(id);
     var outcome: editing.Outcome = undefined;
@@ -347,7 +399,7 @@ pub fn activate(self: *Shell, cx: *ui.Context(Shell), group: usize, match_index:
     return true;
 }
 
-fn reveal(self: *Shell, cx: *ui.Context(Shell), target: Target, cursor: usize) !void {
+pub fn reveal(self: *Shell, cx: *ui.Context(Shell), target: Target, cursor: usize) !void {
     const results = self.search.results orelse return;
     const lh = self.editor_options.font_size * self.editor_options.line_height;
     var y: f32 = 0;
@@ -392,7 +444,7 @@ fn navigate(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), ta
         else => unreachable,
     };
     if (!boundary) return false;
-    if (key.modifiers.shift) return false;
+    if (key.modifiers.shift and self.search.editing.selection[target.pane] == null) try search_selection.sync(self, target.pane, source, false);
     const model = &self.search.editing;
     const index = for (model.projection.excerpts.items, 0..) |item, index| {
         if (std.meta.eql(item.value.id, source.id)) break index;
@@ -416,8 +468,10 @@ fn navigate(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), ta
     destination.editor.edit_scope = next.source_range;
     model.panes[target.pane].active = next.source;
     model.active_excerpt[target.pane] = next.id;
+    const head: multibuffer.Position = .{ .excerpt = next.id, .offset = offset };
+    model.selection[target.pane] = .{ .anchor = if (key.modifiers.shift and model.selection[target.pane] != null) model.selection[target.pane].?.anchor else head, .head = head };
     _ = try actions.ensureTab(self, next.source);
-    for (model.files.items, 0..) |file, group| for (file.excerpts, 0..) |id, index_in_file| if (std.meta.eql(id, next.id)) {
+    for (model.files.items, 0..) |file, group| for (file.excerpts, 0..) |id, index_in_file| if (std.meta.eql(id.id, next.id)) {
         try reveal(self, cx, .{ .group = @intCast(group), .excerpt = @intCast(index_in_file), .generation = model.generation, .revision = after.revision(), .first_row = row, .pane = target.pane }, offset);
     };
     self.editor_focus_request +%= 1;

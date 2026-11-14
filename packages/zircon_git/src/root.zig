@@ -222,7 +222,7 @@ pub const Repository = struct {
         defer a.free(result.stderr);
         if (process.success(result)) return result.stdout;
         a.free(result.stdout);
-        if (std.mem.indexOf(u8, result.stderr, "does not exist") != null or std.mem.indexOf(u8, result.stderr, "not in the index") != null or std.mem.indexOf(u8, result.stderr, "invalid object name 'HEAD'") != null or std.mem.indexOf(u8, result.stderr, "bad revision 'HEAD'") != null) return a.alloc(u8, 0);
+        if (std.mem.indexOf(u8, result.stderr, "does not exist") != null or std.mem.indexOf(u8, result.stderr, "not in the index") != null or std.mem.indexOf(u8, result.stderr, "not in 'HEAD'") != null or std.mem.indexOf(u8, result.stderr, "invalid object name 'HEAD'") != null or std.mem.indexOf(u8, result.stderr, "bad revision 'HEAD'") != null) return a.alloc(u8, 0);
         return self.failure(result.stderr);
     }
     pub fn stage(self: *Repository, paths: []const []const u8) !void {

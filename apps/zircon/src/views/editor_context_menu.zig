@@ -99,6 +99,7 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editor.Editor, docu
         self.editor_context_menu.?.selected = index;
         break;
     };
+    e.releasePointer();
     e.focus();
     e.preventDefault();
     e.stopPropagation();

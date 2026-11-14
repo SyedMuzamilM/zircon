@@ -1,6 +1,7 @@
 //! App-level journeys use temporary repositories, manifests and real documents.
 //! Native rendering has a separate suite; these tests share its event routing.
 const std = @import("std");
+const builtin = @import("builtin");
 const zircon = @import("zircon");
 const ui = @import("zircon_ui");
 const t = std.testing;
@@ -39,13 +40,16 @@ fn command(root: []const u8, args: []const []const u8) !void {
     t.allocator.free(try git(root, args));
 }
 fn settle(app: *ui.App) !void {
+    try settleAt(app, 0);
+}
+fn settleAt(app: *ui.App, time: f64) !void {
     const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
     while (try app.tasksPending()) {
-        _ = try app.step(0);
+        _ = try app.step(time);
         if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.JourneyTimeout;
         std.Io.sleep(t.io, .fromMilliseconds(1), .awake) catch {};
     }
-    _ = try app.step(0);
+    _ = try app.step(time);
 }
 const Ops = struct {
     fn setProjectQuery(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), bytes: []const u8) !void {
@@ -103,8 +107,8 @@ const Ops = struct {
         return self.git.history_tabs.items.len;
     }
     fn sourceBySuffix(self: *const zircon.Shell, suffix: []const u8, a: std.mem.Allocator, out: *[]u8) !void {
-        for (self.tabs.items) |tab| {
-            const record = try self.workspace.getConst(tab.document);
+        for (self.workspace.slots.items) |slot| {
+            const record = slot.record orelse continue;
             if (record.path) |path| if (std.mem.endsWith(u8, path, suffix)) {
                 var snapshot = record.doc.snapshot();
                 defer snapshot.deinit();
@@ -193,8 +197,11 @@ const Ops = struct {
     }
 };
 fn open(app: *ui.App, root: []const u8, file: []const u8) !ui.WindowHandle {
+    return openNamed(app, root, file, "Zircon");
+}
+fn openNamed(app: *ui.App, root: []const u8, file: []const u8, title: []const u8) !ui.WindowHandle {
     var shell = try zircon.Shell.init(t.allocator, t.io, root, file);
-    const h = app.openWindow(zircon.Shell, .{ .visible = false, .menus = &zircon.menus.groups, .width = 1200, .height = 760 }, shell) catch |err| {
+    const h = app.openWindow(zircon.Shell, .{ .title = title, .visible = false, .menus = &zircon.menus.groups, .width = 1200, .height = 760 }, shell) catch |err| {
         shell.deinit(t.allocator);
         return err;
     };
@@ -1021,7 +1028,7 @@ test "Git multibuffer drags across source rows survives redraw and edits either 
         }
     }
     try t.expect(source_canvases >= 2);
-    try t.expect(copy_added and copy_deleted);
+    try t.expect(!copy_added and !copy_deleted);
     const first = try elementBounds(&app, h, "git-live:main.zig:1");
     const begin: ui.Point = .{ .x = first.x + 76, .y = first.y + first.height / 2 };
     try app.dispatch(h, .{ .pointer_down = .{ .position = begin } });
@@ -1083,6 +1090,572 @@ test "Git multibuffer drags across source rows survives redraw and edits either 
 
 test "platform menus dispatch commands without duplicating a menu bar in the window" {
     try menuJourney(false);
+}
+
+fn reviewPoint(app: *ui.App, h: ui.WindowHandle, key: []const u8, line: []const u8, at: usize) !ui.Point {
+    const bounds = try elementBounds(app, h, key);
+    const event: ui.Event(ui.Input) = .{ .data = .{ .text = "" }, ._surface = (try app.window(h)).surface };
+    const metrics = try event.textMetrics();
+    return .{ .x = bounds.x + 76 + metrics.caret(line, .{ .size = 14, .mono = true }, at), .y = bounds.y + bounds.height / 2 };
+}
+
+fn reviewDrag(app: *ui.App, h: ui.WindowHandle, from: ui.Point, to: ui.Point) !void {
+    try app.dispatch(h, .{ .pointer_down = .{ .position = from } });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = to } });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_up = .{ .position = to } });
+    _ = try app.step(0);
+}
+
+fn expectClipboard(app: *ui.App, h: ui.WindowHandle, expected: []const u8) !void {
+    const event: ui.Event(ui.Input) = .{ .data = .{ .text = "" }, ._surface = (try app.window(h)).surface };
+    const bytes = try event.readClipboard(t.allocator);
+    defer t.allocator.free(bytes);
+    try t.expectEqualStrings(expected, bytes);
+}
+
+fn reviewRepo(root: []const u8) !void {
+    try command(root, &.{ "init", "-b", "main" });
+    try command(root, &.{ "config", "user.email", "fixture@zircon.invalid" });
+    try command(root, &.{ "config", "user.name", "Zircon fixture" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Initial" });
+}
+
+const CanvasCheck = enum { gutter, active_tint, context_controls, input_focus, added_input_focus, split_input_focus, wrapping, split_wrapping, highlighting };
+fn gitCanvasJourney(comptime check: CanvasCheck) !void {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const before = "// zero\n// one\n// two\n// three\nconst context = 1;\nconst changed = false;\n// six\n// seven\n// eight\n// nine\n// ten\n// eleven\n";
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = before });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "other.zig", .data = "const inactive = false;\n" });
+    try reviewRepo(root);
+    const segment = "a very long string with multiple words and enough characters to wrap in a narrow editor viewport ";
+    const long = "const changed = \"" ++ segment ++ segment ++ segment ++ segment ++ segment ++ segment ++ segment ++ segment ++ "\";";
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "// zero\n// one\n// two\n// three\nconst context = 1;\n" ++ long ++ "\n// six\n// seven\n// eight\n// nine\n// ten\n// eleven\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "other.zig", .data = "const inactive = true;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const title = "Zircon Git canvas " ++ @tagName(check);
+    const h = try openNamed(&app, root, "main.zig", title);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Settings = struct {
+        fn wrap(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            self.git.editing.horizontal = 80;
+            try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .soft_wrap = .editor_width }});
+        }
+        fn lineHeight(self: *const zircon.Shell) f32 {
+            return self.editor_options.font_size * self.editor_options.line_height;
+        }
+        fn added(self: *const zircon.Shell) ui.Color {
+            return self.editor_options.theme.git_added;
+        }
+    };
+    if (check == .wrapping or check == .split_wrapping) try app.update(owner, Settings.wrap, .{});
+    if (check == .split_input_focus) try send(&app, h, .split_right);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    if (check == .split_wrapping) try send(&app, h, .git_split_view);
+    const lh = try app.read(owner, Settings.lineHeight, .{});
+    switch (check) {
+        .gutter => {
+            const bounds = try elementBounds(&app, h, "git-live:main.zig:6");
+            const color = try app.read(owner, Settings.added, .{});
+            var found = false;
+            for ((try app.window(h)).frames.committed.scene.items) |item| {
+                if (item.kind == .rect and std.meta.eql(item.color, color) and @abs(item.rect.x - bounds.x) < 1 and item.rect.width == 6 and item.rect.y <= bounds.y and item.rect.y + item.rect.height >= bounds.y + lh - 1) found = true;
+            }
+            try t.expect(found);
+        },
+        .active_tint => {
+            try app.dispatch(h, .{ .focus = true });
+            const point = try reviewPoint(&app, h, "git-live:main.zig:6", long, 0);
+            try reviewDrag(&app, h, point, point);
+            const bounds = try elementBounds(&app, h, "git-live:main.zig:6");
+            const Read = struct {
+                fn active(self: *const zircon.Shell) ui.Color {
+                    return self.editor_options.theme.active_line;
+                }
+            };
+            const active = try app.read(owner, Read.active, .{});
+            var subtle = false;
+            for ((try app.window(h)).frames.committed.scene.items) |item| {
+                if (item.kind == .rect and item.rect.y >= bounds.y and item.rect.y < bounds.y + lh and item.rect.width >= bounds.width - 1 and item.color.r == active.r and item.color.g == active.g and item.color.b == active.b) {
+                    subtle = item.color.a > 0 and item.color.a <= 0.2;
+                }
+            }
+            try t.expect(subtle);
+        },
+        .context_controls => {
+            for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) try t.expect(!std.mem.startsWith(u8, item.text, "@@"));
+            var found = false;
+            for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button and std.mem.indexOf(u8, node.kind.button.label, "Expand context") != null) {
+                found = true;
+            };
+            try t.expect(found);
+            try click(&app, h, "Expand context above main.zig");
+            const expanded = try reviewPoint(&app, h, "git-live:main.zig:1", "// zero", 0);
+            try reviewDrag(&app, h, expanded, expanded);
+            try app.dispatch(h, .{ .text = "// expanded context\n" });
+            try settle(&app);
+            var actual: []u8 = undefined;
+            try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &actual });
+            defer t.allocator.free(actual);
+            try t.expect(std.mem.startsWith(u8, actual, "// expanded context\n// zero\n"));
+            try t.expect((try elementBounds(&app, h, "git-live:main.zig:1")).height > 0);
+        },
+        .input_focus, .added_input_focus, .split_input_focus => {
+            try app.dispatch(h, .{ .focus = true });
+            const point = if (check == .added_input_focus) try reviewPoint(&app, h, "git-live:main.zig:6", long, 0) else try reviewPoint(&app, h, "git-live:main.zig:5", "const context = 1;", 0);
+            try reviewDrag(&app, h, point, point);
+            try t.expect((try app.window(h)).frames.committed.text_input != null);
+            if (comptime ui.testing.native != void) {
+                const objc = ui.testing.native.objc;
+                const nsapp = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+                const windows = objc.send(objc.Id, nsapp, "windows", .{});
+                var target: objc.Id = null;
+                for (0..objc.send(usize, windows, "count", .{})) |index| {
+                    const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{index});
+                    if (std.mem.eql(u8, title, objc.fromString(objc.send(objc.Id, candidate, "title", .{})))) target = candidate;
+                }
+                const window = target orelse return error.CanvasWindowMissing;
+                const number = objc.send(isize, window, "windowNumber", .{});
+                const event = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, @as(usize, 0), ui.testing.native.now(), number, @as(objc.Id, null), objc.string("x"), objc.string("x"), false, @as(u16, 7) });
+                objc.send(void, window, "sendEvent:", .{event});
+                for (0..32) |_| try ui.testing.native.pump(0);
+                _ = try app.step(0);
+                var typed: []u8 = undefined;
+                try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &typed });
+                defer t.allocator.free(typed);
+                try t.expect(std.mem.indexOf(u8, typed, if (check == .added_input_focus) "xconst changed" else "xconst context") != null);
+            }
+            try app.dispatch(h, .{ .text = "// typed in Git\n" });
+            try settle(&app);
+            var actual: []u8 = undefined;
+            try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &actual });
+            defer t.allocator.free(actual);
+            try t.expect(std.mem.indexOf(u8, actual, if (check == .added_input_focus) "// typed in Git\nconst changed" else "// typed in Git\nconst context") != null);
+        },
+        .wrapping, .split_wrapping => {
+            const bounds = try elementBounds(&app, h, "git-live:main.zig:6");
+            try t.expect(bounds.height >= lh * 2);
+            if (check == .split_wrapping) {
+                const area = try elementBounds(&app, h, "git-diff-lines");
+                try t.expect(bounds.x > area.x + area.width * 0.45);
+            }
+            if (comptime ui.testing.native != void) try (try app.window(h)).snapshot(if (check == .split_wrapping) "/tmp/zircon-git-canvas-split-wrap.png" else "/tmp/zircon-git-canvas-wrap.png");
+            const Read = struct {
+                fn continuation(self: *const zircon.Shell, index: usize, source_offset: *usize) !void {
+                    const review = self.git.review.?;
+                    const record = try self.workspace.getConst(self.tabs.items[self.active].document);
+                    var snapshot = record.doc.snapshot();
+                    defer snapshot.deinit();
+                    for (review.rows) |row| if (std.mem.eql(u8, row.path, "main.zig") and row.original.new_line == 6) {
+                        const part = row.segments[index];
+                        source_offset.* = try snapshot.lineStart(5) + part.start;
+                        return;
+                    };
+                    return error.WrappedRowMissing;
+                }
+                fn caret(self: *const zircon.Shell, expected: usize) !void {
+                    try t.expectEqual(expected, self.git.editing.current().?.editor.primary().head);
+                }
+                fn wrapWidth(self: *const zircon.Shell) f32 {
+                    return self.git.editing.current().?.editor.wrap_cache.width;
+                }
+            };
+            var offset: usize = 0;
+            try app.read(owner, Read.continuation, .{ 1, &offset });
+            const point: ui.Point = .{ .x = bounds.x + 76 + @as(f32, 0.1), .y = bounds.y + lh * 1.5 };
+            try reviewDrag(&app, h, point, point);
+            try app.read(owner, Read.caret, .{offset});
+            var next_offset: usize = 0;
+            try app.read(owner, Read.continuation, .{ 2, &next_offset });
+            try app.dispatch(h, .{ .key_down = .{ .key = .down } });
+            _ = try app.step(0);
+            try app.read(owner, Read.caret, .{next_offset});
+            try app.dispatch(h, .{ .key_down = .{ .key = .up } });
+            _ = try app.step(0);
+            try app.read(owner, Read.caret, .{offset});
+            const wrap_width = try app.read(owner, Read.wrapWidth, .{});
+            try app.dispatch(h, .{ .text = "X" });
+            try t.expectEqual(wrap_width, try app.read(owner, Read.wrapWidth, .{}));
+            try settle(&app);
+            var actual: []u8 = undefined;
+            try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &actual });
+            defer t.allocator.free(actual);
+            try t.expectEqual(@as(u8, 'X'), actual[offset]);
+            try app.dispatch(h, .{ .resize = .{ .width = 700, .height = 760 } });
+            _ = try app.step(0);
+            const narrower = try elementBounds(&app, h, "git-live:main.zig:6");
+            try t.expect(narrower.height > bounds.height);
+        },
+        .highlighting => {
+            const bounds = try elementBounds(&app, h, "git-live:other.zig:1");
+            var token = false;
+            for ((try app.window(h)).frames.committed.scene.items) |item| {
+                if (item.kind == .text and item.rect.y >= bounds.y and item.rect.y < bounds.y + bounds.height and std.mem.eql(u8, item.text, "const")) token = true;
+            }
+            try t.expect(token);
+        },
+    }
+}
+
+test "Git canvas schedules extension highlighting for inactive sources" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(t.io, "project");
+    try tmp.dir.createDirPath(t.io, "extensions/org.zircon.git-grammar");
+    const fixture = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(fixture);
+    const root = try std.fs.path.join(t.allocator, &.{ fixture, "project" });
+    defer t.allocator.free(root);
+    for ([_][]const u8{ "project/a.retry", "project/b.retry" }) |path|
+        try tmp.dir.writeFile(t.io, .{ .sub_path = path, .data = "before\n" });
+    try reviewRepo(root);
+    for ([_][]const u8{ "project/a.retry", "project/b.retry" }) |path|
+        try tmp.dir.writeFile(t.io, .{ .sub_path = path, .data = "after\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.git-grammar/extension.json", .data =
+        \\{"schema_version":1,"id":"org.zircon.git-grammar","name":"Git grammar","version":"1.0.0","contributes":{"languages":[{"id":"retry","name":"Retry","extensions":["retry"],"grammar":{"builtin":true,"name":"retry","wasm":"","highlights":""}}]}}
+    });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "worker.py", .data =
+        \\#!/usr/bin/env python3
+        \\import json, sys
+        \\source = sys.stdin.buffer.read()
+        \\print(json.dumps({'bytes': len(source), 'spans': [{'start': 0, 'end': 5, 'kind': 'keyword'}]}))
+        \\
+    });
+    const worker_file = try tmp.dir.openFile(t.io, "worker.py", .{});
+    defer worker_file.close(t.io);
+    try worker_file.setPermissions(t.io, .fromMode(0o755));
+    const worker = try std.fs.path.join(t.allocator, &.{ fixture, "worker.py" });
+    defer t.allocator.free(worker);
+    const extensions = try std.fs.path.join(t.allocator, &.{ fixture, "extensions" });
+    defer t.allocator.free(extensions);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "a.retry");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Check = struct {
+        fn configure(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), home: []const u8, executable: []const u8) !void {
+            self.extension_host_path = executable;
+            try self.loadExtensions(cx, home);
+        }
+        fn highlighted(self: *const zircon.Shell) bool {
+            if (self.git.editing.views.items.len != 2) return false;
+            for (self.git.editing.views.items) |view| {
+                const record = self.workspace.getConst(view.document) catch return false;
+                if (view.editor.grammar_revision != record.doc.revision()) return false;
+            }
+            return true;
+        }
+        fn ready(self: *const zircon.Shell) !void {
+            try t.expectEqual(@as(usize, 2), self.git.editing.views.items.len);
+            for (self.git.editing.views.items) |view| {
+                const record = try self.workspace.getConst(view.document);
+                try t.expectEqual(@as(?u64, record.doc.revision()), view.editor.grammar_revision);
+                try t.expectEqual(@as(usize, 1), view.editor.grammar_spans.len);
+                try t.expectEqual(.keyword, view.editor.grammar_spans[0].kind);
+            }
+            try t.expect(self.git.editing.active == null);
+        }
+    };
+    try app.update(owner, Check.configure, .{ extensions, worker });
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    var now: f64 = 1;
+    while (!try app.read(owner, Check.highlighted, .{})) {
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) {
+            try app.read(owner, Check.ready, .{});
+            return error.GitGrammarTimeout;
+        }
+        _ = try app.step(now);
+        now += 0.02;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
+    try app.read(owner, Check.ready, .{});
+}
+
+test "Git canvas added gutter matches the source editor" {
+    try gitCanvasJourney(.gutter);
+}
+test "Git canvas replaces patch headers with context expansion controls" {
+    try gitCanvasJourney(.context_controls);
+}
+test "Git canvas context click provides native text input before typing" {
+    try gitCanvasJourney(.input_focus);
+}
+test "Git canvas added line accepts native input on first click" {
+    try gitCanvasJourney(.added_input_focus);
+}
+test "Git canvas split wrapping preserves continuation editing and navigation" {
+    try gitCanvasJourney(.split_wrapping);
+}
+test "Git canvas in a split pane retains native input focus" {
+    try gitCanvasJourney(.split_input_focus);
+}
+test "Git canvas word wrap grows the displayed row" {
+    try gitCanvasJourney(.wrapping);
+}
+test "Git canvas highlights inactive source excerpts before clicking" {
+    try gitCanvasJourney(.highlighting);
+}
+
+test "Git review selects deleted and mixed text through normal clipboard without modifying sources" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const original = "const a = 1;\nconst b = 2;\nconst c = 3;\n";
+    const current = "const a = 4;\nconst b = 5;\nconst c = 6;\n";
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = original });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = current });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    const word_start = try reviewPoint(&app, h, "git-code:unified:0:0", "const a = 1;", 6);
+    const word_end = try reviewPoint(&app, h, "git-code:unified:0:0", "const a = 1;", 11);
+    try reviewDrag(&app, h, word_start, word_end);
+    const Theme = struct {
+        fn selection(self: *const zircon.Shell) ui.Color {
+            return self.editor_options.theme.selection;
+        }
+    };
+    const selection_color = try app.read(owner, Theme.selection, .{});
+    const old_bounds = try elementBounds(&app, h, "git-code:unified:0:0");
+    var painted = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| {
+        if (item.kind == .rect and std.meta.eql(item.color, selection_color) and item.rect.width > 0 and item.rect.y >= old_bounds.y and item.rect.y < old_bounds.y + old_bounds.height) painted = true;
+    }
+    try t.expect(painted);
+    try app.dispatch(h, .{ .key_down = .{ .key = .c, .modifiers = .{ .command = true } } });
+    try expectClipboard(&app, h, "a = 1");
+    try app.dispatch(h, .{ .key_down = .{ .key = .left, .modifiers = .{ .command = true } } });
+    try app.dispatch(h, .{ .key_down = .{ .key = .right, .modifiers = .{ .shift = true } } });
+    try app.dispatch(h, .{ .key_down = .{ .key = .c, .modifiers = .{ .command = true } } });
+    try expectClipboard(&app, h, "c");
+    // Reverse drag across two deleted lines, rebuilding the frame in between.
+    const first = try reviewPoint(&app, h, "git-code:unified:0:0", "const a = 1;", 0);
+    const third = try reviewPoint(&app, h, "git-code:unified:0:2", "const c = 3;", 0);
+    try reviewDrag(&app, h, third, first);
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.copy) });
+    try expectClipboard(&app, h, "const a = 1;\nconst b = 2;\n");
+    try app.dispatch(h, .{ .text = "must not modify" });
+    try app.dispatch(h, .{ .key_down = .{ .key = .backspace } });
+    try send(&app, h, .cut);
+    try send(&app, h, .paste);
+    try send(&app, h, .undo);
+    var source: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.zig", t.allocator, &source });
+    defer t.allocator.free(source);
+    try t.expectEqualStrings(current, source);
+    try send(&app, h, .select_all);
+    try send(&app, h, .copy);
+    try expectClipboard(&app, h, original ++ current);
+    try app.dispatch(h, .{ .text = "mixed selection must not edit" });
+    try send(&app, h, .save);
+    try settle(&app);
+    const disk = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(disk);
+    try t.expectEqualStrings(current, disk);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-review-deleted-selection.png");
+    try send(&app, h, .git_stage_all);
+    try settle(&app);
+    try send(&app, h, .git_staged_diff);
+    try settle(&app);
+    try send(&app, h, .select_all);
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.copy) });
+    try expectClipboard(&app, h, original ++ current);
+    try app.dispatch(h, .{ .text = "must not edit index" });
+    try send(&app, h, .cut);
+    const index = try git(root, &.{ "show", ":main.zig" });
+    defer t.allocator.free(index);
+    try t.expectEqualStrings(current, index);
+}
+
+test "Git review split selection stays on its side and edits across live files with one undo" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.txt", .data = "old one\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "two.txt", .data = "old two\n" });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.txt", .data = "new one\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "two.txt", .data = "new two\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "one.txt");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    try send(&app, h, .git_split_view);
+    const old = try reviewPoint(&app, h, "git-code:old:0:0", "old one", 0);
+    const new = try reviewPoint(&app, h, "git-live:one.txt:1", "new one", 7);
+    try reviewDrag(&app, h, old, new);
+    try send(&app, h, .copy);
+    try expectClipboard(&app, h, "old one");
+    try reviewDrag(&app, h, new, new);
+    try send(&app, h, .select_all);
+    try send(&app, h, .copy);
+    try expectClipboard(&app, h, "new one\nnew two\n");
+    try send(&app, h, .cut);
+    try settle(&app);
+    var first: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "one.txt", t.allocator, &first });
+    defer t.allocator.free(first);
+    var second: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "two.txt", t.allocator, &second });
+    defer t.allocator.free(second);
+    try t.expectEqualStrings("", first);
+    try t.expectEqualStrings("", second);
+    try send(&app, h, .undo);
+    try settle(&app);
+    var restored_first: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "one.txt", t.allocator, &restored_first });
+    defer t.allocator.free(restored_first);
+    var restored_second: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "two.txt", t.allocator, &restored_second });
+    defer t.allocator.free(restored_second);
+    try t.expectEqualStrings("new one\n", restored_first);
+    try t.expectEqualStrings("new two\n", restored_second);
+}
+
+test "Git review historical selection copies commit text and survives switching tabs" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "before\n" });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "committed\n" });
+    try command(root, &.{ "add", "." });
+    try command(root, &.{ "commit", "-m", "Change" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "today\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.txt");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_history);
+    try settle(&app);
+    try app.update(owner, Ops.gitCommit, .{@as(u32, 0)});
+    try settle(&app);
+    const first = try reviewPoint(&app, h, "git-code:unified:0:0", "before", 0);
+    const end = try reviewPoint(&app, h, "git-live:main.txt:1", "committed", 9);
+    try reviewDrag(&app, h, first, end);
+    try app.dispatch(h, .{ .action = @backingInt(zircon.Command.copy) });
+    try expectClipboard(&app, h, "before\ncommitted");
+    try send(&app, h, .paste);
+    try app.dispatch(h, .{ .text = "must stay historical" });
+    const History = struct {
+        fn working(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) void {
+            self.git.showWorking();
+            cx.notify();
+        }
+        fn history(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            var event: ui.Event(ui.Click) = .{ .data = .{} };
+            try self.onGitHistoryTab(&event, cx, 0);
+        }
+    };
+    try app.update(owner, History.working, .{});
+    _ = try app.step(0);
+    try app.update(owner, History.history, .{});
+    _ = try app.step(0);
+    try send(&app, h, .copy);
+    try expectClipboard(&app, h, "before\ncommitted");
+    var source: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.txt", t.allocator, &source });
+    defer t.allocator.free(source);
+    try t.expectEqualStrings("today\n", source);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-review-history-selection.png");
+}
+
+test "Git review captured drag autoscrolls without more pointer movement and stops on release" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var before: std.ArrayList(u8) = .empty;
+    defer before.deinit(t.allocator);
+    var after: std.ArrayList(u8) = .empty;
+    defer after.deinit(t.allocator);
+    for (0..200) |index| {
+        try before.print(t.allocator, "old {d}\n", .{index});
+        try after.print(t.allocator, "new {d}\n", .{index});
+    }
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = before.items });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = after.items });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.txt");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    const first = try reviewPoint(&app, h, "git-code:unified:0:0", "old 0", 0);
+    const bounds = try elementBounds(&app, h, "git-diff-lines");
+    const outside: ui.Point = .{ .x = first.x, .y = bounds.y + bounds.height + 50 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = first } });
+    _ = try app.step(0);
+    try app.dispatch(h, .{ .pointer_move = .{ .position = outside } });
+    for (1..13) |tick| _ = try app.step(@as(f64, @floatFromInt(tick)) / 60);
+    const Check = struct {
+        fn scrolling(self: *const zircon.Shell) !f32 {
+            try t.expect(self.git.diff_scroll.offset > 50);
+            try t.expect(self.git.review.?.editor.primary().range().end > 100);
+            return self.git.diff_scroll.offset;
+        }
+        fn stopped(self: *const zircon.Shell, offset: f32) !void {
+            try t.expectEqual(offset, self.git.diff_scroll.offset);
+            try t.expect(!self.git.review.?.editor.dragging);
+            try t.expectEqual(null, self.git.selection_drag);
+        }
+    };
+    const offset = try app.read(owner, Check.scrolling, .{});
+    try app.dispatch(h, .{ .pointer_up = .{ .position = outside } });
+    _ = try app.step(0.5);
+    try app.read(owner, Check.stopped, .{offset});
+}
+
+test "Git review source reload cannot leave invalid projected selection offsets" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "before\n" });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "a much longer current line\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.txt");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    const first = try reviewPoint(&app, h, "git-live:main.txt:1", "a much longer current line", 0);
+    const last = try reviewPoint(&app, h, "git-live:main.txt:1", "a much longer current line", 26);
+    try reviewDrag(&app, h, first, last);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.txt", .data = "x\n" });
+    _ = try app.step(2);
+    const Check = struct {
+        fn selection(self: *const zircon.Shell) !void {
+            try t.expect(!self.git.review.?.focused);
+        }
+    };
+    try app.read(owner, Check.selection, .{});
+    try settleAt(&app, 2);
+    var source: []u8 = undefined;
+    try app.read(owner, Ops.sourceBySuffix, .{ "main.txt", t.allocator, &source });
+    defer t.allocator.free(source);
+    try t.expectEqualStrings("x\n", source);
 }
 
 test "foreground native menus route commands through the key window" {
@@ -1161,4 +1734,222 @@ fn menuJourney(foreground: bool) !void {
         try t.expect(try app.read(try app.windowEntity(zircon.Shell, h), Check.nativeNewFile, .{}));
         if (foreground) try std.Io.Dir.cwd().writeFile(t.io, .{ .sub_path = "/tmp/zircon-native-menu-input-mode.txt", .data = "PASSED: native responder-chain menu routing through the key window\n" });
     }
+}
+
+test "Git canvas active line preserves the change background" {
+    try gitCanvasJourney(.active_tint);
+}
+
+fn gitSaveJourney(comptime removed_hunk: bool) !void {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 1;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "helper.zig", .data = "const b = 1;\n" });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const a = 2;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "helper.zig", .data = "const b = 2;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Ownership = struct {
+        fn wrap(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            try cx.update(self.settings.?, zircon.Settings.apply, .{zircon.SettingsPatch{ .soft_wrap = .editor_width }});
+        }
+        fn builds(self: *const zircon.Shell) usize {
+            return self.tabs.items[0].editor.wrap_cache.builds;
+        }
+        fn check(self: *const zircon.Shell) !void {
+            try t.expectEqual(@as(usize, 1), self.tabs.items.len);
+        }
+    };
+    try app.update(owner, Ownership.wrap, .{});
+    _ = try app.step(0);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    try app.read(owner, Ownership.check, .{});
+    const before_edit = zircon.git.processStats();
+    const hidden_builds = try app.read(owner, Ownership.builds, .{});
+    const first = try reviewPoint(&app, h, "git-live:main.zig:1", "const a = 2;", 0);
+    if (removed_hunk) {
+        const end = try reviewPoint(&app, h, "git-live:main.zig:1", "const a = 2;", "const a = 2;".len);
+        try reviewDrag(&app, h, first, end);
+        try app.dispatch(h, .{ .text = "const a = 1;" });
+    } else {
+        try reviewDrag(&app, h, first, first);
+        try app.dispatch(h, .{ .text = "// first\n" });
+    }
+    try settle(&app);
+    const second = try reviewPoint(&app, h, "git-live:helper.zig:1", "const b = 2;", 0);
+    try reviewDrag(&app, h, second, second);
+    try app.dispatch(h, .{ .text = "// second\n" });
+    try settle(&app);
+    // Buffer diffs use retained comparison text, without Git subprocesses.
+    try t.expectEqual(before_edit.commands, zircon.git.processStats().commands);
+    try t.expectEqual(hidden_builds, try app.read(owner, Ownership.builds, .{}));
+    try app.read(owner, Ownership.check, .{});
+    if (!removed_hunk) {
+        const dot = try elementBounds(&app, h, "git-dirty:main.zig");
+        _ = try elementBounds(&app, h, "git-dirty:helper.zig");
+        const Theme = struct {
+            fn blue(self: *const zircon.Shell) ui.Color {
+                return self.colors.accent;
+            }
+        };
+        const blue = try app.read(owner, Theme.blue, .{});
+        var found = false;
+        for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and std.meta.eql(item.color, blue) and item.rect.x == dot.x and item.rect.y == dot.y and item.rect.width == 6 and item.rect.height == 6) {
+            found = true;
+        };
+        try t.expect(found);
+        if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-dirty-headers.png");
+    }
+    try app.dispatch(h, .{ .key_down = .{ .key = .s, .modifiers = .{ .command = true } } });
+    try settle(&app);
+    const main = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(main);
+    const helper = try tmp.dir.readFileAlloc(t.io, "helper.zig", t.allocator, .limited(1000));
+    defer t.allocator.free(helper);
+    try t.expectEqualStrings(if (removed_hunk) "const a = 1;\n" else "// first\nconst a = 2;\n", main);
+    try t.expectEqualStrings("// second\nconst b = 2;\n", helper);
+    const Read = struct {
+        fn clean(self: *const zircon.Shell) !void {
+            for (self.git.editing.views.items) |view| try t.expect(!try self.workspace.dirty(view.document));
+        }
+    };
+    try app.read(owner, Read.clean, .{});
+    for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.key) |key| if (key == .string) try t.expect(!std.mem.startsWith(u8, key.string, "git-dirty:"));
+    try send(&app, h, .back_to_editor);
+    try app.read(owner, Ownership.check, .{});
+}
+
+test "Git canvas marks both unsaved files and saves them together" {
+    try gitSaveJourney(false);
+}
+test "Git canvas saves an edited file after its last hunk disappears" {
+    try gitSaveJourney(true);
+}
+
+test "Git canvas context arrows expand five lines at one boundary" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var before: std.ArrayList(u8) = .empty;
+    defer before.deinit(t.allocator);
+    var after: std.ArrayList(u8) = .empty;
+    defer after.deinit(t.allocator);
+    for (1..81) |number| {
+        const old = try std.fmt.allocPrint(t.allocator, "const value_{d} = false;\n", .{number});
+        defer t.allocator.free(old);
+        const new = try std.fmt.allocPrint(t.allocator, "const value_{d} = {s};\n", .{ number, if (number == 20 or number == 60) "true" else "false" });
+        defer t.allocator.free(new);
+        try before.appendSlice(t.allocator, old);
+        try after.appendSlice(t.allocator, new);
+    }
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = before.items });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = after.items });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    const Check = struct {
+        fn ranges(self: *const zircon.Shell, start: usize, count: usize, second_start: usize, second_count: usize) !void {
+            const hunks = self.git.diff.?.hunks;
+            try t.expectEqual(@as(usize, 2), hunks.len);
+            try t.expectEqual(start, hunks[0].new_start);
+            try t.expectEqual(count, hunks[0].new_count);
+            try t.expectEqual(second_start, hunks[1].new_start);
+            try t.expectEqual(second_count, hunks[1].new_count);
+        }
+    };
+    const down = try elementBounds(&app, h, "git-context:down:main.zig:17");
+    const point: ui.Point = .{ .x = down.x + down.width / 2, .y = down.y + down.height / 2 };
+    try reviewDrag(&app, h, point, point);
+    try app.read(owner, Check.ranges, .{ @as(usize, 17), @as(usize, 12), @as(usize, 57), @as(usize, 7) });
+    const up = try elementBounds(&app, h, "git-context:up:main.zig:57");
+    const second: ui.Point = .{ .x = up.x + up.width / 2, .y = up.y + up.height / 2 };
+    try reviewDrag(&app, h, second, second);
+    try app.read(owner, Check.ranges, .{ @as(usize, 17), @as(usize, 12), @as(usize, 52), @as(usize, 12) });
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-git-local-context.png");
+}
+
+fn stickyFileJourney(comptime search: bool) !void {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var old: std.ArrayList(u8) = .empty;
+    defer old.deinit(t.allocator);
+    var new: std.ArrayList(u8) = .empty;
+    defer new.deinit(t.allocator);
+    for (0..60) |_| {
+        try old.appendSlice(t.allocator, "const needle = false;\n");
+        try new.appendSlice(t.allocator, "const needle = true;\n");
+    }
+    for ([_][]const u8{ "main.zig", "z.zig" }) |path| try tmp.dir.writeFile(t.io, .{ .sub_path = path, .data = old.items });
+    try reviewRepo(root);
+    for ([_][]const u8{ "main.zig", "z.zig" }) |path| try tmp.dir.writeFile(t.io, .{ .sub_path = path, .data = new.items });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, root, "main.zig");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    if (search) {
+        try send(&app, h, .project_search);
+        try app.update(owner, Ops.setProjectQuery, .{"needle"});
+        try send(&app, h, .run_project_search);
+    } else try send(&app, h, .git_diff_all);
+    try settle(&app);
+    const Check = struct {
+        fn end(self: *const zircon.Shell) f32 {
+            const lh = self.editor_options.font_size * self.editor_options.line_height;
+            if (search) {
+                const file = self.search.editing.files.items[0];
+                return 36 + @as(f32, @floatFromInt(file.rows)) * lh + @as(f32, @floatFromInt(file.excerpts.len)) * 12;
+            }
+            return self.git.projection.?.files[0].height(&self.git.diff_view, lh);
+        }
+        fn scroll(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), value: f32) void {
+            if (search) self.search.editing.scroll[0].offset = value else self.git.diff_scroll.offset = value;
+            cx.notify();
+        }
+        fn clean(self: *const zircon.Shell) !void {
+            for (self.workspace.slots.items) |slot| if (slot.record) |record| try t.expect(!record.dirty());
+        }
+    };
+    const key = if (search) "search-excerpts" else "git-diff-lines";
+    const first_header = if (search) "search-file:0" else "diff-file:main.zig";
+    const second_header = if (search) "search-file:1" else "diff-file:z.zig";
+    const header_height: f32 = if (search) 36 else zircon.diff_layout.file_height;
+    var area = try elementBounds(&app, h, key);
+    try app.dispatch(h, .{ .scroll = .{ .position = .{ .x = area.x + 100, .y = area.y + 120 }, .x = 0, .y = -100 } });
+    _ = try app.step(0);
+    area = try elementBounds(&app, h, key);
+    try t.expectApproxEqAbs(area.y, (try elementBounds(&app, h, first_header)).y, 0.1);
+    const end = try app.read(owner, Check.end, .{});
+    try app.update(owner, Check.scroll, .{end - header_height / 2});
+    _ = try app.step(0);
+    try t.expectApproxEqAbs(area.y - header_height / 2, (try elementBounds(&app, h, first_header)).y, 0.1);
+    try t.expectApproxEqAbs(area.y + header_height / 2, (try elementBounds(&app, h, second_header)).y, 0.1);
+    try app.update(owner, Check.scroll, .{end + 100});
+    _ = try app.step(0);
+    try t.expectApproxEqAbs(area.y, (try elementBounds(&app, h, second_header)).y, 0.1);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot(if (search) "/tmp/zircon-search-sticky.png" else "/tmp/zircon-git-sticky.png");
+    // The floating header keeps its action and does not focus underlying text.
+    if (search) {
+        try click(&app, h, "z.zig    60 matches");
+    } else try click(&app, h, "Collapse z.zig");
+    try app.read(owner, Check.clean, .{});
+}
+
+test "Git file header sticks pushes off and keeps its controls" {
+    try stickyFileJourney(false);
+}
+test "project search file header sticks pushes off and opens its source" {
+    try stickyFileJourney(true);
 }

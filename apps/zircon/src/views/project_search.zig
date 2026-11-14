@@ -2,10 +2,13 @@
 //! disk files; excerpts edit their source documents and headers open source tabs.
 const std = @import("std");
 const ui = @import("zircon_ui");
+const zircon_widgets = @import("zircon_widgets");
 const search_editing = @import("../search_editing.zig");
+const search_selection = @import("../search_selection.zig");
 const shell = @import("../shell.zig");
 const v = @import("components.zig");
 const field_input = @import("input.zig");
+const sticky_header = zircon_widgets.sticky_header;
 const Shell = shell.Shell;
 
 pub const Fields = struct {
@@ -24,14 +27,13 @@ pub fn contentHeight(self: *const Shell) !f32 {
     var total: f32 = 0;
     for (results.groups, 0..) |group, group_index| {
         total += header_height;
-        for (group.excerpts, 0..) |_, index| {
-            if (try search_editing.excerpt(self, group_index, index)) |source| total += @as(f32, @floatFromInt(source.rows)) * line_height + 12 else total += 40;
-        }
+        total += search_editing.groupHeight(self, group_index, line_height, group.excerpts.len);
     }
     return total;
 }
 
 pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
+    if (self.search.editing.autoscroll[pane] != null) try b.requestFrameAfter(1.0 / 60.0);
     const c = self.colors;
     const line_height = self.editor_options.font_size * self.editor_options.line_height;
     var content: std.ArrayList(ui.Element) = .empty;
@@ -73,38 +75,29 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
     const bottom = top + viewport;
     var y: f32 = 0;
     var first: ?f32 = null;
+    var sticky: ?ui.Element = null;
+    var push: f32 = 0;
     var rows: std.ArrayList(ui.Element) = .empty;
     if (self.search.results) |results| {
         for (results.groups, 0..) |group, group_index| {
             if (y >= bottom) break;
-            const target: Target = .{ .group = @intCast(group_index), .match = 0, .generation = results.generation };
+            const group_height = header_height + search_editing.groupHeight(self, group_index, line_height, group.excerpts.len);
+            if (y + group_height <= top) {
+                y += group_height;
+                continue;
+            }
+            const pinned = sticky_header.offset(y, y + group_height, header_height, top);
+            if (pinned) |offset| {
+                sticky = try fileHeader(self, b, group, group_index);
+                push = offset;
+            }
             if (visible(y, header_height, top, bottom)) {
                 if (first == null) first = y;
-                var path = group.path() orelse group.title;
-                if (std.mem.startsWith(u8, path, self.workspace.root_path)) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
-                const label = try std.fmt.allocPrint(b.allocator(), "{s}    {d} matches", .{ path, group.matches.len });
-                try rows.append(b.allocator(), try b.fluent().button(.{
-                    .label = label,
-                })
-                    .flex()
-                    .h(.{ .px = header_height })
-                    .shrink_0()
-                    .gap_px(8)
-                    .items_center()
-                    .padding(.{ .left = 14, .right = 14 })
-                    .background(c.panel)
-                    .hover_background(c.hover)
-                    .overflow_hidden()
-                    .on_click(b.onClickWith(Shell.onSearchResult, target))
-                    .children(&.{
-                        try v.fileGlyph(self, b, path, false, false, 16),                                                                                                         try v.text(b, path, c.text, 13),
-                        try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} {s}", .{ group.matches.len, if (group.matches.len == 1) "match" else "matches" }), c.muted, 11),
-                    })
-                    .id(.{ .number = @intCast(group_index) })
-                    .build());
+                try rows.append(b.allocator(), if (pinned != null) try b.fluent().div().h_px(header_height).shrink_0().build() else try fileHeader(self, b, group, group_index));
             }
             y += header_height;
             for (group.excerpts, 0..) |_, excerpt_index| {
+                if (y >= bottom) break;
                 const source = try search_editing.excerpt(self, group_index, excerpt_index) orelse {
                     if (visible(y, 40, top, bottom)) {
                         if (first == null) first = y;
@@ -150,16 +143,17 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
         if (results.groups.len == 0) try rows.append(b.allocator(), try note(b, c, "No matches. Try a different query."));
         if (results.errors.len > 0) try rows.append(b.allocator(), try note(b, c, try std.fmt.allocPrint(b.allocator(), "{d} sources could not be searched.", .{results.errors.len})));
     } else try rows.append(b.allocator(), try note(b, c, "Enter a query and press Enter to search this project."));
-    try content.append(b.allocator(), try b.fluent().div()
+    const excerpts = try b.fluent().div()
         .grow()
         .min_h(.{ .px = 0 })
         .scroll_y_px(if (first) |origin| @max(0, top - origin) else 0)
         .overflow_hidden()
         .flex_col()
         .children(rows.items)
-        .id(.{ .string = "search-excerpts" })
-        .listeners(.{ .on_input = b.onInputWith(onScroll, pane) })
-        .build());
+        .build();
+    const surface = if (sticky) |header| try sticky_header.overlay(b, excerpts, header, header_height, push) else excerpts;
+    try content.append(b.allocator(), try b.fluent().adopt(surface).id(.{ .string = "search-excerpts" })
+        .listeners(.{ .on_input = b.onInputWith(onScroll, pane) }).build());
     return b.fluent().div()
         .grow()
         .min_h(.{ .px = 0 })
@@ -168,6 +162,21 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
         .flex_col()
         .children(content.items)
         .build();
+}
+
+fn fileHeader(self: *const Shell, b: *ui.Ui, group: anytype, group_index: usize) !ui.Element {
+    const c = self.colors;
+    const results = self.search.results.?;
+    const target: Target = .{ .group = @intCast(group_index), .match = 0, .generation = results.generation };
+    var path = group.path() orelse group.title;
+    if (std.mem.startsWith(u8, path, self.workspace.root_path)) path = std.mem.trimStart(u8, path[self.workspace.root_path.len..], "/");
+    const label = try std.fmt.allocPrint(b.allocator(), "{s}    {d} matches", .{ path, group.matches.len });
+    const button = try b.fluent().button(.{ .label = label }).flex().h_px(header_height).shrink_0().gap_px(8).items_center()
+        .padding(.{ .left = 14, .right = 14 }).background(c.panel).hover_background(c.hover).overflow_hidden()
+        .on_click(b.onClickWith(Shell.onSearchResult, target))
+        .children(.{ try v.fileGlyph(self, b, path, false, false, 16), try v.text(b, path, c.text, 13), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} {s}", .{ group.matches.len, if (group.matches.len == 1) "match" else "matches" }), c.muted, 11) })
+        .id(.{ .number = @intCast(group_index) }).build();
+    return b.fluent().adopt(button).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "search-file:{d}", .{group_index}) }).build();
 }
 
 fn visible(y: f32, height: f32, top: f32, bottom: f32) bool {
@@ -183,7 +192,11 @@ fn note(b: *ui.Ui, c: v.Palette, text: []const u8) !ui.Element {
 }
 
 fn onScroll(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !void {
-    if (event.data != .scroll) return;
+    if (event.data != .scroll) {
+        if (self.window) |handle| if (sticky_header.hit(&(try cx.app.window(handle)).frames.committed, event.data, "search-file:")) return;
+        try search_selection.pointer(self, event, cx, pane);
+        return;
+    }
     self.search.editing.viewport[pane] = event.bounds.height;
     self.search.editing.scroll[pane].wheel(event.data.scroll.y, try contentHeight(self), event.bounds.height);
     event.preventDefault();
