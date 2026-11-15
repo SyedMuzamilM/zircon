@@ -280,7 +280,7 @@ pub fn getView(self: *Shell, id: ws.DocumentId) !*View {
     editor.soft_wrap = self.editor_options.soft_wrap;
     editor.show_fold_controls = false;
     editor.show_git_gutters = false;
-    editor.show_indent_guides = false;
+    editor.show_indent_guides = self.editor_options.indent_guides;
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
     editor.synchronize(snapshot);

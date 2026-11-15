@@ -139,6 +139,7 @@ pub const Editor = struct {
         if (!std.math.isFinite(self.font_size) or self.font_size <= 0 or self.font_size > 128 or !std.math.isFinite(self.line_height) or self.line_height < self.font_size or !std.math.isFinite(self.scroll.offset) or self.scroll.offset < 0 or !std.math.isFinite(self.horizontal) or self.horizontal < 0 or self.tab_width == 0 or self.tab_width > 32) return error.InvalidEditorOptions;
     }
     pub fn synchronize(self: *Editor, snapshot: text.Snapshot) void {
+        self.synchronizeGitChanges(snapshot);
         self.bracket_cache.revision = null;
         self.selections.synchronize(snapshot);
         vim_module.synchronize(self, snapshot);
@@ -155,6 +156,7 @@ pub const Editor = struct {
     pub fn mapChange(self: *Editor, change: *const text.Change) void {
         self.pairs.map(change);
         self.mapHighlights(change);
+        self.mapGitChanges(change);
         if (self.edit_scope) |*range| {
             range.start = change.map(range.start, .before);
             range.end = change.map(range.end, .after);
@@ -171,6 +173,36 @@ pub const Editor = struct {
         self.marked = null;
         self.typing_group = 0;
     }
+    pub fn anchorGitChanges(self: *Editor, snapshot: text.Snapshot) void {
+        if (self.git_revision != snapshot.revision()) return;
+        for (self.git_changes) |*marker| if (marker.source_range == null) {
+            const start = if (marker.start < snapshot.lineCount()) snapshot.lineStart(marker.start) catch return else snapshot.byteLen();
+            const end = if (marker.end < snapshot.lineCount()) snapshot.lineStart(marker.end) catch return else snapshot.byteLen();
+            marker.source_range = .{ .start = start, .end = end };
+        };
+    }
+
+    fn mapGitChanges(self: *Editor, change: *const text.Change) void {
+        if (self.git_revision != change.before) return;
+        for (self.git_changes) |marker| if (marker.source_range == null) return;
+        for (self.git_changes) |*marker| {
+            const range = marker.source_range.?;
+            const start = change.map(range.start, .after);
+            marker.source_range = .{ .start = start, .end = @max(start, change.map(range.end, .before)) };
+        }
+        self.git_revision = change.after;
+    }
+
+    fn synchronizeGitChanges(self: *Editor, snapshot: text.Snapshot) void {
+        if (self.git_revision != snapshot.revision()) return;
+        for (self.git_changes) |*marker| if (marker.source_range) |range| {
+            marker.start = (snapshot.pointAt(@min(range.start, snapshot.byteLen())) catch return).line;
+            const end = (snapshot.pointAt(@min(range.end, snapshot.byteLen())) catch return).line;
+            marker.end = @max(marker.start + @as(usize, @intFromBool(range.end > range.start)), end);
+        };
+        self.anchorGitChanges(snapshot);
+    }
+
     fn mapHighlights(self: *Editor, change: *const text.Change) void {
         if (self.grammar_revision != change.before) return;
         for (self.grammar_spans) |*span| {
@@ -282,6 +314,7 @@ pub const Editor = struct {
         pub fn commit(self: *PreparedEdit) !Outcome {
             if (self.transferred) return error.EditAlreadyCommitted;
             const editor_value = self.editor;
+            editor_value.anchorGitChanges(self.before);
             var change = try self.text_edit.commit(self.document);
             if (change.before == change.after) {
                 change.deinit();
@@ -289,6 +322,7 @@ pub const Editor = struct {
             }
             editor_value.pairs.map(&change);
             editor_value.mapHighlights(&change);
+            editor_value.mapGitChanges(&change);
             if (editor_value.edit_scope) |*scope| {
                 scope.start = change.map(scope.start, .before);
                 scope.end = change.map(scope.end, .after);
@@ -306,6 +340,7 @@ pub const Editor = struct {
             }
             var snapshot = self.document.snapshot();
             defer snapshot.deinit();
+            editor_value.synchronizeGitChanges(snapshot);
             const row = if (self.edits.len > 0) (self.before.pointAt(self.edits[0].range.start) catch unreachable).line else 0;
             if (editor_value.language == .plain) editor_value.syntax_cache.clear() else {
                 if (editor_value.syntax_cache.revision != self.before.revision() or self.edits.len > 1) editor_value.syntax_cache.clear();

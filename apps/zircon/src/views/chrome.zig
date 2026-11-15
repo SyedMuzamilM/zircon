@@ -10,6 +10,7 @@ const panes = @import("../panes.zig");
 const services_recovery = @import("../services/recovery.zig");
 const shell = @import("../shell.zig");
 const v = @import("components.zig");
+const diagnostics = @import("diagnostics.zig");
 const Shell = shell.Shell;
 pub fn titlebar(self: *const Shell, b: *ui.Ui) !ui.Element {
     const c = self.colors;
@@ -437,10 +438,7 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
                 .children(.{})
                 .build(),
         }).build());
-    var issues: usize = 0;
-    for (self.language.documents.items) |doc| if (doc.diagnostics) |message| {
-        issues += message.data.diagnostics.items.len;
-    };
+    const issues = diagnostics.count(self, .all);
     try items.append(b.allocator(), try b.fluent().button(.{
         .label = "Diagnostics",
         .tooltip = "Language server diagnostics",
@@ -450,7 +448,7 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
         .items_center()
         .gap_px(3)
         .padding(.{ .left = 3, .right = 3 })
-        .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.language_servers))
+        .on_click(b.onClickWith(Shell.onCommand, commands_module.Command.show_diagnostics))
         .children(if (issues == 0) &.{try v.icon(b, .check, c.muted, 13)} else &.{ try v.icon(b, .warning, c.warning, 13), try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d}", .{issues}), c.warning, 11) })
         .build());
     if (self.recovery) |recovery| {

@@ -58,9 +58,11 @@ fn bounds(app: *ui.App, h: ui.WindowHandle, key: []const u8) !ui.Rect {
 }
 fn click(app: *ui.App, h: ui.WindowHandle, label: []const u8) !void {
     const frame = &(try app.window(h)).frames.committed;
-    const rect = for (frame.nodes.items, 0..) |node, index| {
-        if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, label)) break frame.bounds[index];
-    } else return error.MissingButton;
+    var found: ?ui.Rect = null;
+    for (frame.nodes.items, 0..) |node, index| {
+        if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, label)) found = frame.bounds[index];
+    }
+    const rect = found orelse return error.MissingButton;
     const point: ui.Point = .{ .x = rect.x + rect.width / 2, .y = rect.y + rect.height / 2 };
     try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
     try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
@@ -81,8 +83,21 @@ test "diagnostics tab virtualizes issues filters severity and opens another sour
     try app.update(owner, Ops.seed, .{});
     _ = try app.step(0);
     try t.expect((try bounds(&app, h, "primary-editor")).height > 500);
-    try app.update(owner, Ops.command, .{.show_diagnostics});
+    try app.update(owner, Ops.command, .{.language_servers});
     _ = try app.step(0);
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text) {
+        try t.expect(!std.mem.startsWith(u8, item.text, "Issue "));
+    };
+    try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
+    _ = try app.step(0);
+    try click(&app, h, "Diagnostics");
+    _ = try app.step(0);
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot("/tmp/zircon-diagnostics-excerpts.png");
+    var source_visible = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, "abc")) {
+        source_visible = true;
+    };
+    try t.expect(source_visible);
     var visible: usize = 0;
     for ((try app.window(h)).frames.committed.nodes.items) |node| if (node.kind == .button and std.mem.startsWith(u8, node.kind.button.label, "Issue ")) {
         visible += 1;

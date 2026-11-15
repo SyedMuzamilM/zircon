@@ -36,8 +36,45 @@ const Ops = struct {
     fn selectionCount(self: *const zircon.Shell) usize {
         return self.tabs.items[self.active].editor.selections.items.items.len;
     }
+    fn typingPosition(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        const tab = &self.tabs.items[self.active];
+        var snapshot = try self.workspace.snapshot(tab.document);
+        defer snapshot.deinit();
+        try tab.editor.setSelection(snapshot, .{ .start = 0, .end = 0 });
+        cx.notify();
+    }
+    fn projectIssue(self: *const zircon.Shell) bool {
+        for (self.language.documents.items) |doc| if (doc.diagnostics) |message| {
+            for (message.data.diagnostics.items) |issue| if (std.mem.eql(u8, issue.message, "project issue")) return doc.version == null;
+        };
+        return false;
+    }
+    fn bothReady(self: *const zircon.Shell) bool {
+        if (self.language.documents.items.len != 2) return false;
+        for (self.language.documents.items) |doc| if (doc.version == null) return false;
+        return true;
+    }
+    fn filtered(self: *const zircon.Shell) !void {
+        const items = self.language.completions.?.data.completion.items;
+        try t.expectEqual(@as(usize, 2), items.len);
+        try t.expectEqualStrings("aaaAnswer", items[0].label);
+    }
+    fn completionVisible(self: *const zircon.Shell) bool {
+        const pending_value = self.language.pending orelse return false;
+        return self.language.completions != null and std.meta.eql(pending_value.document, self.tabs.items[self.active].document);
+    }
+    fn definitionOther(self: *const zircon.Shell) !void {
+        const record = try self.workspace.getConst(self.tabs.items[self.active].document);
+        try t.expectEqualStrings("two.zig", std.fs.path.basename(record.path.?));
+    }
+    fn definitionSelected(self: *const zircon.Shell) bool {
+        return self.language.definition_pending == null and self.tabs.items[self.active].editor.primary().head == 1;
+    }
     fn hoverReady(self: *const zircon.Shell) bool {
         return self.language.documents.items.len > 0 and self.language.documents.items[0].version != null and self.language.sessions.items[self.language.documents.items[0].session].client.?.ready();
+    }
+    fn definitionPending(self: *const zircon.Shell) bool {
+        return self.language.definition_pending != null;
     }
     fn hoverVisible(self: *const zircon.Shell) bool {
         return self.symbol_hover.preview != null;
@@ -162,7 +199,7 @@ test "completion additional edits keep one caret at the primary edit" {
     try t.expectEqual(@as(usize, 1), try fixture.app.read(fixture.owner, Ops.selectionCount, .{}));
 }
 
-const HoverCheck = enum { edit, leave_symbol, leave_below, leave_window, layout, layout_long };
+const HoverCheck = enum { edit, leave_symbol, leave_below, leave_window, layout, layout_long, pinned, completion_typing, completion_filter, definition_click, definition_control, definition_import, project_diagnostics };
 fn hoverJourney(comptime check: HoverCheck) !void {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
@@ -172,10 +209,11 @@ fn hoverJourney(comptime check: HoverCheck) !void {
     const fixture_source = try std.mem.replaceOwned(u8, t.allocator, @embedFile("language_fixture"), "Returns the answer.", if (check == .layout_long) "Returns the answer with details about ownership, parameters, memory allocation, error handling, and the lifetime of the returned value. This documentation ends here." else "Returns the answer.");
     defer t.allocator.free(fixture_source);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "server.py", .data = fixture_source });
-    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = "const answer = 42;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "one.zig", .data = if (check == .definition_import) "const lib = @import(\"two.zig\");\n" else "const answer = 42;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "two.zig", .data = "const other = 42;\n" });
     const server = try std.fs.path.join(t.allocator, &.{ root, "server.py" });
     defer t.allocator.free(server);
-    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{ .schema_version = 1, .id = "org.zircon.hover", .name = "Hover", .version = "1.0.0", .contributes = .{ .language_servers = .{.{ .id = "hover", .languages = .{"zig"}, .command = "python3", .args = .{ server, "host" } }} } }, .{});
+    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{ .schema_version = 1, .id = "org.zircon.hover", .name = "Hover", .version = "1.0.0", .contributes = .{ .language_servers = .{.{ .id = "hover", .languages = .{"zig"}, .command = "python3", .args = .{ server, if (check == .definition_import) "host-navigation" else if (check == .completion_filter) "host-filter" else if (check == .project_diagnostics) "project-diagnostics" else "host" } }} } }, .{});
     defer t.allocator.free(manifest);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.hover/extension.json", .data = manifest });
     const home = try std.fs.path.join(t.allocator, &.{ root, "extensions" });
@@ -196,8 +234,71 @@ fn hoverJourney(comptime check: HoverCheck) !void {
     const editor_bounds = for (frame.nodes.items, 0..) |node, index| {
         if (node.key) |key| if (key == .string and std.mem.eql(u8, key.string, "primary-editor")) break frame.bounds[index];
     } else return error.MissingEditor;
-    const symbol: ui.Point = .{ .x = editor_bounds.x + 140, .y = editor_bounds.y + 11 };
-    if (check == .edit) try app.update(owner, Ops.command, .{.show_symbol_info}) else {
+    if (check == .project_diagnostics) {
+        while (!try app.read(owner, Ops.projectIssue, .{})) {
+            _ = try app.step(0);
+            if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.ProjectDiagnosticsTimeout;
+            try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+        }
+        try app.update(owner, Ops.command, .{.show_diagnostics});
+        _ = try app.step(0);
+        const rect = for (frame.nodes.items, 0..) |node, index| {
+            if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "project issue")) break frame.bounds[index];
+        } else return error.ProjectIssueMissing;
+        const at: ui.Point = .{ .x = rect.x + rect.width / 2, .y = rect.y + rect.height / 2 };
+        try app.dispatch(h, .{ .pointer_down = .{ .position = at } });
+        try app.dispatch(h, .{ .pointer_up = .{ .position = at } });
+        try app.read(owner, Ops.definitionOther, .{});
+        return;
+    }
+    if (check == .completion_typing or check == .completion_filter) {
+        for (0..2) |file| {
+            if (file == 1) {
+                try app.update(owner, Ops.second, .{});
+                while (!try app.read(owner, Ops.bothReady, .{})) {
+                    _ = try app.step(0);
+                    if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.CompletionReadinessTimeout;
+                    try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+                }
+            }
+            try app.update(owner, Ops.typingPosition, .{});
+            try app.dispatch(h, .{ .text = "ans" });
+            try t.expect(try app.read(owner, Ops.pending, .{}));
+            while (!try app.read(owner, Ops.completionVisible, .{})) {
+                _ = try app.step(0);
+                if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.CompletionTimeout;
+                try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+            }
+            if (check == .completion_filter) try app.read(owner, Ops.filtered, .{});
+        }
+        return;
+    }
+    const metrics = (try app.window(h)).surface.?.measurer();
+    const symbol: ui.Point = .{ .x = editor_bounds.x + if (check == .definition_import) 76 + metrics.caret("const lib = @import(\"two.zig\");", .{ .size = 14, .mono = true }, 22) else @as(f32, 140), .y = editor_bounds.y + 11 };
+    if (check == .definition_click or check == .definition_control or check == .definition_import) {
+        const modifiers: ui.Modifiers = if (check == .definition_control) .{ .control = true } else .{ .command = true };
+        try app.dispatch(h, .{ .pointer_down = .{ .position = symbol, .modifiers = modifiers } });
+        try t.expect(try app.read(owner, Ops.definitionPending, .{}));
+        try app.dispatch(h, .{ .pointer_up = .{ .position = symbol, .modifiers = modifiers } });
+        while (!try app.read(owner, Ops.definitionSelected, .{})) {
+            _ = try app.step(0);
+            if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.DefinitionTimeout;
+            try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+        }
+        if (check == .definition_import) try app.read(owner, Ops.definitionOther, .{});
+        return;
+    }
+    if (check == .pinned) {
+        try app.dispatch(h, .{ .pointer_down = .{ .position = symbol, .button = .secondary } });
+        try app.dispatch(h, .{ .pointer_up = .{ .position = symbol, .button = .secondary } });
+        _ = try app.step(0);
+        const rect = for (frame.nodes.items, 0..) |node, index| {
+            if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, "Show Symbol Information")) break frame.bounds[index];
+        } else return error.SymbolActionMissing;
+        const at: ui.Point = .{ .x = rect.x + 20, .y = rect.y + rect.height / 2 };
+        try app.dispatch(h, .{ .pointer_down = .{ .position = at } });
+        try app.dispatch(h, .{ .pointer_up = .{ .position = at } });
+    } else if (check == .edit) try app.update(owner, Ops.command, .{.show_symbol_info}) else {
         try app.dispatch(h, .{ .pointer_move = .{ .position = symbol } });
         _ = try app.step(0.4);
     }
@@ -213,6 +314,13 @@ fn hoverJourney(comptime check: HoverCheck) !void {
     };
     try t.expect(card);
     switch (check) {
+        .completion_typing, .completion_filter, .definition_click, .definition_control, .definition_import, .project_diagnostics => unreachable,
+        .pinned => {
+            try app.dispatch(h, .{ .pointer_move = .{ .position = symbol } });
+            _ = try app.step(0.4);
+            try t.expect(try app.read(owner, Ops.hoverVisible, .{}));
+            return;
+        },
         .edit => try app.dispatch(h, .{ .text = "x" }),
         .leave_symbol => try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = editor_bounds.x + 450, .y = editor_bounds.y + 300 } } }),
         .leave_below => try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = symbol.x, .y = editor_bounds.y + 300 } } }),
@@ -513,4 +621,29 @@ test "retired resolver callbacks cannot restart reused slots or strand another d
 
 test "symbol hover does not remain over blank space below the last source line" {
     try hoverJourney(.leave_below);
+}
+
+test "symbol hover opened explicitly stays visible while moving over its source" {
+    try hoverJourney(.pinned);
+}
+test "language completion requests suggestions while typing identifiers" {
+    try hoverJourney(.completion_typing);
+}
+test "language command click requests the definition under the pointer" {
+    try hoverJourney(.definition_click);
+}
+
+test "language control click navigates to the definition" {
+    try hoverJourney(.definition_control);
+}
+test "language command click follows an import into another file" {
+    try hoverJourney(.definition_import);
+}
+
+test "language diagnostics include server reported project files without an open tab" {
+    try hoverJourney(.project_diagnostics);
+}
+
+test "language completion filters and orders the server candidates for the typed prefix" {
+    try hoverJourney(.completion_filter);
 }

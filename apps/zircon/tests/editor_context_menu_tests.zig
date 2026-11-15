@@ -125,3 +125,60 @@ fn menuPersistence() !void {
 test "editor context menu stays open across press release movement and redraw" {
     try menuPersistence();
 }
+
+test "editor context menu survives AppKit right mouse events and idle frames" {
+    if (comptime ui.testing.native == void) return error.SkipZigTest;
+    const native = ui.testing.native;
+    const objc = native.objc;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "  alpha beta\nsecond line\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const title = "Zircon right mouse persistence";
+    const h = try app.openWindow(zircon.Shell, .{ .title = title, .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    const nsapp = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const windows = objc.send(objc.Id, nsapp, "windows", .{});
+    const window = for (0..objc.send(usize, windows, "count", .{})) |index| {
+        const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{index});
+        if (std.mem.eql(u8, title, objc.fromString(objc.send(objc.Id, candidate, "title", .{})))) break candidate;
+    } else return error.NativeWindowMissing;
+    const view = objc.send(objc.Id, window, "contentView", .{});
+    const at = try point(&app, h, 0, 3);
+    const location = objc.send(objc.CGPoint, view, "convertPoint:toView:", .{ objc.CGPoint{ .x = at.x, .y = at.y }, @as(objc.Id, null) });
+    for ([_]usize{ 3, 4, 5 }) |kind| {
+        const event = objc.send(objc.Id, objc.class("NSEvent"), "mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:", .{ kind, location, @as(usize, 0), native.now(), objc.send(isize, window, "windowNumber", .{}), @as(objc.Id, null), @as(isize, 0), @as(isize, 1), @as(f32, 1) });
+        objc.send(void, view, if (kind == 3) "rightMouseDown:" else if (kind == 4) "rightMouseUp:" else "mouseMoved:", .{event});
+        try native.pump(0);
+        _ = try app.step(0);
+        try t.expect(!try app.read(owner, Ops.closed, .{}));
+    }
+    for (0..5) |index| {
+        _ = try app.step(@as(f64, @floatFromInt(index + 1)));
+        try t.expect(!try app.read(owner, Ops.closed, .{}));
+    }
+}
+
+test "editor context menu stays open through residual trackpad scrolling" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "  alpha beta\nsecond line\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    _ = try app.step(0);
+    const at = try point(&app, h, 0, 3);
+    try click(&app, h, at, .secondary);
+    try app.dispatch(h, .{ .scroll = .{ .position = at, .x = 0, .y = 0.01 } });
+    _ = try app.step(0.1);
+    try t.expect(!try app.read(owner, Ops.closed, .{}));
+}

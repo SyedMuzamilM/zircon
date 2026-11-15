@@ -1,6 +1,7 @@
 //! Document-revision-bound decorations. Inline blocks participate in vertical
 //! geometry instead of covering source text; input uses the same row mapping.
 const std = @import("std");
+const text = @import("zircon_text");
 const zircon_ui = @import("zircon_ui");
 pub const GitChange = struct {
     kind: enum { added, modified, deleted },
@@ -10,6 +11,7 @@ pub const GitChange = struct {
     old_count: usize = 0,
     removed: []const u8 = "",
     expanded: bool = false,
+    source_range: ?text.Range = null,
 };
 pub fn insertedRows(changes: []const GitChange, before: usize) usize {
     var count: usize = 0;

@@ -90,6 +90,18 @@ pub const Preview = struct {
         errdefer value.generation.release();
         return builder.custom(Canvas, value, .{ .flex_grow = 1, .overflow = .hidden, .background = self.colors.background });
     }
+    pub fn contentWidth(self: *const Preview, metrics: ui.layout.Measurer, maximum: f32) !f32 {
+        var width: f32 = 180;
+        for (self.generation.document.blocks) |block| {
+            var lines = std.mem.splitScalar(u8, block.content, '\n');
+            while (lines.next()) |line| {
+                const measured = try metrics.text(metrics.context, line, .{ .size = 13, .mono = block.kind == .code });
+                width = @max(width, measured.width + 24);
+                if (width >= maximum) return maximum;
+            }
+        }
+        return @min(maximum, width);
+    }
     pub fn contentHeight(self: *const Preview, metrics: ui.layout.Measurer, width: f32) !f32 {
         return (try cachedLayout(self.generation, metrics, width, self.colors, self.compact)).prepared.height;
     }
@@ -404,9 +416,9 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
                 flow.y += 26;
             },
             .code => {
-                flow.left = inset + (if (compact) @as(f32, 8) else 14);
+                flow.left = inset + (if (compact) @as(f32, 0) else 14);
                 flow.x = flow.left;
-                flow.y += gap;
+                if (!compact) flow.y += gap;
                 flow.line_height = if (compact) 20 else 22;
                 const language: syntax.Language = if (std.mem.startsWith(u8, block.info, "zig")) .zig else if (std.mem.startsWith(u8, block.info, "rust") or std.mem.startsWith(u8, block.info, "rs")) .rust else if (std.mem.startsWith(u8, block.info, "json")) .json else .plain;
                 var lexical: syntax.State = .{};
@@ -426,7 +438,7 @@ fn layout(a: std.mem.Allocator, generation: *Generation, metrics: ui.layout.Meas
                     if (at < line.len) try flow.textRun(line[at..], .{ .size = if (compact) 13 else 14, .mono = true, .color = colors.text }, block.source.start, null, false, true);
                     flow.newline();
                 }
-                flow.y += 8;
+                if (!compact) flow.y += 8;
                 try flow.fills.append(a, .{ .bounds = .{ .x = inset, .y = block_top, .width = @max(1, flow.right - inset), .height = flow.y - block_top }, .color = colors.code, .radius = ui.controls.metrics.control_radius });
                 flow.y += if (compact) @as(f32, 8) else 14;
             },

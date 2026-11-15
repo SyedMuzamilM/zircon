@@ -169,6 +169,8 @@ fn revealTreePath(self: *Shell, path: []const u8) !void {
 }
 
 pub fn openPath(self: *Shell, path: []const u8) !void {
+    self.language.clearCompletion();
+    self.symbol_hover.deinit();
     if (views_image.supported(path)) {
         const absolute = try std.fs.path.resolve(self.allocator, &.{ self.workspace.root_path, path });
         defer self.allocator.free(absolute);
@@ -410,6 +412,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     }
     const record = try self.workspace.get(selected.id);
     if (try editor_context_menu.pointer(self, cx, selected.editor, &record.doc, selected.id, pane, e)) return true;
+    if (try services_language.definitionPointer(self, cx, selected.editor, &record.doc, e)) return true;
     try symbol_hover.pointer(self, cx, selected.editor, &record.doc, selected.id, e);
     if (try editor_git.handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
     const old_gutter_hover = selected.editor.gutter_hovered;
@@ -430,14 +433,9 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     const changed = outcome.change != null or outcome.reset;
     const origin: ws.ChangeOrigin = if (shortcut == .undo) .undo else if (shortcut == .redo) .redo else .typing;
     try applyOutcome(self, cx, selected.id, pane, &outcome, origin);
-    if (changed and self.git.repository) try services_git.start(self, cx, .refresh);
+    if (changed) try services_git.edited(self, cx);
     if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
-    const typed: []const u8 = switch (e.data) {
-        .text => |bytes| bytes,
-        .edit => |edit| if (edit.composing) "" else edit.text,
-        else => "",
-    };
-    if (changed and typed.len == 1 and typed[0] == '.') services_language.request(self, cx) catch |err| switch (err) {
+    if (changed and services_language.completionTrigger(e.data)) services_language.request(self, cx) catch |err| switch (err) {
         error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
         else => try self.reportError(err),
     };

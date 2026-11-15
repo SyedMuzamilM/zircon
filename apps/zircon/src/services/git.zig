@@ -96,6 +96,7 @@ pub const Model = struct {
     needs_buffer_diff: bool = false,
     baselines: []*BaseSource = &.{},
     next_refresh: f64 = 0,
+    edit_refresh_at: ?f64 = null,
     needs_metadata: bool = true,
     metadata_fingerprint: ?u64 = null,
     pending_all_diff: bool = false,
@@ -702,6 +703,14 @@ pub fn bufferChanged(self: *Shell, cx: *ui.Context(Shell)) !void {
     try start(self, cx, .buffer_diff);
 }
 
+pub fn edited(self: *Shell, cx: *ui.Context(Shell)) !void {
+    if (!self.git.repository) return;
+    const first = self.git.edit_refresh_at == null;
+    self.git.edit_refresh_at = try cx.app.currentTime() + 0.25;
+    const current = actions.active(self) catch return;
+    if (first and (current.editor.git_changes.len == 0 or !std.meta.eql(@as(?workspace.DocumentId, current.id), self.git.active_document))) try start(self, cx, .refresh);
+}
+
 pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
     return startOperation(self, cx, operation, true);
 }
@@ -958,11 +967,20 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     };
     if (value.changes_ready or value.blame != null) if (value.document) |id| if (self.workspace.getConst(id)) |record| {
         if (record.doc.revision() == value.revision) {
+            if (value.changes_ready and std.meta.eql(self.git.active_document, value.document)) self.git.edit_refresh_at = null;
             for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
-                changed = changed or value.blame != null or tab.editor.git_revision != value.revision or !std.mem.eql(u8, tab.editor.git_baseline, value.baseline);
+                changed = changed or value.changes_ready or value.blame != null or tab.editor.git_revision != value.revision or !std.mem.eql(u8, tab.editor.git_baseline, value.baseline);
                 try installEditor(&tab.editor, &value);
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                tab.editor.anchorGitChanges(snapshot);
             };
-            if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) try installEditor(&pane.editor, &value);
+            if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
+                try installEditor(&pane.editor, &value);
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                pane.editor.anchorGitChanges(snapshot);
+            };
         }
     } else |_| {};
     if (changed) cx.notify();
@@ -997,6 +1015,10 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         return;
     }
     if (self.git.needs_refresh) {
+        if (self.git.edit_refresh_at) |due| if (try cx.app.currentTime() < due) {
+            const current = actions.active(self) catch return;
+            if (current.editor.git_changes.len > 0 and std.meta.eql(@as(?workspace.DocumentId, current.id), self.git.active_document)) return;
+        };
         self.git.needs_refresh = false;
         try start(self, cx, .refresh);
     }

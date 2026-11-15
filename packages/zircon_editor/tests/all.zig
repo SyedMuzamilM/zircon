@@ -1298,5 +1298,65 @@ test "active brackets paint subtle backgrounds and their enclosing indentation g
         if (item.color.a == 0.45 and item.rect.width == 1) guides += 1;
     };
     try t.expectEqual(@as(usize, 2), matches);
+    try t.expectEqual(@as(usize, 1), guides);
+}
+
+test "indentation guides continue through empty rows inside a block" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "fn main() {\n    first();\n\n    last();\n}\n");
+    var state = try editor.Editor.init(t.allocator);
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    state.language = .zig;
+    state.synchronize(snapshot);
+    const h = try app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state });
+    _ = try app.step(0);
+    var guides: usize = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.width == 1 and (item.color.a == 0.2 or item.color.a == 0.45)) {
+        guides += 1;
+    };
     try t.expectEqual(@as(usize, 3), guides);
+}
+
+test "Git gutter markers remain visible through typing before the refreshed diff arrives" {
+    var document = try text.Document.init(t.allocator, "first\nsecond\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.git_changes = try t.allocator.dupe(editor.GitChange, &.{.{ .kind = .modified, .start = 1, .end = 2, .expanded = true, .old_count = 1 }});
+    state.git_revision = document.revision();
+    var outcome = try state.execute(&document, .{ .insert = "x" });
+    defer release(&outcome);
+    try t.expectEqual(@as(usize, 1), state.visibleChanges(document.revision()).len);
+    try t.expect(state.visibleChanges(document.revision())[0].expanded);
+}
+
+test "Git gutter markers follow inserted rows in the edited buffer and its other view" {
+    var document = try text.Document.init(t.allocator, "before\nmodified\nafter\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    var other = try editor.Editor.init(t.allocator);
+    defer other.deinit();
+    for ([_]*editor.Editor{ &state, &other }) |view| {
+        view.git_changes = try t.allocator.dupe(editor.GitChange, &.{.{ .kind = .modified, .start = 1, .end = 2, .expanded = true, .old_count = 1 }});
+        view.git_revision = document.revision();
+        var snapshot = document.snapshot();
+        defer snapshot.deinit();
+        view.anchorGitChanges(snapshot);
+    }
+    var outcome = try state.execute(&document, .{ .insert = "\n" });
+    defer release(&outcome);
+    other.mapChange(&outcome.change.?);
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    other.synchronize(snapshot);
+    for ([_]*editor.Editor{ &state, &other }) |view| {
+        const markers = view.visibleChanges(snapshot.revision());
+        try t.expectEqual(@as(usize, 1), markers.len);
+        try t.expectEqual(@as(usize, 2), markers[0].start);
+        try t.expectEqual(@as(usize, 3), markers[0].end);
+        try t.expect(markers[0].expanded);
+    }
 }

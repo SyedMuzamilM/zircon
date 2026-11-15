@@ -8,6 +8,7 @@ const blame_view = @import("blame_view.zig");
 const brackets = @import("brackets.zig");
 const display = @import("display.zig");
 const editor = @import("editor.zig");
+const indent_guides = @import("indent_guides.zig");
 const profile_module = @import("profile.zig");
 const selection = @import("selections.zig");
 const syntax = @import("syntax.zig");
@@ -210,26 +211,23 @@ const Canvas = struct {
                         if (column >= segment_start and column < segment_end) try highlightColumns(cx, metrics.*, line, style, x, column, column + 1, fill);
                     }
                 };
-                var indent: usize = 0;
-                while (indent < line.original.len and (line.original[indent] == ' ' or line.original[indent] == '\t')) indent += 1;
-                const cells = line.display.displayOffset(indent);
+                const cells = if (!self.indent_guides) 0 else if (indent_guides.blank(line.original)) try indent_guides.blankCells(self.snapshot, line.row, self.tab_width, cx.painter.allocator) else indent_guides.cells(line.original, self.tab_width);
                 const advance = @max(1, metrics.caret(" ", style, 1));
                 const step = @as(f32, @floatFromInt(self.tab_width));
                 var guide = @as(usize, @intFromFloat(@floor(self.horizontal / advance / step))) * self.tab_width;
                 const last_guide = @min(cells, @as(usize, @intFromFloat(@ceil((self.horizontal + bounds.width) / advance))));
-                var tint = self.theme.line_number;
-                tint.a = 0.2;
                 while (self.indent_guides and guide < last_guide) : (guide += self.tab_width) {
+                    var tint = self.theme.line_number;
+                    tint.a = 0.2;
+                    if (cx.focused) if (self.scope_guide) |scope| {
+                        if (guide == scope.indent and line.row > scope.first_row and line.row < scope.last_row) {
+                            tint = if (self.theme.background.r + self.theme.background.g + self.theme.background.b < 1.5) ui.Color.rgb(0xffffff) else self.theme.foreground;
+                            tint.a = 0.45;
+                        }
+                    };
                     const guide_x = @as(f32, @floatFromInt(guide)) * advance;
                     try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + guide_x, .y = line.y, .width = 1, .height = self.line_height }, .color = tint });
                 }
-                if (self.indent_guides and cx.focused) if (self.scope_guide) |scope| {
-                    if (scope.first_row < scope.last_row and line.row >= scope.first_row and line.row <= scope.last_row) {
-                        var active = self.theme.foreground;
-                        active.a = 0.45;
-                        try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + @as(f32, @floatFromInt(scope.indent)) * advance, .y = line.y, .width = 1, .height = self.line_height }, .color = active });
-                    }
-                };
                 var match_start: usize = 0;
                 var match_end = self.search_ranges.len;
                 while (match_start < match_end) {

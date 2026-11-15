@@ -342,22 +342,22 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     self.status_is_error = true;
                     changed = true;
                 },
-                .diagnostics => |value| for (self.language.documents.items) |*doc| {
-                    if (doc.session != session_index or !std.mem.eql(u8, doc.uri, value.uri)) continue;
-                    if (doc.version == null or (value.version != null and value.version.? != doc.version.?)) break;
-                    const current = self.workspace.getConst(doc.id) catch break;
-                    if (current.doc.revision() != doc.version.?) break;
-                    if (value.version == null) message.data.diagnostics.version = doc.version;
-                    if (doc.diagnostics) |*old| old.deinit();
-                    doc.diagnostics = message;
+                .diagnostics => if (try acceptDiagnostics(self, session_index, &message)) {
                     self.language.diagnostics_generation +%= 1;
                     moved = true;
                     changed = true;
-                    break;
                 },
                 .completion => |value| if (self.language.pending) |pending| {
                     const record = self.workspace.getConst(pending.document) catch continue;
                     if (!self.language.expects(session_index, value.uri, value.id, value.version) or record.doc.revision() != value.version) continue;
+                    const current = actions.active(self) catch continue;
+                    if (!std.meta.eql(current.id, pending.document) or current.editor.primary().head != pending.cursor) continue;
+                    try filterCompletions(&message, record.doc.snapshot(), pending.cursor);
+                    if (message.data.completion.items.len == 0) {
+                        self.language.clearCompletion();
+                        changed = true;
+                        continue;
+                    }
                     if (self.language.completions) |*old| old.deinit();
                     self.language.completions = message;
                     self.language.completion_index = 0;
@@ -422,6 +422,117 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         }
     };
     if (changed) cx.notify();
+}
+
+fn matchRank(candidate: []const u8, prefix: []const u8) ?usize {
+    if (prefix.len == 0) return 0;
+    if (candidate.len >= prefix.len and std.ascii.eqlIgnoreCase(candidate[0..prefix.len], prefix)) return 0;
+    var matched: usize = 0;
+    var gaps: usize = 0;
+    for (candidate) |byte| {
+        if (std.ascii.toLower(byte) == std.ascii.toLower(prefix[matched])) {
+            matched += 1;
+            if (matched == prefix.len) return 1 + gaps;
+        } else gaps += 1;
+    }
+    return null;
+}
+
+fn filterCompletions(message: *lsp.Message, snapshot_value: text.Snapshot, cursor: usize) !void {
+    var snapshot = snapshot_value;
+    defer snapshot.deinit();
+    const a = message.arena.allocator();
+    const word = try completionWordRange(snapshot, cursor);
+    const prefix = try snapshot.copy(a, .{ .start = word.start, .end = cursor });
+    const candidates = message.data.completion.items;
+    const items = try a.alloc(lsp.Completion, candidates.len);
+    var count: usize = 0;
+    for (candidates) |candidate| {
+        if (candidate.snippet or matchRank(candidate.filter_text orelse candidate.label, prefix) == null) continue;
+        items[count] = candidate;
+        count += 1;
+    }
+    std.mem.sort(lsp.Completion, items[0..count], prefix, struct {
+        fn less(typed: []const u8, left: lsp.Completion, right: lsp.Completion) bool {
+            const left_rank = matchRank(left.filter_text orelse left.label, typed).?;
+            const right_rank = matchRank(right.filter_text orelse right.label, typed).?;
+            if (left_rank != right_rank) return left_rank < right_rank;
+            return std.mem.lessThan(u8, left.sort_text orelse left.label, right.sort_text orelse right.label);
+        }
+    }.less);
+    message.data.completion.items = items[0..count];
+}
+
+fn acceptDiagnostics(self: *Shell, session: usize, message: *lsp.Message) !bool {
+    const value = message.data.diagnostics;
+    var found: ?usize = null;
+    for (self.language.documents.items, 0..) |doc, index| if (std.mem.eql(u8, doc.uri, value.uri)) {
+        if (doc.session != session) return false;
+        found = index;
+        break;
+    };
+    const index = found orelse blk: {
+        if (value.version != null or value.items.len == 0) return false;
+        const path = lsp.filePath(self.allocator, value.uri) catch return false;
+        defer self.allocator.free(path);
+        const root = self.workspace.root_path;
+        if (!std.mem.startsWith(u8, path, root) or path.len <= root.len or path[root.len] != '/') return false;
+        const id = self.workspace.open(path) catch return false;
+        const record = try self.workspace.getConst(id);
+        if (record.dirty()) return false;
+        const uri = try self.allocator.dupe(u8, value.uri);
+        errdefer self.allocator.free(uri);
+        const owned_path = try self.allocator.dupe(u8, record.path.?);
+        errdefer self.allocator.free(owned_path);
+        try self.language.documents.append(self.allocator, .{ .id = id, .uri = uri, .path = owned_path, .session = session });
+        break :blk self.language.documents.items.len - 1;
+    };
+    const doc = &self.language.documents.items[index];
+    const record = self.workspace.getConst(doc.id) catch return false;
+    if (doc.version == null and (value.version != null or record.dirty())) return false;
+    const revision = doc.version orelse record.doc.revision();
+    if (record.doc.revision() != revision or (value.version != null and value.version.? != revision)) return false;
+    message.data.diagnostics.version = revision;
+    if (doc.diagnostics) |*old| old.deinit();
+    doc.diagnostics = message.*;
+    return true;
+}
+
+pub fn completionTrigger(input: ui.Input) bool {
+    const bytes = switch (input) {
+        .text => |value| value,
+        .edit => |edit| if (edit.composing) "" else edit.text,
+        else => "",
+    };
+    if (bytes.len == 0) return false;
+    for (bytes) |byte| if (!identifierByte(byte) and byte != '.' and byte != '@' and byte != ':' and byte != '"' and byte != '/' and byte != ']') return false;
+    return true;
+}
+
+pub fn definitionPointer(self: *Shell, cx: *ui.Context(Shell), state: *zircon_editor.Editor, document: *const text.Document, event: *ui.Event(ui.Input)) !bool {
+    if (event.data != .pointer_down) return false;
+    const pointer = event.data.pointer_down;
+    if (pointer.button != .primary or (!pointer.modifiers.command and !pointer.modifiers.control) or pointer.modifiers.shift or pointer.modifiers.alt) return false;
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    const gutter = if (state.show_line_numbers) zircon_editor.gutterWidth(snapshot.lineCount(), state.font_size) else 20;
+    if (pointer.position.x < event.bounds.x + gutter) return false;
+    const at = try state.offsetAtPoint(snapshot, event, pointer.position);
+    if (at >= snapshot.byteLen() or std.ascii.isWhitespace(try snapshot.byteAt(at))) return false;
+    state.selections.single(.{ .anchor = at, .head = at });
+    state.dragging = false;
+    state.typing_group = 0;
+    self.language.clearCompletion();
+    symbol_hover.clear(self, cx);
+    requestDefinition(self, cx) catch |err| switch (err) {
+        error.NoLanguageServer, error.ServerNotReady, error.DefinitionNotSupported => return false,
+        else => return err,
+    };
+    event.focus();
+    event.preventDefault();
+    event.stopPropagation();
+    cx.notify();
+    return true;
 }
 
 pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
@@ -575,6 +686,8 @@ pub fn acceptDefinition(self: *Shell, cx: *ui.Context(Shell), session: usize, me
     if (pending.session != session or pending.request != value.id or value.version != pending.revision) return;
     const record = self.workspace.getConst(pending.document) catch return;
     if (record.doc.revision() != pending.revision) return self.language.clearDefinition();
+    const origin = actions.active(self) catch return self.language.clearDefinition();
+    if (!std.meta.eql(origin.id, pending.document)) return self.language.clearDefinition();
     if (value.items.len == 0) return self.language.clearDefinition();
     const location = value.items[0];
     const path = try lsp.filePath(self.allocator, location.uri);

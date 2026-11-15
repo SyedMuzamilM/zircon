@@ -17,6 +17,7 @@ pub const Content = struct {
     line_height: f32,
     width: f32 = 800,
     line_numbers: bool = true,
+    indent_guides: bool = true,
     tab_width: usize = 4,
     horizontal: f32 = 0,
     theme: editor.Theme,
@@ -125,6 +126,24 @@ pub const Content = struct {
     fn blank(self: Content, b: *ui.Ui, height: f32) !ui.Element {
         return b.fluent().div().h_px(height).shrink_0().background(self.colors.sidebar).build();
     }
+    fn indentCells(self: Content, loc: Location, bytes: []const u8, live: bool) usize {
+        if (!editor.indent_guides.blank(bytes)) return editor.indent_guides.cells(bytes, self.tab_width);
+        const lines = self.diff.hunks[loc.hunk].lines;
+        var before: ?[]const u8 = null;
+        var after: ?[]const u8 = null;
+        for (0..@min(1024, lines.len)) |distance| {
+            if (before == null and loc.line > distance) {
+                const line_value = lines[loc.line - distance - 1];
+                if ((if (live) line_value.new_line != null else line_value.old_line != null) and !editor.indent_guides.blank(line_value.text)) before = line_value.text;
+            }
+            if (after == null and loc.line + distance + 1 < lines.len) {
+                const line_value = lines[loc.line + distance + 1];
+                if ((if (live) line_value.new_line != null else line_value.old_line != null) and !editor.indent_guides.blank(line_value.text)) after = line_value.text;
+            }
+            if (before != null and after != null) return editor.indent_guides.between(before.?, after.?, self.tab_width);
+        }
+        return 0;
+    }
     const Location = struct { hunk: usize, line: usize, side: review_model.Side };
     fn line(self: Content, b: *ui.Ui, host: anytype, comptime Hooks: type, original: git.Line, path: []const u8, paired: ?[]const u8, live: bool, location: ?Location, projected: ?layout.Row) !ui.Element {
         const changed = original.kind == .addition or original.kind == .deletion;
@@ -153,7 +172,7 @@ pub const Content = struct {
                 break;
             }
         };
-        const code = try editor.code_line.element(b, original.text, path, self.font, self.line_height, self.theme, highlights[0..range_count], .{ .tab_width = self.tab_width, .horizontal = self.horizontal, .segments = segments });
+        const code = try editor.code_line.element(b, original.text, path, self.font, self.line_height, self.theme, highlights[0..range_count], .{ .tab_width = self.tab_width, .horizontal = self.horizontal, .segments = segments, .indent_guides = self.indent_guides, .indent_cells = if (location) |loc| self.indentCells(loc, original.text, live) else null });
         const row = try b.fluent().row()
             .h_px(if (projected) |r| r.height(self.line_height) else self.line_height)
             .shrink_0()

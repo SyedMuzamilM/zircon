@@ -1953,3 +1953,78 @@ test "Git file header sticks pushes off and keeps its controls" {
 test "project search file header sticks pushes off and opens its source" {
     try stickyFileJourney(true);
 }
+
+fn diffGuidesJourney(split: bool) !void {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "fn main() {\n    before();\n\n    tail();\n}\n" });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "fn main() {\n    after();\n\n    tail();\n}\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try openNamed(&app, root, "main.zig", "Zircon diff indentation guides");
+    try send(&app, h, .git_diff_all);
+    try settle(&app);
+    if (split) {
+        try send(&app, h, .git_split_view);
+        try settle(&app);
+    }
+    const frame = &(try app.window(h)).frames.committed;
+    const removed = try elementBounds(&app, h, if (split) "git-code:old:0:1" else "git-code:unified:0:1");
+    const added = try elementBounds(&app, h, "git-live:main.zig:2");
+    const blank = try elementBounds(&app, h, "git-live:main.zig:3");
+    for ([_]ui.Rect{ removed, added, blank }) |row| {
+        var found = false;
+        for (frame.scene.items) |item| if (item.kind == .rect and item.rect.width == 1 and (item.color.a == 0.2 or item.color.a == 0.45)) {
+            if (@abs(item.rect.x - row.x - 76) < 1 and @abs(item.rect.y - row.y) < 1) found = true;
+        };
+        try t.expect(found);
+    }
+    if (comptime ui.testing.native != void) try (try app.window(h)).snapshot(if (split) "/tmp/zircon-diff-indent-split.png" else "/tmp/zircon-diff-indent-unified.png");
+}
+
+test "Git diff indentation guides align in added deleted and blank rows" {
+    try diffGuidesJourney(false);
+}
+test "Git split diff indentation guides align on both sides" {
+    try diffGuidesJourney(true);
+}
+
+test "Git gutter refresh waits for typing to settle while retaining existing markers" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 1;\n" });
+    try reviewRepo(root);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "const value = 2;\n" });
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try openNamed(&app, root, "main.zig", "Zircon stable gutter while typing");
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Gutter = struct {
+        fn disableBlame(self: *zircon.Shell, _: *ui.Context(zircon.Shell)) void {
+            self.inline_blame_enabled = false;
+        }
+        fn generation(self: *const zircon.Shell) !u64 {
+            const tab = &self.tabs.items[self.active];
+            const revision = (try self.workspace.getConst(tab.document)).doc.revision();
+            try t.expect(tab.editor.visibleChanges(revision).len > 0);
+            return self.git.generation;
+        }
+    };
+    try app.update(owner, Gutter.disableBlame, .{});
+    try settle(&app);
+    const generation = try app.read(owner, Gutter.generation, .{});
+    try app.dispatch(h, .{ .text = "x" });
+    try t.expectEqual(generation, try app.read(owner, Gutter.generation, .{}));
+    _ = try app.step(0.1);
+    try app.dispatch(h, .{ .text = "y" });
+    _ = try app.step(0.3);
+    try t.expectEqual(generation, try app.read(owner, Gutter.generation, .{}));
+    _ = try app.step(0.36);
+    try t.expect(try app.read(owner, Gutter.generation, .{}) > generation);
+    try settleAt(&app, 0.36);
+}

@@ -6,6 +6,7 @@ pub const code_line = @import("code_line.zig");
 const commands = @import("commands.zig");
 pub const display = @import("display.zig");
 const editor = @import("editor.zig");
+pub const indent_guides = @import("indent_guides.zig");
 const profile = @import("profile.zig");
 const selections = @import("selections.zig");
 const source_editors = @import("source_editors.zig");

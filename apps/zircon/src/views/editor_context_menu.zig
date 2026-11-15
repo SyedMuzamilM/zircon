@@ -151,7 +151,12 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
                 cx.notify();
             }
         },
-        .scroll, .resize, .text, .edit => {
+        .scroll => {
+            e.preventDefault();
+            e.stopPropagation();
+            return true;
+        },
+        .resize, .text, .edit => {
             self.editor_context_menu = null;
             cx.notify();
         },

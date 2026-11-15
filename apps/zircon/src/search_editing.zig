@@ -224,6 +224,7 @@ fn handle(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), targ
     }
     current.editor.scroll.offset = @as(f32, @floatFromInt(target.first_row)) * current.editor.line_height;
     if (try context_menu.pointer(self, cx, &current.editor, &record.doc, source.document, target.pane, event)) return;
+    if (try language.definitionPointer(self, cx, &current.editor, &record.doc, event)) return;
     try symbol_hover.pointer(self, cx, &current.editor, &record.doc, source.document, event);
     var outcome = current.editor.handle(&record.doc, event) catch |err| switch (err) {
         error.CrossExcerptEdit => editing.Outcome{ .handled = true },
@@ -237,13 +238,8 @@ fn handle(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), targ
         };
         try actions.applyOutcome(self, cx, source.document, 3 + target.pane, &outcome, .typing);
         if (edited) {
-            try git.start(self, cx, .refresh);
-            const typed = switch (event.data) {
-                .text => |bytes| bytes,
-                .edit => |edit| if (edit.composing) "" else edit.text,
-                else => "",
-            };
-            if (std.mem.eql(u8, typed, ".")) language.request(self, cx) catch |err| switch (err) {
+            try git.edited(self, cx);
+            if (language.completionTrigger(event.data)) language.request(self, cx) catch |err| switch (err) {
                 error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
                 else => try self.reportError(err),
             };
@@ -342,7 +338,7 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !b
             }
             try self.workspace.save(source.id, null);
         }
-        if (self.git.repository) try git.start(self, cx, .refresh);
+        if (self.git.repository) try git.edited(self, cx);
         cx.notify();
         return true;
     }

@@ -561,7 +561,8 @@ fn modifiers(event: Id) platform.Modifiers {
 }
 fn pointer(s: *State, event: Id) platform.Pointer {
     const button = objc.send(isize, event, "buttonNumber", .{});
-    return .{ .position = eventPoint(s, event), .button = if (button == 1) .secondary else if (button == 2) .middle else .primary, .modifiers = modifiers(event), .clicks = @intCast(@min(255, @max(1, objc.send(isize, event, "clickCount", .{})))) };
+    const kind = objc.send(usize, event, "type", .{});
+    return .{ .position = eventPoint(s, event), .button = if (kind == 3 or kind == 4 or kind == 7 or button == 1) .secondary else if (button == 2) .middle else .primary, .modifiers = modifiers(event), .clicks = @intCast(@min(255, @max(1, objc.send(isize, event, "clickCount", .{})))) };
 }
 fn pointerDown(object: Id, _: Sel, event: Id) callconv(.c) void {
     const s = nativeState(object) orelse return;

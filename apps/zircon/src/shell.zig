@@ -384,7 +384,7 @@ pub const Shell = struct {
             view.editor.soft_wrap = values.soft_wrap;
             view.editor.show_fold_controls = false;
             view.editor.show_git_gutters = false;
-            view.editor.show_indent_guides = false;
+            view.editor.show_indent_guides = values.indent_guides;
         }
         for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| {
             const record = self.workspace.getConst(view.document) catch continue;
@@ -588,6 +588,8 @@ pub const Shell = struct {
         };
     }
     pub fn onTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: u32) !void {
+        self.language.clearCompletion();
+        self.symbol_hover.deinit();
         const index = target & 0x7fffffff;
         if (target & 0x80000000 != 0) {
             if (index < self.tabs.items.len) try panes.selectSecondary(self, index);
@@ -739,7 +741,12 @@ pub const Shell = struct {
         try services_git.pollBlame(self, cx);
         if (!self.git.busy) {
             const current: ?workspace.DocumentId = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else null;
-            if (!std.meta.eql(current, self.git.active_document) or try cx.app.currentTime() >= self.git.next_refresh) try services_git.start(self, cx, .refresh);
+            const now = try cx.app.currentTime();
+            if (!std.meta.eql(current, self.git.active_document) or now >= (self.git.edit_refresh_at orelse self.git.next_refresh)) {
+                self.git.edit_refresh_at = null;
+                self.git.needs_refresh = false;
+                try services_git.start(self, cx, .refresh);
+            }
         }
     }
     pub fn onPreview(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {

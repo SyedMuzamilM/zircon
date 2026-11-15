@@ -90,6 +90,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         .horizontal = if (self.editor_options.soft_wrap == .none) self.git.editing.horizontal else 0,
         .width = width,
         .line_numbers = self.editor_options.line_numbers,
+        .indent_guides = self.editor_options.indent_guides,
         .theme = self.editor_options.theme,
         .colors = c,
         .review = if (self.git.review) |*review| review else null,

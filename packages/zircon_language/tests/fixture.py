@@ -96,6 +96,8 @@ while True:
         document = params["textDocument"]
         opened[document["uri"]] = document
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"], "version": document["version"], "diagnostics": [{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}}, "severity": 2, "message": "emoji warning", "source": "fixture"}]}})
+        if mode == "project-diagnostics" and document["uri"].endswith("/one.zig"):
+            send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"].rsplit("/", 1)[0] + "/two.zig", "diagnostics": [{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}}, "severity": 1, "message": "project issue", "source": "fixture"}]}})
     elif method == "textDocument/didChange":
         document = params["textDocument"]
         old = opened[document["uri"]]
@@ -118,7 +120,11 @@ while True:
     elif method == "textDocument/hover":
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"contents": {"kind": "markdown", "value": "```zig\nfn answer() u32\n```\nReturns the answer."}}})
     elif method == "textDocument/definition":
-        send({"jsonrpc": "2.0", "id": message["id"], "result": [{"uri": params["textDocument"]["uri"], "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}}]})
+        target_uri = params["textDocument"]["uri"]
+        if mode == "host-navigation":
+            assert params["position"]["character"] == 22
+            target_uri = target_uri.rsplit("/", 1)[0] + "/two.zig"
+        send({"jsonrpc": "2.0", "id": message["id"], "result": [{"uri": target_uri, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}}]})
     elif method == "textDocument/references":
         send({"jsonrpc": "2.0", "id": message["id"], "result": [{"uri": params["textDocument"]["uri"], "range": {"start": {"line": 0, "character": 2}, "end": {"line": 0, "character": 3}}}]})
     elif method == "textDocument/rename":
@@ -144,9 +150,12 @@ while True:
     elif method == "textDocument/completion":
         assert params["position"]["character"] == 3
         completions.append(message)
-        if len(completions) == 2 or mode == "host":
+        if len(completions) == 2 or mode in ("host", "host-filter"):
             for request in reversed(completions):
-                send({"jsonrpc": "2.0", "id": request["id"], "result": {"isIncomplete": False, "items": [{"label": "answer🙂", "insertText": "answer", "detail": "fixture completion", "textEdit": {"range": {"start": {"line": 0, "character": 3}, "end": {"line": 0, "character": 3}}, "newText": "answer"}}]}})
+                if mode == "host-filter":
+                    send({"jsonrpc": "2.0", "id": request["id"], "result": {"items": [{"label": "unrelated", "filterText": "unrelated", "sortText": "0"}, {"label": "zzzAnswer", "filterText": "answer", "sortText": "2"}, {"label": "aaaAnswer", "filterText": "answer", "sortText": "1"}]}})
+                else:
+                    send({"jsonrpc": "2.0", "id": request["id"], "result": {"isIncomplete": False, "items": [{"label": "answer🙂", "insertText": "answer", "detail": "fixture completion", "textEdit": {"range": {"start": {"line": 0, "character": 3}, "end": {"line": 0, "character": 3}}, "newText": "answer"}}]}})
             completions.clear()
     elif method == "textDocument/didClose":
         opened.pop(params["textDocument"]["uri"], None)

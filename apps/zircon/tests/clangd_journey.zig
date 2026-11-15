@@ -99,3 +99,66 @@ test "real clangd completion replaces a prefix in the original editor document" 
     defer t.allocator.free(actual);
     try t.expectEqualStrings("int main(void) { int variable = 1; variable", actual);
 }
+
+test "real ZLS narrows imported functions while typing and applies the completion edit" {
+    const executable = t.environ.getAlloc(t.allocator, "ZIRCON_TEST_ZLS") catch return error.SkipZigTest;
+    defer t.allocator.free(executable);
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const source = "const lib = @import(\"lib.zig\");\npub fn main() void { lib.an";
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = source });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "lib.zig", .data = "pub fn answer() u32 { return 42; }\npub fn another() void {}\n" });
+    try tmp.dir.createDirPath(t.io, "extensions/org.zircon.zls");
+    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{ .schema_version = 1, .id = "org.zircon.zls", .name = "ZLS acceptance", .version = "1.0.0", .contributes = .{ .language_servers = .{.{ .id = "zls", .languages = .{"zig"}, .command = executable }} } }, .{});
+    defer t.allocator.free(manifest);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.zls/extension.json", .data = manifest });
+    const home = try std.fs.path.join(t.allocator, &.{ root, "extensions" });
+    defer t.allocator.free(home);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .title = "Zircon ZLS acceptance", .visible = false, .width = 1100, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, Ops.configure, .{home});
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(10));
+    while (!try app.read(owner, Ops.opened, .{})) {
+        _ = try app.step(0);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.ZlsServerTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
+    try app.update(owner, Ops.cursor, .{});
+    _ = try app.step(0);
+    const native = ui.testing.native;
+    const objc = native.objc;
+    const nsapp = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const windows = objc.send(objc.Id, nsapp, "windows", .{});
+    const window = for (0..objc.send(usize, windows, "count", .{})) |index| {
+        const candidate = objc.send(objc.Id, windows, "objectAtIndex:", .{index});
+        if (std.mem.eql(u8, "Zircon ZLS acceptance", objc.fromString(objc.send(objc.Id, candidate, "title", .{})))) break candidate;
+    } else return error.ZlsWindowMissing;
+    const native_event = objc.send(objc.Id, objc.class("NSEvent"), "keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:", .{ @as(usize, 10), objc.CGPoint{}, @as(usize, 0), native.now(), objc.send(isize, window, "windowNumber", .{}), @as(objc.Id, null), objc.string("s"), objc.string("s"), false, @as(u16, 1) });
+    objc.send(void, window, "sendEvent:", .{native_event});
+    try native.pump(0);
+    while (!try app.read(owner, Ops.completion, .{})) {
+        _ = try app.step(0);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.ZlsCompletionTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
+    const Zls = struct {
+        fn accept(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            const items = self.language.completions.?.data.completion.items;
+            try t.expectEqual(@as(usize, 1), items.len);
+            try t.expectEqualStrings("answer", items[0].label);
+            var event: ui.Event(ui.Click) = .{ .data = .{} };
+            try self.onCompletion(&event, cx, 0);
+            try t.expect(!self.status_is_error);
+        }
+    };
+    try app.update(owner, Zls.accept, .{});
+    var actual: []u8 = undefined;
+    try app.read(owner, Ops.source, .{ t.allocator, &actual });
+    defer t.allocator.free(actual);
+    try t.expectEqualStrings("const lib = @import(\"lib.zig\");\npub fn main() void { lib.answer", actual);
+}

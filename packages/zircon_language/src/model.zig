@@ -10,7 +10,7 @@ pub const Location = struct { uri: []const u8, range: Range };
 pub const LocationsKind = enum { definition, references };
 pub const FileEdits = struct { uri: []const u8, edits: []const TextEdit, version: ?u64 = null };
 pub const CodeAction = struct { title: []const u8, files: []const FileEdits, disabled_reason: ?[]const u8 = null };
-pub const Completion = struct { label: []const u8, insert_text: []const u8, detail: ?[]const u8 = null, text_edit: ?TextEdit = null, additional_edits: []const TextEdit = &.{}, snippet: bool = false };
+pub const Completion = struct { label: []const u8, insert_text: []const u8, detail: ?[]const u8 = null, text_edit: ?TextEdit = null, additional_edits: []const TextEdit = &.{}, snippet: bool = false, filter_text: ?[]const u8 = null, sort_text: ?[]const u8 = null };
 pub const Message = struct {
     arena: std.heap.ArenaAllocator,
     data: union(enum) {

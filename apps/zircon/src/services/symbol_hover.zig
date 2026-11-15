@@ -5,6 +5,7 @@ const lsp = @import("zircon_language");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
+const actions = @import("../actions.zig");
 const shell = @import("../shell.zig");
 const v = @import("../views/components.zig");
 const markdown = @import("../views/markdown.zig");
@@ -18,9 +19,11 @@ pub const Model = struct {
     target: ?Target = null,
     due: f64 = 0,
     requested: bool = false,
+    pinned: bool = false,
     pending: ?Pending = null,
     preview: ?markdown.Preview = null,
     height: f32 = 120,
+    width: f32 = 480,
 
     pub fn deinit(self: *Model) void {
         if (self.preview) |*preview| preview.deinit();
@@ -42,6 +45,7 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, doc
         if (e.data == .text or e.data == .edit or e.data == .key_down or e.data == .pointer_down or e.data == .scroll or e.data == .pointer_leave) clear(self, cx);
         return;
     }
+    if (self.symbol_hover.pinned) return;
     const point = e.data.pointer_move.position;
     if (overPopup(self, cx, point)) return;
     if (state.dragging or self.overlay != .none or self.menu_open or self.editor_context_menu != null) return clear(self, cx);
@@ -60,10 +64,9 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, doc
 
 pub fn show(self: *Shell, cx: *ui.Context(Shell)) !void {
     try language.poll(self, cx);
-    const pane = if (self.active_pane == .secondary) self.secondary else null;
-    if (pane == null and self.tabs.items.len == 0) return;
-    const id = if (pane) |value| value.document else self.tabs.items[self.active].document;
-    const state = if (pane) |value| value.editor else self.tabs.items[self.active].editor;
+    const current = actions.active(self) catch return;
+    const id = current.id;
+    const state = current.editor;
     const record = try self.workspace.getConst(id);
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
@@ -71,6 +74,7 @@ pub fn show(self: *Shell, cx: *ui.Context(Shell)) !void {
     const window = try cx.app.window(self.window orelse return);
     const anchor = if (window.frames.committed.text_input) |text_input| text_input.caret else ui.Rect{ .x = 120, .y = 100, .width = 1, .height = state.line_height };
     self.symbol_hover.target = .{ .document = id, .revision = snapshot.revision(), .offset = state.primary().head, .range = .{ .start = state.primary().head, .end = state.primary().head }, .anchor = anchor, .editor_bounds = .{ .width = window.dimensions.width, .height = window.dimensions.height } };
+    self.symbol_hover.pinned = true;
     self.symbol_hover.due = try cx.app.currentTime();
     try poll(self, cx);
 }
@@ -113,18 +117,20 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), session: usize, message: @Fi
     var preview = try markdown.Preview.init(self.allocator, self.workspace.io, null, snapshot);
     preview.colors = self.previewColors();
     preview.colors.background = self.colors.panel;
+    preview.colors.code = self.colors.panel;
     preview.compact = true;
     if (self.symbol_hover.preview) |*old| old.deinit();
     self.symbol_hover.preview = preview;
     const window = try cx.app.window(self.window orelse return);
-    const width = @min(480, @max(80, window.dimensions.width - 16));
-    self.symbol_hover.height = std.math.clamp(try preview.contentHeight(window.surface.?.measurer(), width - 16) + 16, 56, 320);
+    const width = try preview.contentWidth(window.surface.?.measurer(), @min(520, @max(80, window.dimensions.width - 16)));
+    self.symbol_hover.width = width;
+    self.symbol_hover.height = std.math.clamp(try preview.contentHeight(window.surface.?.measurer(), width - 8) + 8, 40, 320);
     cx.notify();
 }
 
 fn bounds(self: *const Shell, viewport: ui.Size) ui.Rect {
     const target = self.symbol_hover.target.?;
-    const width = @min(480, @max(80, viewport.width - 16));
+    const width = @min(self.symbol_hover.width, @max(80, viewport.width - 16));
     const height = @min(self.symbol_hover.height, @max(40, viewport.height - 16));
     const y = target.anchor.y + target.anchor.height + 6;
     return .{ .x = std.math.clamp(target.anchor.x - 12, 8, @max(8, viewport.width - width - 8)), .y = std.math.clamp(if (y + height <= viewport.height - 8) y else target.anchor.y - height - 6, 8, @max(8, viewport.height - height - 8)), .width = width, .height = height };
@@ -145,7 +151,7 @@ pub fn dismissOutside(self: *Shell, cx: *ui.Context(Shell), event: ui.Input) voi
     if (event == .scroll and !overPopup(self, cx, event.scroll.position)) return clear(self, cx);
     if (event == .focus and !event.focus) return clear(self, cx);
     if (event == .pointer_leave) return clear(self, cx);
-    if (event == .pointer_move) if (self.symbol_hover.target) |target| {
+    if (event == .pointer_move and !self.symbol_hover.pinned) if (self.symbol_hover.target) |target| {
         if (!editing.annotations.contains(target.editor_bounds, event.pointer_move.position) and !overPopup(self, cx, event.pointer_move.position)) clear(self, cx);
     };
 }
@@ -156,7 +162,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
     const preview = self.symbol_hover.preview orelse return null;
     const area = bounds(self, b.viewport());
     const content = try b.fluent().adopt(try preview.render(b)).listeners(.{ .on_input = b.onInput(input) }).build();
-    const card = try v.floatingPanel(b, self.colors, .{ .width = area.width, .height = area.height }, ui.Insets.all(8), 0, &.{content});
+    const card = try v.floatingPanel(b, self.colors, .{ .width = area.width, .height = area.height }, ui.Insets.all(4), 0, &.{content});
     return try b.fluent().adopt(card).margin(.{ .top = area.y, .left = area.x }).id(.{ .string = "symbol-hover" }).build();
 }
 

@@ -736,7 +736,7 @@ fn parse(self: *Client, body: []const u8) !void {
             for (entries.array.items, items) |item, *completion| {
                 const label = try string(field(item, "label") orelse return error.InvalidCompletionResult);
                 const insert_text = if (field(item, "insertText")) |v| try string(v) else label;
-                completion.* = .{ .label = label, .insert_text = insert_text, .detail = if (field(item, "detail")) |v| try string(v) else null, .text_edit = if (field(item, "textEdit")) |v| if (field(v, "range") != null) try edit(v) else null else null, .snippet = if (field(item, "insertTextFormat")) |v| try unsigned(v) == 2 else false };
+                completion.* = .{ .label = label, .insert_text = insert_text, .filter_text = if (field(item, "filterText")) |v| try string(v) else null, .sort_text = if (field(item, "sortText")) |v| try string(v) else null, .detail = if (field(item, "detail")) |v| try string(v) else null, .text_edit = if (field(item, "textEdit")) |v| if (field(v, "range") != null) try edit(v) else null else null, .snippet = if (field(item, "insertTextFormat")) |v| try unsigned(v) == 2 else false };
                 if (field(item, "additionalTextEdits")) |edits| {
                     if (edits != .array or edits.array.items.len > 1024) return error.InvalidCompletionResult;
                     const additional = try a.alloc(model.TextEdit, edits.array.items.len);

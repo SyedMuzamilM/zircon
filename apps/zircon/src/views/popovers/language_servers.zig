@@ -58,20 +58,6 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
             }).build());
         height += 24;
     }
-    for (self.language.documents.items) |doc| if (doc.diagnostics) |message| {
-        for (message.data.diagnostics.items) |diagnostic| {
-            try rows.append(b.allocator(), try b.fluent().div()
-                .h(.{ .px = 20 })
-                .shrink_0()
-                .items_center()
-                .padding(.{ .left = 8, .right = 8 })
-                .overflow_hidden()
-                .flex()
-                .children(.{v.text(b, diagnostic.message, c.warning, 11)})
-                .build());
-            height += 20;
-        }
-    };
     const rule = try v.rule(b, c);
     try rows.append(b.allocator(), try b.fluent().div()
         .margin(.{ .top = 4, .bottom = 4 })
