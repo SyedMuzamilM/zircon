@@ -19,6 +19,7 @@ const graphics_images = @import("graphics/images.zig");
 const painter = @import("graphics/painter.zig");
 const scene = @import("graphics/scene.zig");
 const tree_paint = @import("graphics/tree_paint.zig");
+const layout_cache = @import("layout/cache.zig");
 const flex = @import("layout/flex.zig");
 const geometry = @import("layout/geometry.zig");
 const measure = @import("layout/measure.zig");
@@ -97,6 +98,8 @@ pub const layout = struct {
     pub const Constraints = flex.Constraints;
     pub const LayoutResult = flex.Layout;
     pub const calculate = flex.calculate;
+    pub const calculateWithCache = flex.calculateWithCache;
+    pub const Cache = layout_cache.LayoutCache;
     pub const Measurer = measure.Measurer;
     pub const FixedMetrics = measure.FixedMetrics;
 };
@@ -109,4 +112,5 @@ pub const graphics = struct {
     pub const Transform = painter.Transform;
     pub const Scene = scene.Frame;
     pub const paintTree = tree_paint.paint;
+    pub const paintTreeWithCache = tree_paint.paintWithCache;
 };

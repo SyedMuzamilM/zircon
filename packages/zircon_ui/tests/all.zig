@@ -1,4 +1,5 @@
 const animation_tests = @import("animation_tests.zig");
+const cache_tests = @import("cache_tests.zig");
 const composition_tests = @import("composition_tests.zig");
 const control_tests = @import("control_tests.zig");
 const entity_tests = @import("entity_tests.zig");
@@ -14,6 +15,7 @@ const task_tests = @import("task_tests.zig");
 const text_input_tests = @import("text_input_tests.zig");
 const window_tests = @import("window_tests.zig");
 test {
+    _ = cache_tests;
     _ = fluent_tests;
     _ = composition_tests;
     _ = external_tests;

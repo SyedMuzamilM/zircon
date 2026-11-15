@@ -12,6 +12,8 @@ The November 11 [Git canvas follow-up](progress/2026-11-11-git-canvas.md) adds m
 
 The November 11 [scrolling follow-up](progress/2026-11-11-scrolling.md) removes repeated search excerpt and Git geometry scans and records native before/after measurements. Search shows the clearest gain; normal editor submission remains near the presentation cadence in this workload.
 
+The [November 15 cache follow-up](progress/2026-11-15-subtree-cache.md) adds bounded keyed subtree measurement/arrangement reuse and fixes ownership and invalidation in scene replay. Project sidebar rows use this path. Tree construction and stateful custom layout still run normally.
+
 ## Framework coverage
 
 | Area | Implemented and exercised | Remaining scope |

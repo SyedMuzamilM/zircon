@@ -202,6 +202,16 @@ These are signatures, not a complete custom element. Phase state belongs to the 
 
 Decoded assets are limited to 64 MiB and 16,384 pixels per dimension. Cache and retired-frame budgets do not impose a whole-process memory cap. Examples: [painter tests](../packages/zircon_ui/tests/painter_tests.zig), [image tests](../packages/zircon_ui/tests/image_tests.zig), and the [editor canvas](../packages/zircon_editor/src/canvas.zig).
 
+## Cached subtrees
+
+Use `.id(key).cache()` on a fluent element, or `b.cache(element)` after assigning a logical key. Unchanged subtrees reuse intrinsic measurements and arranged bounds, and replay their scene commands. Changed siblings still pass through parent flex arrangement. Frame-local node indices may change; cached records restore by subtree order. Rendering still builds the element tree.
+
+Cache identity includes the ancestor path. Invalidation covers semantic style fields, content, child structure, available constraints, viewport/rem units, and font generation. Scene invalidation also covers descendant bounds, hover/focus, inherited opacity, and clipping. Replayed text is copied into the new frame so cache eviction cannot invalidate a committed scene. Each cache retains at most 4,096 entries and 8 MiB of payload, excluding map overhead.
+
+Custom elements are uncached by default. Optional `cacheFingerprint(*const T) u64` opts pure, deterministic drawing into replay. It must change whenever visual content changes; return zero to disable reuse. Cached custom prepaint/paint must not publish text input, schedule deadlines, or depend on time or external mutable state. Layout reuse additionally requires `LayoutState == void`. Other custom elements run layout every frame to initialize their phase state. Image commands and transformed/animated commands are excluded from scene-cache entries.
+
+`window.layout_cache.measurement_hits`, `arrangement_hits`, and `window.scene_cache.hits` expose work counts. These show that work was skipped; they do not establish a speedup against GPUI.
+
 ## Animation and background work
 
 `b.animate(key, target, transition)` samples a scalar channel. `animateColor` and `animateRect` sample four scalar channels each. `presence` returns `visible` and `opacity` for entry/exit composition. Transitions are `.instant`, `.tween`, or `.spring`, defined in [`animation/timeline.zig`](../packages/zircon_ui/src/animation/timeline.zig). Color and rectangle helpers expand their key to `key * 4` through `key * 4 + 3`; overlapping scalar keys share tracks within the same entity.

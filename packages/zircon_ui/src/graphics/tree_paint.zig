@@ -6,6 +6,7 @@ const flex = @import("../layout/flex.zig");
 const g = @import("../layout/geometry.zig");
 const measure = @import("../layout/measure.zig");
 const text_style = @import("../text/style.zig");
+const cache_key_module = @import("../ui/cache_key.zig");
 const ui_custom = @import("../ui/custom.zig");
 const tree = @import("../ui/tree.zig");
 const cache_module = @import("cache.zig");
@@ -17,10 +18,13 @@ pub fn paint(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, 
 pub fn paintWithCache(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer, cache: ?*cache_module.SceneCache) !void {
     const root = frame.root orelse return error.NoFrameRoot;
     if (layout.frame_epoch != frame.epoch) return error.InvalidFrame;
-    try node(frame, layout, painter, root.index, 1, 0, measurer, cache);
+    const fingerprints = try painter.allocator.alloc(u64, frame.nodes.items.len);
+    @memset(fingerprints, 0);
+    if (cache != null) _ = fingerprintNode(frame, layout, root.index, measurer.generation, fingerprints, 0);
+    try node(frame, layout, painter, root.index, 1, 0, measurer, cache, fingerprints);
     try tooltip(frame, layout, painter, measurer);
 }
-fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer, cache: ?*cache_module.SceneCache) anyerror!void {
+fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer, cache: ?*cache_module.SceneCache, fingerprints: []const u64) anyerror!void {
     if (depth > 128) return error.PaintDepthExceeded;
     const value = frame.nodes.items[index];
     const bounds = layout.bounds[index];
@@ -32,13 +36,20 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
         break;
     };
     const background_value = if (within_hover) value.style.hover_background orelse value.style.background else value.style.background;
-    const cache_key = if (value.cache) if (value.key) |key| cache_module.keyHash(key) else null else null;
-    const fingerprint = if (cache_key != null) fingerprintNode(frame, index, within_hover, inherited_opacity) else 0;
+    const cache_key = if (value.cache) if (value.key != null) cache_key_module.scoped(frame, index) else null else null;
+    const fingerprint = cache_key_module.hash(fingerprints[index], inherited_opacity);
+    const cacheable = fingerprints[index] != 0;
     const cache_clip = painter.clip();
-    if (cache_key) |key| if (cache) |store| if (fingerprint != 0) if (store.lookup(key, fingerprint, bounds, cache_clip)) |items| {
-        try painter.items.appendSlice(painter.allocator, items);
+    if (cache_key) |key| if (cache) |store| if (cacheable) if (store.lookup(key, fingerprint, bounds, cache_clip)) |items| {
+        store.hits += 1;
+        for (items) |item| {
+            var copied = item;
+            if (item.kind == .text) copied.text = try painter.allocator.dupe(u8, item.text);
+            try painter.items.append(painter.allocator, copied);
+        }
         return;
     };
+    if (cache_key != null and cache != null and cacheable) cache.?.misses += 1;
     const start = painter.items.items.len;
     if (background_value) |background| {
         var color = background;
@@ -76,30 +87,45 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             if (value.kind == .text or value.children.len == 0) try painter.drawText(.{ .bounds = content, .text = text, .style = style });
         },
     }
-    for (value.children) |child| try node(frame, layout, painter, child, opacity, depth + 1, measurer, cache);
-    if (cache_key) |key| if (cache) |store| if (fingerprint != 0) {
+    for (value.children) |child| try node(frame, layout, painter, child, opacity, depth + 1, measurer, cache, fingerprints);
+    if (cache_key) |key| if (cache) |store| if (cacheable) {
         store.put(key, fingerprint, bounds, cache_clip, painter.items.items[start..]) catch |err| if (err != error.UncacheableScene) return err;
     };
 }
 
-fn fingerprintNode(frame: *const tree.Frame, index: u32, hovered: bool, inherited_opacity: f32) u64 {
+fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: u32, generation: u64, fingerprints: []u64, depth: usize) u64 {
+    if (depth > 128) return 0;
     const value = frame.nodes.items[index];
-    if (value.kind == .custom) return value.kind.custom.fingerprint(value.kind.custom.object);
-    var hash: u64 = std.hash.Wyhash.hash(0, std.mem.asBytes(&value.style));
-    hash = std.hash.Wyhash.hash(hash, &.{@intFromBool(hovered)});
-    hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&inherited_opacity));
+    var within_hover = false;
+    var hovered = frame.hovered_node;
+    while (hovered) |current| : (hovered = frame.nodes.items[current].parent) if (current == index) {
+        within_hover = true;
+        break;
+    };
+    var hash = cache_key_module.hash(generation, value.style);
+    hash = cache_key_module.hash(hash, layout.bounds[index]);
+    hash = cache_key_module.hash(hash, within_hover);
+    hash = cache_key_module.hash(hash, frame.focused_node == index);
+    hash = cache_key_module.hash(hash, std.meta.activeTag(value.kind));
+    var cacheable = true;
     switch (value.kind) {
         .container => {},
-        .text => |text| hash = std.hash.Wyhash.hash(hash, text),
-        .button => |button| hash = std.hash.Wyhash.hash(hash, button.label),
-        .custom => unreachable,
+        .text => |text| hash = cache_key_module.hash(hash, text),
+        .button => |button| hash = cache_key_module.hash(hash, button.label),
+        .custom => |custom| {
+            const own = custom.fingerprint(custom.object);
+            cacheable = own != 0;
+            hash = cache_key_module.hash(hash, own);
+        },
     }
+    hash = cache_key_module.hash(hash, value.children.len);
     for (value.children) |child| {
-        const child_hash = fingerprintNode(frame, child, hovered, inherited_opacity * value.style.opacity);
-        if (child_hash == 0) return 0;
-        hash = std.hash.Wyhash.hash(hash, std.mem.asBytes(&child_hash));
+        const child_hash = fingerprintNode(frame, layout, child, generation, fingerprints, depth + 1);
+        if (child_hash == 0) cacheable = false;
+        hash = cache_key_module.hash(hash, child_hash);
     }
-    return hash;
+    fingerprints[index] = if (cacheable) hash else 0;
+    return fingerprints[index];
 }
 
 fn tooltip(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer) !void {

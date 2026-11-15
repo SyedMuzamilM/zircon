@@ -2,6 +2,7 @@
 //! Supports padding, margins, gap, grow/shrink with min/max freezing and alignment.
 //! Text measurement is injected. CSS wrapping/grid/baseline alignment are not claimed.
 const std = @import("std");
+const cache_key = @import("../ui/cache_key.zig");
 const ui_custom = @import("../ui/custom.zig");
 const elements = @import("../ui/element.zig");
 const styles = @import("../ui/style.zig");
@@ -38,7 +39,10 @@ pub fn calculateWithCache(a: std.mem.Allocator, frame: *const tree.Frame, root: 
     defer arena.deinit();
     const intrinsic = try arena.allocator().alloc(geometry.Size, frame.nodes.items.len);
     @memset(intrinsic, .{ .width = 0, .height = 0 });
-    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a, .cache = cache };
+    const fingerprints = try arena.allocator().alloc(u64, frame.nodes.items.len);
+    @memset(fingerprints, 0);
+    if (cache != null) _ = fingerprintNode(frame, root.index, cache_key.hash(0, .{ constraints, measurer.generation }), fingerprints, 0);
+    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a, .cache = cache, .fingerprints = fingerprints };
     try engine.measureNode(root.index, constraints.viewport, 0);
     const style = frame.nodes.items[root.index].style;
     const size = try engine.resolveSize(style, constraints.viewport, .{ .width = @max(0, constraints.viewport.width - style.margin.horizontal()), .height = @max(0, constraints.viewport.height - style.margin.vertical()) });
@@ -54,6 +58,7 @@ const Engine = struct {
     scratch: std.mem.Allocator,
     frame_allocator: std.mem.Allocator,
     cache: ?*layout_cache.LayoutCache,
+    fingerprints: []const u64,
     fn length(e: *Engine, value: styles.Length, parent: f32) ?f32 {
         return switch (value) {
             .auto => null,
@@ -83,10 +88,11 @@ const Engine = struct {
         const style = node.style;
         const declared = try e.resolveSize(style, available, available);
         const content: geometry.Size = .{ .width = @max(0, declared.width - style.padding.horizontal()), .height = @max(0, declared.height - style.padding.vertical()) };
-        const cache_key = if (node.cache) if (node.key) |key| layout_cache.keyHash(key) else null else null;
-        const cache_fingerprint = if (cache_key != null) fingerprintNode(e.frame, index) else 0;
-        if (cache_key) |key| if (e.cache) |store| if (cache_fingerprint != 0 and node.children.len == 0) if (store.lookup(key, cache_fingerprint, available)) |cached| {
-            e.intrinsic[index] = cached;
+        const key = if (node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
+        const fingerprint = e.fingerprints[index];
+        if (key) |id| if (e.cache) |store| if (fingerprint != 0) if (store.lookup(id, fingerprint, available)) |cached| {
+            var cursor: usize = 0;
+            e.restoreSizes(index, cached, &cursor);
             return;
         };
         var natural: geometry.Size = .{ .width = 0, .height = 0 };
@@ -132,9 +138,46 @@ const Engine = struct {
         natural.width += style.padding.horizontal();
         natural.height += style.padding.vertical();
         e.intrinsic[index] = try e.resolveSize(style, available, natural);
-        if (cache_key) |key| if (e.cache) |store| if (cache_fingerprint != 0 and node.children.len == 0) try store.put(key, cache_fingerprint, available, e.intrinsic[index]);
+        if (key) |id| if (e.cache) |store| if (fingerprint != 0) {
+            var sizes: std.ArrayList(geometry.Size) = .empty;
+            try e.collectSizes(index, &sizes);
+            try store.put(id, fingerprint, available, sizes.items);
+        };
     }
     fn arrange(e: *Engine, index: u32, rect: geometry.Rect, depth: usize) anyerror!void {
+        const node = e.frame.nodes.items[index];
+        const key = if (node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
+        if (key) |id| if (e.cache) |store| if (e.fingerprints[index] != 0) if (store.arranged(id, e.fingerprints[index], rect)) |cached| {
+            var cursor: usize = 0;
+            e.restoreBounds(index, cached, &cursor);
+            return;
+        };
+        try e.arrangeFresh(index, rect, depth);
+        if (key) |id| if (e.cache) |store| if (e.fingerprints[index] != 0) {
+            var bounds: std.ArrayList(geometry.Rect) = .empty;
+            try e.collectBounds(index, &bounds);
+            try store.putArrangement(id, e.fingerprints[index], rect, bounds.items);
+        };
+    }
+    fn restoreSizes(e: *Engine, index: u32, sizes: []const geometry.Size, cursor: *usize) void {
+        e.intrinsic[index] = sizes[cursor.*];
+        cursor.* += 1;
+        for (e.frame.nodes.items[index].children) |child| e.restoreSizes(child, sizes, cursor);
+    }
+    fn restoreBounds(e: *Engine, index: u32, bounds: []const geometry.Rect, cursor: *usize) void {
+        e.bounds[index] = bounds[cursor.*];
+        cursor.* += 1;
+        for (e.frame.nodes.items[index].children) |child| e.restoreBounds(child, bounds, cursor);
+    }
+    fn collectSizes(e: *Engine, index: u32, sizes: *std.ArrayList(geometry.Size)) anyerror!void {
+        try sizes.append(e.scratch, e.intrinsic[index]);
+        for (e.frame.nodes.items[index].children) |child| try e.collectSizes(child, sizes);
+    }
+    fn collectBounds(e: *Engine, index: u32, bounds: *std.ArrayList(geometry.Rect)) anyerror!void {
+        try bounds.append(e.scratch, e.bounds[index]);
+        for (e.frame.nodes.items[index].children) |child| try e.collectBounds(child, bounds);
+    }
+    fn arrangeFresh(e: *Engine, index: u32, rect: geometry.Rect, depth: usize) anyerror!void {
         if (depth > 128) return error.LayoutDepthExceeded;
         e.bounds[index] = rect;
         const node = e.frame.nodes.items[index];
@@ -234,19 +277,30 @@ const Engine = struct {
         }
     }
 };
-fn fingerprintNode(frame: *const tree.Frame, index: u32) u64 {
+fn fingerprintNode(frame: *const tree.Frame, index: u32, environment: u64, fingerprints: []u64, depth: usize) u64 {
+    if (depth > 128) return 0;
     const node = frame.nodes.items[index];
-    var hash: u64 = std.hash.Wyhash.hash(0, std.mem.asBytes(&node.style));
+    var hash = cache_key.hash(environment, node.style);
+    hash = cache_key.hash(hash, std.meta.activeTag(node.kind));
+    var cacheable = true;
     switch (node.kind) {
         .custom => |custom| {
             const own = custom.fingerprint(custom.object);
-            return std.hash.Wyhash.hash(hash, std.mem.asBytes(&own));
+            cacheable = own != 0 and custom.layout_cacheable;
+            hash = cache_key.hash(hash, own);
         },
-        .text => |text| hash = std.hash.Wyhash.hash(hash, text),
-        .button => |button| hash = std.hash.Wyhash.hash(hash, button.label),
+        .text => |text| hash = cache_key.hash(hash, text),
+        .button => |button| hash = cache_key.hash(hash, button.label),
         .container => {},
     }
-    return hash;
+    hash = cache_key.hash(hash, node.children.len);
+    for (node.children) |child| {
+        const child_hash = fingerprintNode(frame, child, environment, fingerprints, depth + 1);
+        cacheable = cacheable and child_hash != 0;
+        hash = cache_key.hash(hash, child_hash);
+    }
+    fingerprints[index] = if (cacheable) hash else 0;
+    return fingerprints[index];
 }
 fn valid(n: f32) bool {
     return std.math.isFinite(n) and n >= 0;

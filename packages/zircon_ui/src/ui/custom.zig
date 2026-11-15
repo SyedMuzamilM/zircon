@@ -35,6 +35,7 @@ pub fn LayoutResult(comptime State: type) type {
 pub const Custom = struct {
     object: *anyopaque,
     fingerprint: *const fn (*anyopaque) u64,
+    layout_cacheable: bool,
     measure: *const fn (*anyopaque, *LayoutCx) anyerror!g.Size,
     paint: *const fn (*anyopaque, *PaintCx, g.Rect) anyerror!void,
     destroy: *const fn (*anyopaque) void,
@@ -45,7 +46,7 @@ pub fn create(comptime T: type, a: std.mem.Allocator, value: T) !Custom {
     }
     const Adapter = struct {
         value: T,
-        layout: ?T.LayoutState = null,
+        layout: ?T.LayoutState = if (T.LayoutState == void) {} else null,
         prepaint: ?T.PrepaintState = null,
         fn measure(raw: *anyopaque, cx: *LayoutCx) !g.Size {
             const self: *@This() = @ptrCast(@alignCast(raw));
@@ -65,11 +66,15 @@ pub fn create(comptime T: type, a: std.mem.Allocator, value: T) !Custom {
         }
         fn fingerprint(raw: *anyopaque) u64 {
             const self: *@This() = @ptrCast(@alignCast(raw));
-            if (@hasDecl(T, "cacheFingerprint")) return self.value.cacheFingerprint();
+            if (@hasDecl(T, "cacheFingerprint")) {
+                const own = self.value.cacheFingerprint();
+                if (own == 0) return 0;
+                return std.hash.Wyhash.hash(own, @typeName(T));
+            }
             return 0;
         }
     };
     const object = try a.create(Adapter);
     object.* = .{ .value = value };
-    return .{ .object = object, .fingerprint = Adapter.fingerprint, .measure = Adapter.measure, .paint = Adapter.paint, .destroy = Adapter.destroy };
+    return .{ .object = object, .fingerprint = Adapter.fingerprint, .layout_cacheable = T.LayoutState == void, .measure = Adapter.measure, .paint = Adapter.paint, .destroy = Adapter.destroy };
 }

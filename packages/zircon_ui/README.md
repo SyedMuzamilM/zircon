@@ -34,6 +34,8 @@ A successful frame commits tree, layout, scene, handlers, dependencies, animatio
 
 `App.step(seconds)` and `App.dispatch(window, input)` drive the same runtime in deterministic tests. The older `testing.Harness` remains a smaller entity/tree-only test tool. It does not imply native rendering.
 
+For keyed subtrees, `.id(key).cache()` reuses unchanged measurements, arranged bounds, and scene commands. It preserves handlers in the newly built tree. Scene and layout caches each retain at most 8 MiB of payload and 4,096 entries; custom state and image exclusions are described in [the cache contract](../../docs/zircon-ui.md#cached-subtrees).
+
 ## Custom elements and controls
 
 `Ui.custom(T, value, style)` owns a frame-local value and generated adapter. T supplies `LayoutState`, `PrepaintState`, `requestLayout(*Self,*LayoutCx)!LayoutResult(LayoutState)`, `prepaint(*Self,*PrepaintCx,Rect,*LayoutState)!PrepaintState` and `paint(*Self,*PaintCx,Rect,*LayoutState,*PrepaintState)!void`. Optional `deinit(*Self)void` releases retained resources at frame retirement. Ownership of the custom value transfers only when construction succeeds; the caller retains cleanup responsibility on error. Phase storage belongs to the frame. Painter records ordered clipped rectangles, text and images with inherited opacity. `button` can contain decorative child elements; its label names the action while the children supply its visible layout. Pointer activation resolves the enclosing button across those children, and keyboard activation still uses one focus target.
