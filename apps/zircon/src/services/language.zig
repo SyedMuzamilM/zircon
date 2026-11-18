@@ -341,6 +341,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                         symbol_hover.clear(self, cx);
                         continue;
                     };
+                    if (self.language.pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearCompletion();
                     if (self.language.rename_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearRename();
                     if (self.language.formatting_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearFormatting();
                     if (self.language.code_actions_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearCodeActions();
@@ -364,25 +365,25 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                         changed = true;
                         continue;
                     }
-                    var kept: [128]u8 = undefined;
-                    var kept_len: usize = 0;
-                    if (self.language.completions) |old| {
-                        const old_items = old.data.completion.items;
-                        if (self.language.completion_index < old_items.len) {
-                            const label = old_items[self.language.completion_index].label;
-                            if (label.len <= kept.len) {
-                                @memcpy(kept[0..label.len], label);
-                                kept_len = label.len;
+                    var selected: usize = 0;
+                    if (self.language.completions) |*old| {
+                        const items = old.data.completion.items;
+                        if (self.language.completion_index < items.len) {
+                            const previous = items[self.language.completion_index];
+                            for (message.data.completion.items, 0..) |item, index| {
+                                if (std.mem.eql(u8, item.label, previous.label) and
+                                    std.mem.eql(u8, item.detail orelse "", previous.detail orelse "") and
+                                    std.mem.eql(u8, item.insert_text, previous.insert_text))
+                                {
+                                    selected = index;
+                                    break;
+                                }
                             }
                         }
+                        old.deinit();
                     }
-                    if (self.language.completions) |*old| old.deinit();
                     self.language.completions = message;
-                    self.language.completion_index = 0;
-                    if (kept_len > 0) for (message.data.completion.items, 0..) |item, index| if (std.mem.eql(u8, item.label, kept[0..kept_len])) {
-                        self.language.completion_index = index;
-                        break;
-                    };
+                    self.language.completion_index = selected;
                     symbol_hover.clear(self, cx);
                     moved = true;
                     changed = true;
@@ -478,7 +479,7 @@ pub fn diagnosticAt(self: *const Shell, snapshot: text.Snapshot, id: ws.Document
                 if (offset != start) continue;
             } else if (offset < start or offset >= end) continue;
             const hit: DiagnosticHit = .{ .range = .{ .start = start, .end = end }, .severity = severityOf(item.severity), .message = item.message, .source = item.source orelse "" };
-            if (best == null or hit.range.end - hit.range.start < best.?.range.end - best.?.range.start or (hit.range.end - hit.range.start == best.?.range.end - best.?.range.start and @intFromEnum(hit.severity) > @intFromEnum(best.?.severity))) best = hit;
+            if (best == null or hit.range.end - hit.range.start < best.?.range.end - best.?.range.start or (hit.range.end - hit.range.start == best.?.range.end - best.?.range.start and @backingInt(hit.severity) > @backingInt(best.?.severity))) best = hit;
         }
         return best;
     };
@@ -842,6 +843,9 @@ pub fn acceptReference(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
 pub fn accept(self: *Shell, cx: *ui.Context(Shell), index: usize) !void {
     const pending = self.language.pending orelse return error.NoCompletion;
     const message = self.language.completions orelse return error.NoCompletion;
+    // The previous list stays visible while its replacement is in flight.
+    // Its edit ranges belong to the revision that produced it.
+    if (message.data.completion.id != pending.request or message.data.completion.version != pending.revision) return;
     if (index >= message.data.completion.items.len) return error.NoCompletion;
     const item = message.data.completion.items[index];
     if (item.snippet) return error.SnippetNotSupported;

@@ -308,6 +308,18 @@ fn hoverJourney(comptime check: HoverCheck) !void {
                 try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
             }
             if (check == .completion_filter) try app.read(owner, Ops.filtered, .{});
+            if (check == .completion_typing) {
+                try app.dispatch(h, .{ .text = "w" });
+                try t.expect(try app.read(owner, Ops.completionVisible, .{}));
+                var before: []u8 = undefined;
+                try app.read(owner, Ops.source, .{ t.allocator, &before });
+                defer t.allocator.free(before);
+                try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+                var after: []u8 = undefined;
+                try app.read(owner, Ops.source, .{ t.allocator, &after });
+                defer t.allocator.free(after);
+                try t.expectEqualStrings(before, after);
+            }
         }
         return;
     }
