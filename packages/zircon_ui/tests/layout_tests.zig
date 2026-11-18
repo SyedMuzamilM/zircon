@@ -131,3 +131,47 @@ fn allocationCase(a: std.mem.Allocator) !void {
     var result = try ui.layout.calculate(a, &h.frames.committed, root, .{ .viewport = .{ .width = 100, .height = 100 } }, metrics.measurer());
     defer result.deinit();
 }
+
+test "wrapped rows form independent flex lines and place oversized items" {
+    var h = try ui.testing.Harness.init(t.allocator);
+    defer h.deinit();
+    var b = try builder(&h);
+    const a = try b.div(.{ .width = .{ .px = 40 }, .height = .{ .px = 12 }, .flex_grow = 1 }, &.{});
+    const c = try b.div(.{ .width = .{ .px = 40 }, .height = .{ .px = 20 }, .flex_grow = 1 }, &.{});
+    const d = try b.div(.{ .width = .{ .px = 120 }, .height = .{ .px = 10 } }, &.{});
+    const root = try b.row(.{ .flex_wrap = true, .align_content = .start, .gap = 4 }, &.{ a, c, d });
+    var result = try calculate(&h, root, .{ .width = 100, .height = 80 });
+    defer result.deinit();
+    try t.expectEqual(ui.Rect{ .width = 48, .height = 12 }, try result.get(&h.frames.committed, a));
+    try t.expectEqual(ui.Rect{ .x = 52, .width = 48, .height = 20 }, try result.get(&h.frames.committed, c));
+    try t.expectEqual(ui.Rect{ .y = 24, .width = 100, .height = 10 }, try result.get(&h.frames.committed, d));
+}
+
+test "wrapped columns stretch line widths across the content box" {
+    var h = try ui.testing.Harness.init(t.allocator);
+    defer h.deinit();
+    var b = try builder(&h);
+    const a = try b.div(.{ .height = .{ .px = 24 } }, &.{});
+    const c = try b.div(.{ .height = .{ .px = 24 } }, &.{});
+    const root = try b.fluent().div().flex_col().flex_wrap().gap_px(4).children(.{ a, c }).build();
+    var result = try calculate(&h, root, .{ .width = 100, .height = 40 });
+    defer result.deinit();
+    try t.expectEqual(ui.Rect{ .width = 48, .height = 24 }, try result.get(&h.frames.committed, a));
+    try t.expectEqual(ui.Rect{ .x = 52, .width = 48, .height = 24 }, try result.get(&h.frames.committed, c));
+}
+
+test "equal grid tracks resolve percentages inside a cell and advance by the tallest item" {
+    var h = try ui.testing.Harness.init(t.allocator);
+    defer h.deinit();
+    var b = try builder(&h);
+    try t.expectError(error.InvalidStyle, b.grid(0, .{}, &.{}));
+    const a = try b.div(.{ .height = .{ .px = 14 } }, &.{});
+    const c = try b.div(.{ .width = .{ .percent = 50 }, .height = .{ .px = 20 }, .margin = .{ .left = 2 } }, &.{});
+    const d = try b.div(.{ .height = .{ .px = 10 } }, &.{});
+    const root = try b.fluent().div().grid_cols(2).refine(.{ .padding = ui.Insets.all(5), .gap = @as(f32, 4), .align_content = @as(@FieldType(ui.Style, "align_content"), .start) }).children(.{ a, c, d }).build();
+    var result = try calculate(&h, root, .{ .width = 114, .height = 80 });
+    defer result.deinit();
+    try t.expectEqual(ui.Rect{ .x = 5, .y = 5, .width = 50, .height = 14 }, try result.get(&h.frames.committed, a));
+    try t.expectEqual(ui.Rect{ .x = 61, .y = 5, .width = 25, .height = 20 }, try result.get(&h.frames.committed, c));
+    try t.expectEqual(ui.Rect{ .x = 5, .y = 29, .width = 50, .height = 10 }, try result.get(&h.frames.committed, d));
+}

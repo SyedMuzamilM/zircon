@@ -1,8 +1,7 @@
-//! Deterministic, single-line flex rows and columns. Logical units only.
+//! Flex lines and row-major equal-column grids in logical units.
 //! Supports padding, margins, gap, grow/shrink with min/max freezing and alignment.
-//! Text measurement is injected. CSS wrapping/grid/baseline alignment are not claimed.
+//! Text and custom-element measurement are injected by the caller.
 const std = @import("std");
-const zircon_options = @import("zircon_options");
 const cache_key = @import("../ui/cache_key.zig");
 const ui_custom = @import("../ui/custom.zig");
 const elements = @import("../ui/element.zig");
@@ -11,7 +10,6 @@ const tree = @import("../ui/tree.zig");
 const layout_cache = @import("cache.zig");
 const geometry = @import("geometry.zig");
 const measure_module = @import("measure.zig");
-const taffy = @import("taffy.zig");
 const Measurer = measure_module.Measurer;
 pub const Constraints = struct { viewport: geometry.Size, rem: f32 = 16 };
 pub const Layout = struct {
@@ -118,6 +116,12 @@ const Engine = struct {
                     }
                     break :container;
                 }
+                if (style.direction == .grid or style.flex_wrap) {
+                    const child_space = childSpace(style, content);
+                    for (node.children) |child| try e.measureNode(child, child_space, depth + 1);
+                    natural = try e.measureLines(node.children, style, content);
+                    break :container;
+                }
                 var main: f32 = 0;
                 var cross: f32 = 0;
                 for (node.children) |child| {
@@ -146,6 +150,58 @@ const Engine = struct {
             try store.put(id, fingerprint, available, sizes.items);
         };
     }
+    const Line = struct { count: usize = 0, main: f32 = 0, cross: f32 = 0 };
+
+    fn gridWidth(style: styles.Style, width: f32) f32 {
+        const columns: f32 = @floatFromInt(style.grid_columns);
+        return @max(0, width - (columns - 1) * style.gap) / columns;
+    }
+
+    fn childSpace(style: styles.Style, content: geometry.Size) geometry.Size {
+        if (style.direction == .grid) return .{ .width = gridWidth(style, content.width), .height = content.height };
+        return content;
+    }
+
+    fn nextLine(e: *Engine, children: []const u32, style: styles.Style, available: geometry.Size) !Line {
+        const horizontal = style.direction != .column;
+        const limit = if (horizontal) available.width else available.height;
+        var line: Line = .{};
+        for (children) |child| {
+            if (style.direction == .grid and line.count == style.grid_columns) break;
+            const cs = e.frame.nodes.items[child].style;
+            const size = try e.resolveSize(cs, childSpace(style, available), e.intrinsic[child]);
+            const width = size.width + cs.margin.horizontal();
+            const height = size.height + cs.margin.vertical();
+            const main = if (horizontal) width else height;
+            const with_gap = line.main + (if (line.count == 0) 0 else style.gap) + main;
+            if (style.direction != .grid and style.flex_wrap and line.count != 0 and with_gap > limit) break;
+            line.count += 1;
+            line.main = with_gap;
+            line.cross = @max(line.cross, if (horizontal) height else width);
+        }
+        return line;
+    }
+
+    fn measureLines(e: *Engine, children: []const u32, style: styles.Style, content: geometry.Size) !geometry.Size {
+        var main: f32 = 0;
+        var cross: f32 = 0;
+        var offset: usize = 0;
+        while (offset < children.len) {
+            const line = try e.nextLine(children[offset..], style, content);
+            main = @max(main, line.main);
+            if (offset != 0) cross += style.gap;
+            cross += line.cross;
+            offset += line.count;
+        }
+        if (style.direction == .grid and children.len > 0) {
+            var widest: f32 = 0;
+            for (children) |child| widest = @max(widest, e.intrinsic[child].width + e.frame.nodes.items[child].style.margin.horizontal());
+            const columns: f32 = @floatFromInt(style.grid_columns);
+            main = widest * columns + style.gap * (columns - 1);
+        }
+        return if (style.direction == .column) .{ .width = cross, .height = main } else .{ .width = main, .height = cross };
+    }
+
     fn arrange(e: *Engine, index: u32, rect: geometry.Rect, depth: usize) anyerror!void {
         const node = e.frame.nodes.items[index];
         const key = if (node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
@@ -208,42 +264,86 @@ const Engine = struct {
             }
             return;
         }
-        if (zircon_options.taffy) {
-            const items = try e.scratch.alloc(taffy.Item, node.children.len);
-            const bounds = try e.scratch.alloc(taffy.Bounds, node.children.len);
-            for (node.children, items) |child, *item| {
-                const cs = e.frame.nodes.items[child].style;
-                const size = try e.resolveSize(cs, available, e.intrinsic[child]);
-                const x = e.limits(cs, available, true);
-                const y = e.limits(cs, available, false);
-                item.* = .{
-                    .width = if (!horizontal and style.align_items == .stretch and cs.width == .auto) -1 else size.width,
-                    .height = if (horizontal and style.align_items == .stretch and cs.height == .auto) -1 else size.height,
-                    .min_width = x.min,
-                    .min_height = y.min,
-                    .max_width = x.max,
-                    .max_height = y.max,
-                    .left = cs.margin.left,
-                    .right = cs.margin.right,
-                    .top = cs.margin.top,
-                    .bottom = cs.margin.bottom,
-                    .grow = cs.flex_grow,
-                    .shrink = cs.flex_shrink,
-                };
+        if (style.direction == .grid or style.flex_wrap) {
+            // Partition on the final content box. Each flex line distributes
+            // its own free space. Grid rows share equal-width column tracks.
+            var lines: std.ArrayList(Line) = .empty;
+            var offset: usize = 0;
+            var used: f32 = 0;
+            while (offset < node.children.len) {
+                const line = try e.nextLine(node.children[offset..], style, available);
+                try lines.append(e.scratch, line);
+                used += line.cross;
+                offset += line.count;
             }
-            try taffy.arrange(items, bounds, available, style);
-            for (node.children, bounds) |child, b| {
-                try e.arrange(child, .{ .x = content.x + b.x, .y = content.y + b.y, .width = b.width, .height = b.height }, depth + 1);
+            const count: f32 = @floatFromInt(lines.items.len);
+            const cross_size = if (style.direction == .column) content.width else content.height;
+            const free = @max(0, cross_size - used - (count - 1) * style.gap);
+            const extra = if (style.align_content == .stretch) free / count else 0;
+            var cross: f32 = switch (style.align_content) {
+                .center => free / 2,
+                .end => free,
+                else => 0,
+            };
+            offset = 0;
+            for (lines.items) |line| {
+                const extent = line.cross + extra;
+                const children = node.children[offset..][0..line.count];
+                if (style.direction == .grid) {
+                    try e.arrangeGridRow(children, style, content, cross, extent, depth);
+                } else {
+                    var band = content;
+                    if (horizontal) {
+                        band.y += cross;
+                        band.height = extent;
+                    } else {
+                        band.x += cross;
+                        band.width = extent;
+                    }
+                    try e.arrangeFlexLine(children, style, band, available, depth);
+                }
+                offset += line.count;
+                cross += extent + style.gap;
             }
             return;
         }
-        const bases = try e.scratch.alloc(f32, node.children.len);
-        const sizes = try e.scratch.alloc(f32, node.children.len);
-        const frozen = try e.scratch.alloc(bool, node.children.len);
+        try e.arrangeFlexLine(node.children, style, content, available, depth);
+    }
+
+    fn arrangeGridRow(e: *Engine, children: []const u32, style: styles.Style, content: geometry.Rect, top: f32, height: f32, depth: usize) !void {
+        const track = gridWidth(style, content.width);
+        for (children, 0..) |child, i| {
+            const cs = e.frame.nodes.items[child].style;
+            const available: geometry.Size = .{ .width = track, .height = content.height };
+            const natural = e.intrinsic[child];
+            const size = try e.resolveSize(cs, available, .{
+                .width = @max(0, track - cs.margin.horizontal()),
+                .height = if (style.align_items == .stretch) @max(0, height - cs.margin.vertical()) else natural.height,
+            });
+            const free = height - size.height - cs.margin.vertical();
+            const shift: f32 = switch (style.align_items) {
+                .center => free / 2,
+                .end => free,
+                else => 0,
+            };
+            try e.arrange(child, .{
+                .x = content.x + @as(f32, @floatFromInt(i)) * (track + style.gap) + cs.margin.left,
+                .y = content.y + top + shift + cs.margin.top,
+                .width = size.width,
+                .height = size.height,
+            }, depth + 1);
+        }
+    }
+
+    fn arrangeFlexLine(e: *Engine, children: []const u32, style: styles.Style, content: geometry.Rect, available: geometry.Size, depth: usize) !void {
+        const horizontal = style.direction == .row;
+        const bases = try e.scratch.alloc(f32, children.len);
+        const sizes = try e.scratch.alloc(f32, children.len);
+        const frozen = try e.scratch.alloc(bool, children.len);
         @memset(frozen, false);
         var total: f32 = 0;
         var margin_total: f32 = 0;
-        for (node.children, 0..) |child, i| {
+        for (children, 0..) |child, i| {
             const child_style = e.frame.nodes.items[child].style;
             const measured = try e.resolveSize(child_style, available, e.intrinsic[child]);
             bases[i] = if (horizontal) measured.width else measured.height;
@@ -251,19 +351,19 @@ const Engine = struct {
             total += bases[i];
             margin_total += if (horizontal) child_style.margin.horizontal() else child_style.margin.vertical();
         }
-        const gap_total = style.gap * @as(f32, @floatFromInt(node.children.len - 1));
+        const gap_total = style.gap * @as(f32, @floatFromInt(children.len - 1));
         var remaining = (if (horizontal) content.width else content.height) - gap_total - margin_total - total;
         const growing = remaining >= 0;
         var iterations: usize = 0;
-        while (@abs(remaining) > 0.001 and iterations <= node.children.len) : (iterations += 1) {
+        while (@abs(remaining) > 0.001 and iterations <= children.len) : (iterations += 1) {
             var weight: f32 = 0;
-            for (node.children, 0..) |child, i| if (!frozen[i]) {
+            for (children, 0..) |child, i| if (!frozen[i]) {
                 const cs = e.frame.nodes.items[child].style;
                 weight += if (growing) cs.flex_grow else cs.flex_shrink * bases[i];
             };
             if (weight <= 0) break;
             var consumed: f32 = 0;
-            for (node.children, 0..) |child, i| if (!frozen[i]) {
+            for (children, 0..) |child, i| if (!frozen[i]) {
                 const cs = e.frame.nodes.items[child].style;
                 const w = if (growing) cs.flex_grow else cs.flex_shrink * bases[i];
                 if (w == 0) continue;
@@ -283,8 +383,8 @@ const Engine = struct {
             .end => free,
             else => 0,
         };
-        const gap = style.gap + if (style.justify_content == .space_between and node.children.len > 1) free / @as(f32, @floatFromInt(node.children.len - 1)) else @as(f32, 0);
-        for (node.children, 0..) |child, i| {
+        const gap = style.gap + if (style.justify_content == .space_between and children.len > 1) free / @as(f32, @floatFromInt(children.len - 1)) else @as(f32, 0);
+        for (children, 0..) |child, i| {
             const cs = e.frame.nodes.items[child].style;
             const measured = try e.resolveSize(cs, available, e.intrinsic[child]);
             const cross_margin = if (horizontal) cs.margin.vertical() else cs.margin.horizontal();

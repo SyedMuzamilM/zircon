@@ -68,8 +68,21 @@ Set `WindowOptions.chrome = .integrated` for a full-size content view with hidde
 
 See the [compact composition guide](../../docs/zircon-ui-composition.md) for eager tuple children, inline button keys/listeners and callback payload inference. The root `check` compiles both counter examples and verifies that documented source matches.
 
-## Taffy flex layout
+## Wrapping and grid layout
 
-Run the framework tests and counter from the repository root with `./tools/zig build test counter -Dtaffy=true --summary all`. On macOS, `./tools/zig build run -Dtaffy=true` uses the same backend in the editor. The build requires Cargo and Rust for the build host and compiles the static library using the committed Cargo lockfile. This option supports host Linux and macOS builds.
+Zircon implements flex wrapping and equal-column grid layout in Zig. A row with
+`.flex_wrap = true` starts a new line when the next child's outer size and gap
+would exceed the content width. A column wraps against height. Each line
+distributes its own grow and shrink space. `align_content` controls how lines
+share spare cross-axis space and defaults to stretch.
 
-Taffy arranges the direct children of rows and columns on cache misses. Zircon measures text and custom elements, resolves its units, arranges overlays, and owns scene and layout caches. Fractional positions are preserved. The default build uses Zig flex. The initial backend creates a Taffy tree per arranged container. Grid and wrapping remain future API work.
+Use `b.grid(3, style, children)` or `b.fluent().div().grid_cols(3)` for three
+equal tracks with row-major placement. Padding and gaps are deducted before
+sizing tracks. Horizontal percentages resolve against a single track. Each
+row starts at the height of its tallest item including margins. A partial
+last row keeps the same column widths. The grid API currently covers equal
+columns and automatic rows. Explicit named tracks, spanning and dense packing
+are outside this implementation.
+
+The framework tests run with `./tools/zig build test`. Layout uses the Zig
+toolchain and adds no runtime library or external build step.

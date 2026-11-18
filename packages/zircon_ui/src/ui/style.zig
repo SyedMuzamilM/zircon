@@ -15,13 +15,15 @@ pub const Length = union(enum) {
         return .{ .px = value };
     }
 };
-pub const Direction = enum { row, column, stack };
+pub const Direction = enum { row, column, stack, grid };
 pub const Align = enum { start, center, end, stretch };
 pub const Justify = enum { start, center, end, space_between };
 pub const Cursor = enum { arrow, text, pointing_hand, resize_horizontal, resize_vertical };
 pub const Style = struct {
     cursor: ?Cursor = null,
     direction: Direction = .column,
+    flex_wrap: bool = false,
+    grid_columns: u16 = 1,
     width: Length = .auto,
     height: Length = .auto,
     min_width: Length = .auto,
@@ -31,6 +33,7 @@ pub const Style = struct {
     padding: Insets = .{},
     margin: Insets = .{},
     gap: f32 = 0,
+    align_content: Align = .stretch,
     align_items: Align = .stretch,
     justify_content: Justify = .start,
     flex_grow: f32 = 0,
@@ -44,6 +47,7 @@ pub const Style = struct {
     text: text_style.TextStyle = .{},
     pub fn validate(style: Style) !void {
         try style.text.validate();
+        if (style.direction == .grid and style.grid_columns == 0) return error.InvalidStyle;
         inline for (.{ "width", "height", "min_width", "min_height", "max_width", "max_height" }) |field| switch (@field(style, field)) {
             .auto => {},
             inline else => |n| if (!std.math.isFinite(n) or n < 0) return error.InvalidStyle,

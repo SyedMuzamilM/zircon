@@ -272,6 +272,12 @@ pub const Chain = struct {
         self.factory.ui.frame.nodes.items[record.element.index].drag_region = true;
         return self;
     }
+    pub fn grid_cols(self: Chain, columns: u16) Chain {
+        return self.refine(.{ .direction = @as(styles.Direction, .grid), .grid_columns = columns });
+    }
+    pub fn flex_wrap(self: Chain) Chain {
+        return self.refine(.{ .flex_wrap = true });
+    }
     pub fn stack(self: Chain) Chain {
         return self.when(true, .{ .direction = @as(styles.Direction, .stack) });
     }
