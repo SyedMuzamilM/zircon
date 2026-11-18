@@ -213,6 +213,12 @@ pub const Ui = struct {
         actual.direction = .row;
         return ui.div(actual, children);
     }
+    pub fn grid(ui: *Ui, columns: u16, style: styles.Style, children: anytype) !elements.Element {
+        var actual = style;
+        actual.direction = .grid;
+        actual.grid_columns = columns;
+        return ui.div(actual, children);
+    }
     pub fn stack(ui: *Ui, style: styles.Style, children: anytype) !elements.Element {
         var actual = style;
         actual.direction = .stack;

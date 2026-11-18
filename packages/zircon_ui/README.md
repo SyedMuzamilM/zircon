@@ -67,3 +67,22 @@ Set `WindowOptions.chrome = .integrated` for a full-size content view with hidde
 `App.watchExternal(owner, callback)` registers a UI-thread inbox drain tied to a generational entity. A producer publishes owned data and calls the static, thread-safe `App.wake()`. AppKit receives a coalesced application event, so an idle app can block between real events. Stop/join the producer before destroying its inbox storage. Registration does not authorize transport threads to access entities.
 
 See the [compact composition guide](../../docs/zircon-ui-composition.md) for eager tuple children, inline button keys/listeners and callback payload inference. The root `check` compiles both counter examples and verifies that documented source matches.
+
+## Wrapping and grid layout
+
+Zircon implements flex wrapping and equal-column grid layout in Zig. A row with
+`.flex_wrap = true` starts a new line when the next child's outer size and gap
+would exceed the content width. A column wraps against height. Each line
+distributes its own grow and shrink space. `align_content` controls how lines
+share spare cross-axis space and defaults to stretch.
+
+Use `b.grid(3, style, children)` or `b.fluent().div().grid_cols(3)` for three
+equal tracks with row-major placement. Padding and gaps are deducted before
+sizing tracks. Horizontal percentages resolve against a single track. Each
+row starts at the height of its tallest item including margins. A partial
+last row keeps the same column widths. The grid API currently covers equal
+columns and automatic rows. Explicit named tracks, spanning and dense packing
+are outside this implementation.
+
+The framework tests run with `./tools/zig build test`. Layout uses the Zig
+toolchain and adds no runtime library or external build step.
