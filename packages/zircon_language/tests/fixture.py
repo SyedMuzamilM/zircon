@@ -148,14 +148,19 @@ while True:
             continue
         send({"jsonrpc": "2.0", "id": message["id"], "result": [{"title": "Fix answer", "edit": {"changes": {params["textDocument"]["uri"]: [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}, "newText": "fixed"}]}}}]})
     elif method == "textDocument/completion":
-        assert params["position"]["character"] in ((3, 4) if mode == "host" else (3,))
+        character = params["position"]["character"]
+        assert character in ((3, 4) if mode in ("host", "host-completion-exit") else (3,))
+        if mode == "host-completion-exit" and character == 4:
+            sys.exit(0)
         completions.append(message)
-        if len(completions) == 2 or mode in ("host", "host-filter"):
+        if len(completions) == 2 or mode in ("host", "host-filter", "host-completion-exit"):
             for request in reversed(completions):
                 if mode == "host-filter":
                     send({"jsonrpc": "2.0", "id": request["id"], "result": {"items": [{"label": "unrelated", "filterText": "unrelated", "sortText": "0"}, {"label": "zzzAnswer", "filterText": "answer", "sortText": "2"}, {"label": "aaaAnswer", "filterText": "answer", "sortText": "1"}]}})
                 else:
-                    send({"jsonrpc": "2.0", "id": request["id"], "result": {"isIncomplete": False, "items": [{"label": "answer🙂", "insertText": "answer", "detail": "fixture completion", "textEdit": {"range": {"start": {"line": 0, "character": 3}, "end": {"line": 0, "character": 3}}, "newText": "answer"}}]}})
+                    cursor = request["params"]["position"]["character"]
+                    start = 0 if mode == "host" and cursor == 4 else 3
+                    send({"jsonrpc": "2.0", "id": request["id"], "result": {"isIncomplete": False, "items": [{"label": "answer🙂", "insertText": "answer", "detail": "fixture completion", "textEdit": {"range": {"start": {"line": 0, "character": start}, "end": {"line": 0, "character": cursor}}, "newText": "answer"}}]}})
             completions.clear()
     elif method == "textDocument/didClose":
         opened.pop(params["textDocument"]["uri"], None)

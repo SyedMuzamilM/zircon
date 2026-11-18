@@ -332,6 +332,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             switch (message.data) {
                 .initialized => changed = true,
                 .exited => {
+                    if (self.language.pending) |pending| if (pending.session == session_index) self.language.clearCompletion();
                     try self.setStatus(try std.fmt.allocPrint(self.allocator, "Language server {s} stopped. Run Language: restart servers to retry.", .{session.id}));
                     self.status_is_error = true;
                     changed = true;
@@ -647,6 +648,10 @@ pub fn definitionPointer(self: *Shell, cx: *ui.Context(Shell), state: *zircon_ed
 }
 
 pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
+    errdefer {
+        self.language.clearCompletion();
+        cx.notify();
+    }
     try poll(self, cx);
     const current = try actions.active(self);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {

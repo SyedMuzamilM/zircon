@@ -82,6 +82,14 @@ const Ops = struct {
     fn completionClosed(self: *const zircon.Shell) bool {
         return self.language.completions == null and self.language.pending == null;
     }
+    fn completionCurrent(self: *const zircon.Shell) bool {
+        const request = self.language.pending orelse return false;
+        const displayed = self.language.completions orelse return false;
+        return displayed.data.completion.id == request.request and displayed.data.completion.version == request.revision;
+    }
+    fn serverStopped(self: *const zircon.Shell) bool {
+        return self.status_is_error and std.mem.indexOf(u8, self.status, " stopped.") != null;
+    }
     fn definitionOther(self: *const zircon.Shell) !void {
         const record = try self.workspace.getConst(self.tabs.items[self.active].document);
         try t.expectEqualStrings("two.zig", std.fs.path.basename(record.path.?));
@@ -237,7 +245,7 @@ test "completion additional edits keep one caret at the primary edit" {
     try t.expectEqual(@as(usize, 1), try fixture.app.read(fixture.owner, Ops.selectionCount, .{}));
 }
 
-const HoverCheck = enum { edit, leave_symbol, leave_below, leave_window, layout, layout_long, pinned, completion_typing, completion_filter, definition_click, definition_control, definition_import, project_diagnostics };
+const HoverCheck = enum { edit, leave_symbol, leave_below, leave_window, layout, layout_long, pinned, completion_typing, completion_filter, completion_exit, definition_click, definition_control, definition_import, project_diagnostics };
 fn hoverJourney(comptime check: HoverCheck) !void {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
@@ -251,7 +259,14 @@ fn hoverJourney(comptime check: HoverCheck) !void {
     try tmp.dir.writeFile(t.io, .{ .sub_path = "two.zig", .data = "const other = 42;\n" });
     const server = try std.fs.path.join(t.allocator, &.{ root, "server.py" });
     defer t.allocator.free(server);
-    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{ .schema_version = 1, .id = "org.zircon.hover", .name = "Hover", .version = "1.0.0", .contributes = .{ .language_servers = .{.{ .id = "hover", .languages = .{"zig"}, .command = "python3", .args = .{ server, if (check == .definition_import) "host-navigation" else if (check == .completion_filter) "host-filter" else if (check == .project_diagnostics) "project-diagnostics" else "host" } }} } }, .{});
+    const mode = switch (check) {
+        .definition_import => "host-navigation",
+        .completion_filter => "host-filter",
+        .completion_exit => "host-completion-exit",
+        .project_diagnostics => "project-diagnostics",
+        else => "host",
+    };
+    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{ .schema_version = 1, .id = "org.zircon.hover", .name = "Hover", .version = "1.0.0", .contributes = .{ .language_servers = .{.{ .id = "hover", .languages = .{"zig"}, .command = "python3", .args = .{ server, mode } }} } }, .{});
     defer t.allocator.free(manifest);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.hover/extension.json", .data = manifest });
     const home = try std.fs.path.join(t.allocator, &.{ root, "extensions" });
@@ -289,8 +304,8 @@ fn hoverJourney(comptime check: HoverCheck) !void {
         try app.read(owner, Ops.definitionOther, .{});
         return;
     }
-    if (check == .completion_typing or check == .completion_filter) {
-        for (0..2) |file| {
+    if (check == .completion_typing or check == .completion_filter or check == .completion_exit) {
+        for (0..if (check == .completion_exit) @as(usize, 1) else 2) |file| {
             if (file == 1) {
                 try app.update(owner, Ops.second, .{});
                 while (!try app.read(owner, Ops.bothReady, .{})) {
@@ -308,6 +323,20 @@ fn hoverJourney(comptime check: HoverCheck) !void {
                 try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
             }
             if (check == .completion_filter) try app.read(owner, Ops.filtered, .{});
+            if (check == .completion_exit) {
+                try app.dispatch(h, .{ .text = "w" });
+                while (!try app.read(owner, Ops.serverStopped, .{})) {
+                    _ = try app.step(0);
+                    if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.ServerExitTimeout;
+                    try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+                }
+                try t.expect(try app.read(owner, Ops.completionClosed, .{}));
+                try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+                var after: []u8 = undefined;
+                try app.read(owner, Ops.source, .{ t.allocator, &after });
+                defer t.allocator.free(after);
+                try t.expect(std.mem.startsWith(u8, after, "answ\n"));
+            }
             if (check == .completion_typing) {
                 try app.dispatch(h, .{ .text = "w" });
                 try t.expect(try app.read(owner, Ops.completionVisible, .{}));
@@ -319,6 +348,16 @@ fn hoverJourney(comptime check: HoverCheck) !void {
                 try app.read(owner, Ops.source, .{ t.allocator, &after });
                 defer t.allocator.free(after);
                 try t.expectEqualStrings(before, after);
+                while (!try app.read(owner, Ops.completionCurrent, .{})) {
+                    _ = try app.step(0);
+                    if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.CompletionRefreshTimeout;
+                    try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+                }
+                try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+                var accepted: []u8 = undefined;
+                try app.read(owner, Ops.source, .{ t.allocator, &accepted });
+                defer t.allocator.free(accepted);
+                try t.expect(std.mem.startsWith(u8, accepted, "answerconst "));
             }
         }
         return;
@@ -364,7 +403,7 @@ fn hoverJourney(comptime check: HoverCheck) !void {
     };
     try t.expect(card);
     switch (check) {
-        .completion_typing, .completion_filter, .definition_click, .definition_control, .definition_import, .project_diagnostics => unreachable,
+        .completion_typing, .completion_filter, .completion_exit, .definition_click, .definition_control, .definition_import, .project_diagnostics => unreachable,
         .pinned => {
             try app.dispatch(h, .{ .pointer_move = .{ .position = symbol } });
             _ = try app.step(0.4);
@@ -678,6 +717,9 @@ test "symbol hover opened explicitly stays visible while moving over its source"
 }
 test "language completion requests suggestions while typing identifiers" {
     try hoverJourney(.completion_typing);
+}
+test "language completion closes when its server exits during a refresh" {
+    try hoverJourney(.completion_exit);
 }
 test "language command click requests the definition under the pointer" {
     try hoverJourney(.definition_click);

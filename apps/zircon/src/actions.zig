@@ -453,7 +453,7 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
         self.language.clearCompletion();
     } else if (refresh) {
         services_language.request(self, cx) catch |err| switch (err) {
-            error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => self.language.clearCompletion(),
+            error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
             else => try self.reportError(err),
         };
     } else if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
