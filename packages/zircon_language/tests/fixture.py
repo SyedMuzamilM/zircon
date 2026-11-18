@@ -148,7 +148,7 @@ while True:
             continue
         send({"jsonrpc": "2.0", "id": message["id"], "result": [{"title": "Fix answer", "edit": {"changes": {params["textDocument"]["uri"]: [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}, "newText": "fixed"}]}}}]})
     elif method == "textDocument/completion":
-        assert params["position"]["character"] == 3
+        assert params["position"]["character"] in ((3, 4) if mode == "host" else (3,))
         completions.append(message)
         if len(completions) == 2 or mode in ("host", "host-filter"):
             for request in reversed(completions):

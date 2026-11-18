@@ -374,13 +374,17 @@ fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
 }
 
 pub fn applyOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome, origin: ws.ChangeOrigin) !void {
+    return applyEditorOutcome(self, cx, id, pane, outcome, origin, false);
+}
+
+fn applyEditorOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, pane: u8, outcome: *editing.Outcome, origin: ws.ChangeOrigin, refreshing_completion: bool) !void {
     defer if (outcome.change) |change| {
         self.publishDocumentChange(id, origin, change);
         outcome.change = null;
     } else if (outcome.history_reset) |reset| self.publishDocumentReset(id, if (reset.action == .undo) .undo else .redo, reset.before);
     if (outcome.change == null and !outcome.reset) return;
     defer cx.notify();
-    self.language.clearCompletion();
+    if (!refreshing_completion) self.language.clearCompletion();
     try git_selection.changed(self, id);
     try search_editing.changed(self, id, if (outcome.change) |*change| change else null, pane);
     var snapshot = try self.workspace.snapshot(id);
@@ -442,13 +446,14 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     }
     const changed = outcome.change != null or outcome.reset;
     const origin: ws.ChangeOrigin = if (shortcut == .undo) .undo else if (shortcut == .redo) .redo else .typing;
-    try applyOutcome(self, cx, selected.id, pane, &outcome, origin);
+    const refresh = changed and services_language.completionTrigger(e.data);
+    try applyEditorOutcome(self, cx, selected.id, pane, &outcome, origin, refresh);
     if (changed) try services_git.edited(self, cx);
     if (changed and services_language.completionBreaker(e.data)) {
         self.language.clearCompletion();
-    } else if (changed and services_language.completionTrigger(e.data)) {
+    } else if (refresh) {
         services_language.request(self, cx) catch |err| switch (err) {
-            error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
+            error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => self.language.clearCompletion(),
             else => try self.reportError(err),
         };
     } else if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
