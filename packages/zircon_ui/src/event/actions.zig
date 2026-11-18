@@ -36,7 +36,7 @@ pub fn SequenceMap(comptime Action: type) type {
         };
         pub const Result = union(enum) { none, pending, action: Action };
         bindings: []const Binding,
-        pending: usize = 0,
+        pending: []const Chord = &.{},
         context: []const u8 = "",
 
         pub fn init(bindings: []const Binding) !@This() {
@@ -49,11 +49,11 @@ pub fn SequenceMap(comptime Action: type) type {
 
         pub fn setContext(self: *@This(), context: []const u8) void {
             self.context = context;
-            self.pending = 0;
+            self.pending = &.{};
         }
 
         pub fn reset(self: *@This()) void {
-            self.pending = 0;
+            self.pending = &.{};
         }
 
         pub fn resolve(self: *@This(), input: p.Input) Result {
@@ -61,27 +61,20 @@ pub fn SequenceMap(comptime Action: type) type {
             const key = input.key_down.key;
             const modifiers = input.key_down.modifiers;
             const prefix = self.pending;
-            var matched_prefix = false;
+            var next: []const Chord = &.{};
             for (self.bindings) |binding| {
                 if (binding.context.len != 0 and !std.mem.eql(u8, binding.context, self.context)) continue;
-                if (prefix >= binding.sequence.len) continue;
-                if (binding.sequence[prefix].matches(key, modifiers)) matched_prefix = true;
+                if (binding.sequence.len <= prefix.len or !sameSequence(binding.sequence[0..prefix.len], prefix)) continue;
+                if (!binding.sequence[prefix.len].matches(key, modifiers)) continue;
+                if (binding.sequence.len == prefix.len + 1) {
+                    self.reset();
+                    return .{ .action = binding.action };
+                }
+                next = binding.sequence[0 .. prefix.len + 1];
             }
-            if (!matched_prefix and prefix != 0) {
-                self.pending = 0;
-                return self.resolve(input);
-            }
-            for (self.bindings) |binding| {
-                if (binding.context.len != 0 and !std.mem.eql(u8, binding.context, self.context)) continue;
-                if (prefix + 1 != binding.sequence.len) continue;
-                if (!binding.sequence[prefix].matches(key, modifiers)) continue;
-                self.pending = 0;
-                return .{ .action = binding.action };
-            }
-            if (matched_prefix) {
-                self.pending = prefix + 1;
-                return .pending;
-            }
+            self.pending = next;
+            if (next.len != 0) return .pending;
+            if (prefix.len != 0) return self.resolve(input);
             return .none;
         }
     };

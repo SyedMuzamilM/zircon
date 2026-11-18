@@ -159,3 +159,16 @@ test "search fields honor macOS command and option deletion on UTF8 boundaries" 
     _ = try app.step(0);
     try t.expectEqualStrings("", (try app.window(h)).frames.committed.text_input.?.text);
 }
+
+test "sequence keymap keeps distinct prefixes and retries a new first chord" {
+    const Map = ui.SequenceMap(enum { first, second });
+    var map = try Map.init(&.{
+        .{ .sequence = &.{ .{ .key = .g }, .{ .key = .f } }, .action = .first },
+        .{ .sequence = &.{ .{ .key = .x }, .{ .key = .l } }, .action = .second },
+    });
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .g } }) == .pending);
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .l } }) == .none);
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .g } }) == .pending);
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .x } }) == .pending);
+    try t.expect(map.resolve(.{ .key_down = .{ .key = .l } }).action == .second);
+}
