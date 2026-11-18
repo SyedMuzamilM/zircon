@@ -41,12 +41,13 @@ pub const Note = struct {
     severity: editing.element.Severity,
     message: []u8,
     source: []u8,
+    offset: usize,
 };
 
-fn copyNote(a: std.mem.Allocator, hit: language.DiagnosticHit) !Note {
+fn copyNote(a: std.mem.Allocator, hit: language.DiagnosticHit, offset: usize) !Note {
     const message = try a.dupe(u8, hit.message);
     errdefer a.free(message);
-    return .{ .severity = hit.severity, .message = message, .source = try a.dupe(u8, hit.source) };
+    return .{ .severity = hit.severity, .message = message, .source = try a.dupe(u8, hit.source), .offset = offset };
 }
 
 pub fn clear(self: *Shell, cx: *ui.Context(Shell)) void {
@@ -78,13 +79,16 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, doc
     const range = if (diagnostic) |hit| hit.range else symbol.?;
     if (self.symbol_hover.target) |target| {
         const same = std.meta.eql(target.document, id) and target.revision == snapshot.revision() and std.meta.eql(target.range, range);
-        if (same and (self.symbol_hover.note != null) == (diagnostic != null)) return;
+        if (same and (self.symbol_hover.note != null) == (diagnostic != null)) {
+            if (self.symbol_hover.note) |*note| note.offset = at;
+            return;
+        }
     }
     const row = (try snapshot.pointAt(range.start)).line;
     const now = try cx.app.currentTime();
     clear(self, cx);
     if (diagnostic) |hit| {
-        self.symbol_hover.note = try copyNote(self.allocator, hit);
+        self.symbol_hover.note = try copyNote(self.allocator, hit, at);
         self.symbol_hover.note_generation = self.language.diagnostics_generation;
         self.symbol_hover.width = 440;
         self.symbol_hover.height = 48;
@@ -119,9 +123,9 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.symbol_hover.note_generation != self.language.diagnostics_generation) {
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
-            const hit = language.diagnosticAt(self, snapshot, target.document, target.offset) orelse return clear(self, cx);
+            const hit = language.diagnosticAt(self, snapshot, target.document, old.offset) orelse return clear(self, cx);
             if (!std.meta.eql(hit.range, target.range)) return clear(self, cx);
-            self.symbol_hover.note = try copyNote(self.allocator, hit);
+            self.symbol_hover.note = try copyNote(self.allocator, hit, old.offset);
             self.allocator.free(old.message);
             self.allocator.free(old.source);
             self.symbol_hover.note_generation = self.language.diagnostics_generation;

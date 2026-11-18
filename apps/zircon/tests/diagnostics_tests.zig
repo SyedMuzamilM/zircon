@@ -30,18 +30,24 @@ const Ops = struct {
         self.language.diagnostics_generation += 1;
         cx.notify();
     }
-    fn oneIssue(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+    fn overlappingIssues(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
         const tab = self.tabs.items[self.active];
         const record = try self.workspace.getConst(tab.document);
         var snapshot = record.doc.snapshot();
         defer snapshot.deinit();
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         const a = arena.allocator();
-        const items = try a.alloc(zircon.language.Diagnostic, 1);
+        const items = try a.alloc(zircon.language.Diagnostic, 2);
         items[0] = .{
             .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 5 } },
             .message = "broken name",
             .severity = .error_value,
+            .source = "fixture",
+        };
+        items[1] = .{
+            .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 2 } },
+            .message = "narrower issue",
+            .severity = .warning,
             .source = "fixture",
         };
         const uri = try zircon.language.fileUri(self.allocator, record.path.?);
@@ -114,7 +120,7 @@ test "editor squiggles and diagnostic hover use the stored issue" {
     const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
     const owner = try app.windowEntity(zircon.Shell, h);
     try app.update(owner, zircon.Shell.bootstrap, .{h});
-    try app.update(owner, Ops.oneIssue, .{});
+    try app.update(owner, Ops.overlappingIssues, .{});
     try app.update(owner, zircon.Shell.pollLanguage, .{});
     _ = try app.step(0);
     const tint = try app.read(owner, struct {
@@ -129,7 +135,7 @@ test "editor squiggles and diagnostic hover use the stored issue" {
     try t.expect(waves >= 4);
     const editor_bounds = try bounds(&app, h, "primary-editor");
     const metrics = (try app.window(h)).surface.?.measurer();
-    const at: ui.Point = .{ .x = editor_bounds.x + 76 + metrics.caret("alpha", .{ .size = 14, .mono = true }, 1), .y = editor_bounds.y + 11 };
+    const at: ui.Point = .{ .x = editor_bounds.x + 76 + metrics.caret("alpha", .{ .size = 14, .mono = true }, 3), .y = editor_bounds.y + 11 };
     try app.dispatch(h, .{ .pointer_move = .{ .position = at } });
     _ = try app.step(0);
     var message = false;
@@ -142,7 +148,8 @@ test "editor squiggles and diagnostic hover use the stored issue" {
     _ = try app.step(0);
     const note = try app.read(owner, struct {
         fn refreshed(self: *const zircon.Shell) bool {
-            return std.mem.eql(u8, self.symbol_hover.note.?.message, "updated diagnostic");
+            const note = self.symbol_hover.note orelse return false;
+            return std.mem.eql(u8, note.message, "updated diagnostic");
         }
     }.refreshed, .{});
     try t.expect(note);
