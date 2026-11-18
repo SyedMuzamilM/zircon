@@ -87,7 +87,7 @@ const Code = struct {
                 const start = @max(part.start, origin);
                 const end = @min(part.end, @max(self.underline_end, origin));
                 const point = origin == self.underline_end;
-                if (point and origin >= part.start and origin < part.end) {
+                if (point and editor.element.containsPoint(origin, part.start, part.end, self.text.len)) {
                     const left = cx.measurer.caret(self.text, style, origin);
                     try editor.element.paint(cx, x + left, @max(6, self.font * 0.55), top, self.line_height, self.underline_color);
                 } else if (!point and start < end) {

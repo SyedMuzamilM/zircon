@@ -428,12 +428,12 @@ fn paintDiagnostics(self: *const Canvas, cx: *ui.PaintCx, metrics: ui.layout.Mea
         var begin = @max(mark.range.start, line.range.start) - line.range.start;
         var end = @min(@max(mark.range.end, mark.range.start), line.range.end) - line.range.start;
         if (point) {
-            begin = mark.range.start - line.range.start;
+            if (!element.containsPoint(begin, segment_start, segment_end, line.original.len)) continue;
             end = begin;
         }
         begin = @max(begin, segment_start);
         end = @min(if (point) begin else end, segment_end);
-        if (begin > segment_end or (!point and begin >= end) or (point and begin >= segment_end)) continue;
+        if (begin > segment_end or (!point and begin >= end)) continue;
         const left = line.display.caret(metrics, style, begin);
         const right = if (point) left + @max(6, self.font_size * 0.55) else line.display.caret(metrics, style, end);
         if (right <= left) continue;

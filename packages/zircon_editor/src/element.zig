@@ -12,6 +12,11 @@ pub const Mark = struct {
     source: []const u8 = "",
 };
 
+/// The next visual row owns a wrap boundary. The last row also owns end-of-line.
+pub fn containsPoint(offset: usize, start: usize, end: usize, line_len: usize) bool {
+    return offset >= start and (offset < end or (offset == end and end == line_len));
+}
+
 pub fn color(theme: theme_module.Theme, severity: Severity) ui.Color {
     return switch (severity) {
         .@"error" => theme.git_deleted,
