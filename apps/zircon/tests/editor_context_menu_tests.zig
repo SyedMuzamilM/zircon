@@ -20,6 +20,10 @@ const Ops = struct {
     fn closed(self: *const zircon.Shell) bool {
         return self.editor_context_menu == null;
     }
+    fn row(self: *const zircon.Shell, index: usize) !void {
+        try t.expectEqual(index, self.editor_context_menu.?.selected);
+        try t.expect(self.editor_context_menu.?.keyboard);
+    }
     fn command(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), which: zircon.Command) !void {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onCommand(&event, cx, which);
@@ -30,11 +34,14 @@ fn bounds(app: *ui.App, h: ui.WindowHandle, key: []const u8) !ui.Rect {
     for (frame.nodes.items, 0..) |node, index| if (node.key) |value| if (value == .string and std.mem.eql(u8, value.string, key)) return frame.bounds[index];
     return error.MissingElement;
 }
-fn clickLabel(app: *ui.App, h: ui.WindowHandle, label: []const u8) !void {
+fn buttonBounds(app: *ui.App, h: ui.WindowHandle, label: []const u8) !ui.Rect {
     const frame = &(try app.window(h)).frames.committed;
-    const rect = for (frame.nodes.items, 0..) |node, index| {
+    return for (frame.nodes.items, 0..) |node, index| {
         if (node.kind == .button and std.mem.eql(u8, node.kind.button.label, label)) break frame.bounds[index];
-    } else return error.MissingButton;
+    } else error.MissingButton;
+}
+fn clickLabel(app: *ui.App, h: ui.WindowHandle, label: []const u8) !void {
+    const rect = try buttonBounds(app, h, label);
     try click(app, h, .{ .x = rect.x + rect.width / 2, .y = rect.y + rect.height / 2 }, .primary);
 }
 fn click(app: *ui.App, h: ui.WindowHandle, position: ui.Point, button: anytype) !void {
@@ -120,6 +127,36 @@ fn menuPersistence() !void {
     _ = try app.step(0.1);
     try t.expect(!try app.read(owner, Ops.closed, .{}));
     _ = try bounds(&app, h, "editor-context-menu");
+}
+
+test "editor context menu ignores the gutter and follows the pointer across enabled rows" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "  alpha beta\nsecond line\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    try app.update(owner, Ops.select, .{ @as(usize, 2), @as(usize, 7) });
+    _ = try app.step(0);
+    const editor_bounds = try bounds(&app, h, "primary-editor");
+    try click(&app, h, .{ .x = editor_bounds.x + 8, .y = editor_bounds.y + 11 }, .secondary);
+    try t.expect(try app.read(owner, Ops.closed, .{}));
+    try app.read(owner, Ops.selection, .{ @as(usize, 2), @as(usize, 7), @as(u8, 0) });
+    try click(&app, h, try point(&app, h, 0, 3), .secondary);
+    try t.expect(!try app.read(owner, Ops.closed, .{}));
+    const copy = try buttonBounds(&app, h, "Copy");
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = copy.x + copy.width / 2, .y = copy.y + copy.height / 2 } } });
+    _ = try app.step(0);
+    try app.read(owner, Ops.row, .{@as(usize, 7)});
+    const definition = try buttonBounds(&app, h, "Go to Definition");
+    try app.dispatch(h, .{ .pointer_move = .{ .position = .{ .x = definition.x + 12, .y = definition.y + definition.height / 2 } } });
+    _ = try app.step(0);
+    try app.read(owner, Ops.row, .{@as(usize, 7)});
+    try t.expect(!try app.read(owner, Ops.closed, .{}));
 }
 
 test "editor context menu stays open across press release movement and redraw" {

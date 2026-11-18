@@ -1301,6 +1301,42 @@ test "active brackets paint subtle backgrounds and their enclosing indentation g
     try t.expectEqual(@as(usize, 1), guides);
 }
 
+test "diagnostic underlines paint a wave on the marked span" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "alpha beta\n");
+    var state = try editor.Editor.init(t.allocator);
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    try state.setDiagnostics(snapshot.revision(), 1, &.{.{ .range = .{ .start = 0, .end = 5 }, .severity = .@"error", .message = "broken" }});
+    const tint = state.theme.git_deleted;
+    const h = app.openWindow(View, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+        state.deinit();
+        document.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    var waves: usize = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and item.rect.height == 1 and item.rect.width <= 2 and std.meta.eql(item.color, tint)) {
+        waves += 1;
+    };
+    try t.expect(waves >= 4);
+}
+
+test "diagnostic marks retire when the buffer revision changes" {
+    var document = try text.Document.init(t.allocator, "alpha\n");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    try state.setDiagnostics(snapshot.revision(), 1, &.{.{ .range = .{ .start = 0, .end = 5 }, .severity = .warning, .message = "check" }});
+    try t.expectEqual(snapshot.revision(), state.diagnostics_revision);
+    var outcome = try state.execute(&document, .{ .insert = "z" });
+    release(&outcome);
+    try t.expect(state.diagnostics_revision != document.revision());
+}
+
 test "indentation guides continue through empty rows inside a block" {
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();

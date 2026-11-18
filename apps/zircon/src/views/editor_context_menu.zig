@@ -67,6 +67,19 @@ fn entries(self: *const Shell, menu: Model) [12]Entry {
     };
 }
 
+fn rowAt(self: *const Shell, menu: Model, viewport: ui.Size, point: ui.Point) ?usize {
+    const rect = placement(menu, viewport);
+    if (point.x < rect.x or point.x >= rect.x + rect.width) return null;
+    const choices = entries(self, menu);
+    var y = rect.y + 6;
+    for (choices, 0..) |choice, index| {
+        if (index > 0 and choices[index - 1].group != choice.group) y += 9;
+        if (point.y >= y and point.y < y + row_height) return index;
+        y += row_height;
+    }
+    return null;
+}
+
 fn placement(menu: Model, viewport: ui.Size) ui.Rect {
     const width = @min(340, @max(1, viewport.width - 16));
     const height = @min(12 * row_height + 3 * 9 + 12, @max(1, viewport.height - 16));
@@ -77,6 +90,8 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editor.Editor, docu
     if (e.data != .pointer_down or e.data.pointer_down.button != .secondary) return false;
     var snapshot = document.snapshot();
     defer snapshot.deinit();
+    const gutter = if (state.show_line_numbers) editor.gutterWidth(snapshot.lineCount(), state.font_size) else 20;
+    if (e.data.pointer_down.position.x < e.bounds.x + gutter) return false;
     const at = try state.offsetAtPoint(snapshot, e, e.data.pointer_down.position);
     var inside = false;
     for (state.selections.items.items) |selection| {
@@ -84,6 +99,10 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editor.Editor, docu
         if (!selection.empty() and at >= range.start and at < range.end) inside = true;
     }
     if (!inside) state.selections.single(.{ .anchor = at, .head = at });
+    var any_selection = false;
+    for (state.selections.items.items) |selection| {
+        if (!selection.empty()) any_selection = true;
+    }
     state.typing_group = 0;
     state.dragging = false;
     self.active_pane = if (pane == 1) .secondary else .primary;
@@ -93,7 +112,7 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editor.Editor, docu
     self.popup = .none;
     self.git.menu = .none;
     self.menu_open = false;
-    self.editor_context_menu = .{ .document = id, .revision = snapshot.revision(), .selection = fingerprint(state), .has_selection = !state.primary().empty(), .pane = pane, .anchor = e.data.pointer_down.position };
+    self.editor_context_menu = .{ .document = id, .revision = snapshot.revision(), .selection = fingerprint(state), .has_selection = any_selection, .pane = pane, .anchor = e.data.pointer_down.position };
     const choices = entries(self, self.editor_context_menu.?);
     for (choices, 0..) |choice, index| if (choice.enabled) {
         self.editor_context_menu.?.selected = index;
@@ -145,11 +164,16 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !bool
             cx.notify();
             return true;
         },
-        .pointer_move => {
-            if (menu.keyboard) {
-                self.editor_context_menu.?.keyboard = false;
+        .pointer_move => |pointer_value| if (rowAt(self, menu, try e.windowSize(), pointer_value.position)) |index| {
+            const choices = entries(self, menu);
+            if (choices[index].enabled and menu.selected != index) {
+                self.editor_context_menu.?.selected = index;
+                self.editor_context_menu.?.keyboard = true;
                 cx.notify();
             }
+        } else if (menu.keyboard) {
+            self.editor_context_menu.?.keyboard = false;
+            cx.notify();
         },
         .scroll => {
             e.preventDefault();

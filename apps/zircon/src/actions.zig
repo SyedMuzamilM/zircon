@@ -170,7 +170,7 @@ fn revealTreePath(self: *Shell, path: []const u8) !void {
 
 pub fn openPath(self: *Shell, path: []const u8) !void {
     self.language.clearCompletion();
-    self.symbol_hover.deinit();
+    self.symbol_hover.deinit(self.allocator);
     if (views_image.supported(path)) {
         const absolute = try std.fs.path.resolve(self.allocator, &.{ self.workspace.root_path, path });
         defer self.allocator.free(absolute);
@@ -196,17 +196,20 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
         }
         self.editor_focus_request +%= 1;
         self.overlay = .none;
+        try self.installDiagnostics();
         return;
     };
     errdefer _ = self.workspace.close(id, .discard) catch {};
-    var view = try editing.Editor.init(self.allocator);
-    errdefer view.deinit();
-    const record = try self.workspace.getConst(id);
-    self.configureEditor(&view, record.path orelse "");
-    var snapshot = record.doc.snapshot();
-    defer snapshot.deinit();
-    view.synchronize(snapshot);
-    try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    {
+        var view = try editing.Editor.init(self.allocator);
+        errdefer view.deinit();
+        const record = try self.workspace.getConst(id);
+        self.configureEditor(&view, record.path orelse "");
+        var snapshot = record.doc.snapshot();
+        defer snapshot.deinit();
+        view.synchronize(snapshot);
+        try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    }
     if (self.active_pane == .secondary and self.secondary != null) {
         self.tabs.items[self.tabs.items.len - 1].primary = false;
         try panes.selectSecondary(self, self.tabs.items.len - 1);
@@ -216,20 +219,27 @@ pub fn openPath(self: *Shell, path: []const u8) !void {
     }
     self.editor_focus_request +%= 1;
     self.overlay = .none;
+    try self.installDiagnostics();
 }
 
 /// Attach an already resolved source to ordinary Save/close/recovery ownership
 /// without changing the visible pane or its active source.
 pub fn ensureTab(self: *Shell, id: ws.DocumentId) !usize {
-    for (self.tabs.items, 0..) |tab, index| if (std.meta.eql(tab.document, id)) return index;
-    var view = try editing.Editor.init(self.allocator);
-    errdefer view.deinit();
-    const record = try self.workspace.getConst(id);
-    self.configureEditor(&view, record.path orelse "");
-    var snapshot = record.doc.snapshot();
-    defer snapshot.deinit();
-    view.synchronize(snapshot);
-    try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    for (self.tabs.items, 0..) |tab, index| if (std.meta.eql(tab.document, id)) {
+        try self.installDiagnostics();
+        return index;
+    };
+    {
+        var view = try editing.Editor.init(self.allocator);
+        errdefer view.deinit();
+        const record = try self.workspace.getConst(id);
+        self.configureEditor(&view, record.path orelse "");
+        var snapshot = record.doc.snapshot();
+        defer snapshot.deinit();
+        view.synchronize(snapshot);
+        try self.tabs.append(self.allocator, .{ .document = id, .editor = view });
+    }
+    try self.installDiagnostics();
     return self.tabs.items.len - 1;
 }
 
@@ -434,11 +444,14 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     const origin: ws.ChangeOrigin = if (shortcut == .undo) .undo else if (shortcut == .redo) .redo else .typing;
     try applyOutcome(self, cx, selected.id, pane, &outcome, origin);
     if (changed) try services_git.edited(self, cx);
-    if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
-    if (changed and services_language.completionTrigger(e.data)) services_language.request(self, cx) catch |err| switch (err) {
-        error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
-        else => try self.reportError(err),
-    };
+    if (changed and services_language.completionBreaker(e.data)) {
+        self.language.clearCompletion();
+    } else if (changed and services_language.completionTrigger(e.data)) {
+        services_language.request(self, cx) catch |err| switch (err) {
+            error.NoLanguageServer, error.ServerNotReady, error.CompletionNotSupported => {},
+            else => try self.reportError(err),
+        };
+    } else if (self.language.pending) |pending| if (outcome.handled and (!std.meta.eql(pending.document, selected.id) or pending.cursor != selected.editor.primary().head)) self.language.clearCompletion();
     if (outcome.handled or old_gutter_hover != selected.editor.gutter_hovered) cx.notify();
     return outcome.handled;
 }

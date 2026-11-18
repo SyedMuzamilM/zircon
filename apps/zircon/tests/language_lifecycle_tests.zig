@@ -63,6 +63,25 @@ const Ops = struct {
         const pending_value = self.language.pending orelse return false;
         return self.language.completions != null and std.meta.eql(pending_value.document, self.tabs.items[self.active].document);
     }
+    fn plantCompletion(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        const tab = &self.tabs.items[self.active];
+        var snapshot = try self.workspace.snapshot(tab.document);
+        defer snapshot.deinit();
+        const cursor = snapshot.byteLen();
+        try tab.editor.setSelection(snapshot, .{ .start = cursor, .end = cursor });
+        var arena = std.heap.ArenaAllocator.init(t.allocator);
+        const a = arena.allocator();
+        const items = try a.alloc(lsp.Completion, 2);
+        items[0] = .{ .label = "alpha", .insert_text = "alpha" };
+        items[1] = .{ .label = "beta", .insert_text = "beta", .detail = "fn () void" };
+        self.language.pending = .{ .document = tab.document, .session = 0, .request = 1, .revision = snapshot.revision(), .cursor = cursor };
+        self.language.completions = .{ .arena = arena, .data = .{ .completion = .{ .id = 1, .uri = "file:///main.zig", .version = snapshot.revision(), .items = items } } };
+        self.language.completion_index = 1;
+        cx.notify();
+    }
+    fn completionClosed(self: *const zircon.Shell) bool {
+        return self.language.completions == null and self.language.pending == null;
+    }
     fn definitionOther(self: *const zircon.Shell) !void {
         const record = try self.workspace.getConst(self.tabs.items[self.active].document);
         try t.expectEqualStrings("two.zig", std.fs.path.basename(record.path.?));
@@ -181,6 +200,25 @@ test "completion without textEdit replaces the current identifier" {
     defer t.allocator.free(source);
     try t.expectEqualStrings("print", source);
     try t.expectEqual(@as(usize, 1), try fixture.app.read(fixture.owner, Ops.selectionCount, .{}));
+}
+
+test "completion menu closes when typing leaves the identifier" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "alpha" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var fixture = try openLanguageFixture(root, "main.zig");
+    defer fixture.app.deinit();
+    try fixture.app.update(fixture.owner, Ops.plantCompletion, .{});
+    try t.expect(try fixture.app.read(fixture.owner, Ops.completionVisible, .{}));
+    try fixture.app.dispatch(fixture.handle, .{ .text = " " });
+    _ = try fixture.app.step(0);
+    try t.expect(try fixture.app.read(fixture.owner, Ops.completionClosed, .{}));
+    var source: []u8 = undefined;
+    try fixture.app.read(fixture.owner, Ops.source, .{ t.allocator, &source });
+    defer t.allocator.free(source);
+    try t.expectEqualStrings("alpha ", source);
 }
 
 test "completion additional edits keep one caret at the primary edit" {

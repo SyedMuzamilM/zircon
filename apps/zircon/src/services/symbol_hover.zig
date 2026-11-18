@@ -7,8 +7,8 @@ const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
 const actions = @import("../actions.zig");
 const shell = @import("../shell.zig");
-const v = @import("../views/components.zig");
 const markdown = @import("../views/markdown.zig");
+const hover_popover = @import("../views/hover_popover.zig");
 const language = @import("language.zig");
 const Shell = shell.Shell;
 
@@ -22,21 +22,32 @@ pub const Model = struct {
     pinned: bool = false,
     pending: ?Pending = null,
     preview: ?markdown.Preview = null,
+    note: ?Note = null,
     height: f32 = 120,
     width: f32 = 480,
 
-    pub fn deinit(self: *Model) void {
+    pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         if (self.preview) |*preview| preview.deinit();
+        if (self.note) |note| {
+            a.free(note.message);
+            a.free(note.source);
+        }
         self.* = .{};
     }
+};
+
+pub const Note = struct {
+    severity: editing.element.Severity,
+    message: []u8,
+    source: []u8,
 };
 
 pub fn clear(self: *Shell, cx: *ui.Context(Shell)) void {
     if (self.symbol_hover.pending) |pending| if (pending.session < self.language.sessions.items.len) {
         if (self.language.sessions.items[pending.session].client) |client| client.cancel(pending.request) catch {};
     };
-    const visible = self.symbol_hover.preview != null;
-    self.symbol_hover.deinit();
+    const visible = self.symbol_hover.preview != null or self.symbol_hover.note != null;
+    self.symbol_hover.deinit(self.allocator);
     if (visible) cx.notify();
 }
 
@@ -51,14 +62,30 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, doc
     if (state.dragging or self.overlay != .none or self.menu_open or self.editor_context_menu != null) return clear(self, cx);
     var snapshot = document.snapshot();
     defer snapshot.deinit();
-    const range = (try state.symbolAt(snapshot, e, point)) orelse return clear(self, cx);
+    const gutter = if (state.show_line_numbers) editing.gutterWidth(snapshot.lineCount(), state.font_size) else 20;
+    if (!editing.annotations.contains(e.bounds, point) or point.x < e.bounds.x + gutter or point.x >= e.bounds.x + e.bounds.width - 12) return clear(self, cx);
+    const at = try state.offsetAtPoint(snapshot, e, point);
+    const diagnostic = language.diagnosticAt(self, snapshot, id, at);
+    const symbol = try state.symbolAt(snapshot, e, point);
+    if (diagnostic == null and symbol == null) return clear(self, cx);
+    const range = if (diagnostic) |hit| hit.range else symbol.?;
     if (self.symbol_hover.target) |target| {
-        if (std.meta.eql(target.document, id) and target.revision == snapshot.revision() and std.meta.eql(target.range, range)) return;
+        const same = std.meta.eql(target.document, id) and target.revision == snapshot.revision() and std.meta.eql(target.range, range);
+        if (same and (self.symbol_hover.note != null) == (diagnostic != null)) return;
     }
-    clear(self, cx);
     const row = (try snapshot.pointAt(range.start)).line;
+    const now = try cx.app.currentTime();
+    clear(self, cx);
+    if (diagnostic) |hit| {
+        const message = try self.allocator.dupe(u8, hit.message);
+        errdefer self.allocator.free(message);
+        const source = try self.allocator.dupe(u8, hit.source);
+        self.symbol_hover.note = .{ .severity = hit.severity, .message = message, .source = source };
+        self.symbol_hover.width = 440;
+        self.symbol_hover.height = 48;
+    }
     self.symbol_hover.target = .{ .document = id, .revision = snapshot.revision(), .offset = range.start, .range = range, .anchor = .{ .x = point.x, .y = e.bounds.y + state.rowY(row, snapshot.revision()) - state.scroll.offset, .width = 1, .height = state.line_height }, .editor_bounds = e.bounds };
-    self.symbol_hover.due = try cx.app.currentTime() + 0.35;
+    self.symbol_hover.due = now + if (diagnostic != null) @as(f64, 0) else 0.35;
     cx.notify();
 }
 
@@ -85,6 +112,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (record.doc.revision() != target.revision or self.language_stopped) return clear(self, cx);
     if (self.symbol_hover.requested or try cx.app.currentTime() < self.symbol_hover.due) return;
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, target.document)) {
+        if (doc.session >= self.language.sessions.items.len) break;
         const client = self.language.sessions.items[doc.session].client orelse break;
         if (!client.ready()) {
             self.symbol_hover.due = try cx.app.currentTime() + 0.1;
@@ -123,23 +151,16 @@ pub fn accept(self: *Shell, cx: *ui.Context(Shell), session: usize, message: @Fi
     self.symbol_hover.preview = preview;
     const window = try cx.app.window(self.window orelse return);
     const width = try preview.contentWidth(window.surface.?.measurer(), @min(520, @max(80, window.dimensions.width - 16)));
-    self.symbol_hover.width = width;
-    self.symbol_hover.height = std.math.clamp(try preview.contentHeight(window.surface.?.measurer(), width - 8) + 8, 40, 320);
+    const note: f32 = if (self.symbol_hover.note != null) 36 else 0;
+    self.symbol_hover.width = @max(width, if (note > 0) @as(f32, 440) else 0);
+    self.symbol_hover.height = std.math.clamp(try preview.contentHeight(window.surface.?.measurer(), width - 8) + 8 + note, 40, 360);
     cx.notify();
 }
 
-fn bounds(self: *const Shell, viewport: ui.Size) ui.Rect {
-    const target = self.symbol_hover.target.?;
-    const width = @min(self.symbol_hover.width, @max(80, viewport.width - 16));
-    const height = @min(self.symbol_hover.height, @max(40, viewport.height - 16));
-    const y = target.anchor.y + target.anchor.height + 6;
-    return .{ .x = std.math.clamp(target.anchor.x - 12, 8, @max(8, viewport.width - width - 8)), .y = std.math.clamp(if (y + height <= viewport.height - 8) y else target.anchor.y - height - 6, 8, @max(8, viewport.height - height - 8)), .width = width, .height = height };
-}
-
 fn overPopup(self: *const Shell, cx: *ui.Context(Shell), point: ui.Point) bool {
-    if (self.symbol_hover.preview == null) return false;
+    if (self.symbol_hover.preview == null and self.symbol_hover.note == null) return false;
     const window = cx.app.window(self.window orelse return false) catch return false;
-    var area = bounds(self, window.dimensions);
+    var area = hover_popover.bounds(self, window.dimensions);
     if (area.y > self.symbol_hover.target.?.anchor.y) area.y -= 6;
     area.height += 6;
     return editing.annotations.contains(area, point);
@@ -157,20 +178,5 @@ pub fn dismissOutside(self: *Shell, cx: *ui.Context(Shell), event: ui.Input) voi
 }
 
 pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
-    if (self.symbol_hover.target == null) return null;
-    if (!self.symbol_hover.requested) try b.requestFrameAfter(@max(0.001, self.symbol_hover.due - b.frame.time));
-    const preview = self.symbol_hover.preview orelse return null;
-    const area = bounds(self, b.viewport());
-    const content = try b.fluent().adopt(try preview.render(b)).listeners(.{ .on_input = b.onInput(input) }).build();
-    const card = try v.floatingPanel(b, self.colors, .{ .width = area.width, .height = area.height }, ui.Insets.all(4), 0, &.{content});
-    return try b.fluent().adopt(card).margin(.{ .top = area.y, .left = area.x }).id(.{ .string = "symbol-hover" }).build();
-}
-
-fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
-    if (e.data == .scroll) if (self.symbol_hover.preview) |*preview| {
-        _ = try preview.handle(e);
-        e.preventDefault();
-        e.stopPropagation();
-        cx.notify();
-    };
+    return hover_popover.render(self, b);
 }

@@ -5,6 +5,7 @@ const canvas = @import("canvas.zig");
 pub const code_line = @import("code_line.zig");
 const commands = @import("commands.zig");
 pub const display = @import("display.zig");
+pub const element = @import("element.zig");
 const editor = @import("editor.zig");
 pub const indent_guides = @import("indent_guides.zig");
 const profile = @import("profile.zig");

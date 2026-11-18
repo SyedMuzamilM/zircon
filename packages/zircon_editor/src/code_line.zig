@@ -4,7 +4,7 @@ const std = @import("std");
 const ui = @import("zircon_ui");
 const editor = @import("root.zig");
 pub const Highlight = struct { start: usize, end: usize, color: ui.Color, newline: bool = false };
-pub const Options = struct { tab_width: usize = 4, horizontal: f32 = 0, segments: []const editor.wrap.Row = &.{}, indent_guides: bool = true, indent_cells: ?usize = null };
+pub const Options = struct { tab_width: usize = 4, horizontal: f32 = 0, segments: []const editor.wrap.Row = &.{}, indent_guides: bool = true, indent_cells: ?usize = null, underline: ?editor.element.Mark = null };
 pub fn element(b: *ui.Ui, source: []const u8, path: []const u8, font: f32, line_height: f32, theme: editor.Theme, ranges: []const Highlight, options: Options) !ui.Element {
     const safe = if (source.len > 65536) "[Line exceeds the display limit]" else if (!std.unicode.utf8ValidateSlice(source)) "[Non-UTF-8 source line]" else source;
     const owned = try b.allocator().dupe(u8, safe);
@@ -22,7 +22,8 @@ pub fn element(b: *ui.Ui, source: []const u8, path: []const u8, font: f32, line_
         try segments.append(b.allocator(), mapped);
     }
     if (segments.items.len == 0) try segments.append(b.allocator(), .{ .line = 0, .start = 0, .end = expanded.bytes.len, .x = 0, .first = true });
-    return b.custom(Code, .{ .text = expanded.bytes, .spans = lexed.spans, .theme = theme, .font = font, .line_height = line_height, .highlights = highlights.items, .horizontal = options.horizontal, .segments = segments.items, .indent_cells = if (options.indent_guides) options.indent_cells orelse editor.indent_guides.cells(safe, options.tab_width) else 0, .tab_width = options.tab_width }, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
+    const underline = if (options.underline != null and safe.ptr == source.ptr) options.underline else null;
+    return b.custom(Code, .{ .text = expanded.bytes, .spans = lexed.spans, .theme = theme, .font = font, .line_height = line_height, .highlights = highlights.items, .horizontal = options.horizontal, .segments = segments.items, .indent_cells = if (options.indent_guides) options.indent_cells orelse editor.indent_guides.cells(safe, options.tab_width) else 0, .tab_width = options.tab_width, .underline_start = if (underline) |mark| expanded.displayOffset(mark.range.start) else null, .underline_end = if (underline) |mark| expanded.displayOffset(mark.range.end) else 0, .underline_color = if (underline) |mark| editor.element.color(theme, mark.severity) else ui.Color.rgb(0) }, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
 }
 const Code = struct {
     text: []const u8,
@@ -35,6 +36,9 @@ const Code = struct {
     segments: []const editor.wrap.Row,
     indent_cells: usize,
     tab_width: usize,
+    underline_start: ?usize = null,
+    underline_end: usize = 0,
+    underline_color: ui.Color = ui.Color.rgb(0),
     pub const LayoutState = void;
     pub const PrepaintState = void;
     pub fn requestLayout(self: *Code, cx: *ui.LayoutCx) !ui.LayoutResult(void) {
@@ -79,6 +83,19 @@ const Code = struct {
                 cursor = end;
             }
             if (cursor < part.end) _ = try self.run(cx, self.text[cursor..part.end], self.theme.foreground, x + cx.measurer.caret(self.text, style, cursor), y, bounds);
+            if (self.underline_start) |origin| if (self.underline_end >= origin) {
+                const start = @max(part.start, origin);
+                const end = @min(part.end, @max(self.underline_end, origin));
+                const point = origin == self.underline_end;
+                if (point and origin >= part.start and origin < part.end) {
+                    const left = cx.measurer.caret(self.text, style, origin);
+                    try editor.element.paint(cx, x + left, @max(6, self.font * 0.55), top, self.line_height, self.underline_color);
+                } else if (!point and start < end) {
+                    const left = cx.measurer.caret(self.text, style, start);
+                    const right = cx.measurer.caret(self.text, style, end);
+                    try editor.element.paint(cx, x + left, @max(0, right - left), top, self.line_height, self.underline_color);
+                }
+            };
             cx.painter.popClip();
         }
     }

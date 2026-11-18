@@ -7,7 +7,6 @@ const workspace = @import("zircon_workspace");
 const catalogue = @import("commands.zig");
 const services_language = @import("services/language.zig");
 const recovery = @import("services/recovery.zig");
-const symbol_hover = @import("services/symbol_hover.zig");
 const shell = @import("shell.zig");
 const terminal_module = @import("terminal.zig");
 const theme = @import("theme.zig");
@@ -15,7 +14,9 @@ const buffer_find = @import("views/buffer_find.zig");
 const chrome = @import("views/chrome.zig");
 const components = @import("views/components.zig");
 const views_diagnostics = @import("views/diagnostics.zig");
+const completion_menu = @import("views/completion_menu.zig");
 const editor_context_menu = @import("views/editor_context_menu.zig");
+const hover_popover = @import("views/hover_popover.zig");
 const views_extensions = @import("views/extensions.zig");
 const views_git_diff = @import("views/git/diff.zig");
 const git_controls = @import("views/git/menus.zig");
@@ -66,7 +67,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .build();
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
-    if (try symbol_hover.render(self, b)) |popover| try layers.append(b.allocator(), popover);
+    if (try hover_popover.render(self, b)) |popover| try layers.append(b.allocator(), popover);
     if (self.terminal.sessions.items.len > 0) try layers.append(b.allocator(), try terminal_module.wakeElement(b));
     if (self.find.waiting and !self.find.busy) try layers.append(b.allocator(), try services_language.syntaxWake(b));
     if (self.language.syntax_waiting) try layers.append(b.allocator(), try services_language.syntaxWake(b));
@@ -76,40 +77,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.menu_open) try layers.append(b.allocator(), try chrome.menu(self, b));
     if (self.editor_context_menu != null) try layers.append(b.allocator(), try editor_context_menu.render(self, b));
     if (self.overlay != .none and self.fields != null) try layers.append(b.allocator(), try overlays.render(self, b));
-    if (self.overlay == .none) if (self.language.completions) |message| {
-        var choices: std.ArrayList(ui.Element) = .empty;
-        const start = self.language.completion_index -| 7;
-        for (message.data.completion.items[start..@min(start + 8, message.data.completion.items.len)], start..) |item, index| {
-            try choices.append(b.allocator(), try b.fluent().button(.{
-                .label = item.label,
-            })
-                .h(.{ .px = 30 })
-                .shrink_0()
-                .padding(.{ .left = 12, .top = 7 })
-                .background(if (index == self.language.completion_index) colors.selected else colors.panel)
-                .text_style(.{ .size = 13, .mono = true, .color = colors.text })
-                .overflow_hidden()
-                .on_click(b.onClickWith(Shell.onCompletion, @as(u32, @intCast(index))))
-                .id(.{ .number = @intCast(index) })
-                .build());
-        }
-        if (choices.items.len == 0) try choices.append(b.allocator(), try label(b, colors, "No completions", colors.muted, 12));
-        const requested: ui.Size = .{ .width = @min(420, viewport.width - 24), .height = @as(f32, @floatFromInt(@max(1, choices.items.len))) * 30 + 12 };
-        var anchor: ui.Rect = .{ .x = if (self.sidebar_visible) self.panelWidth() + 60 else 60, .y = 100, .height = 22 };
-        if (self.window) |handle| if (b.frame.app) |app| {
-            if ((try app.window(handle)).frames.committed.text_input) |input| anchor = input.caret;
-        };
-        anchor.width = requested.width;
-        const placement = components.popoverBounds(viewport, anchor, requested);
-        const popup = try b.fluent().adopt(try components.floatingPanel(b, colors, .{ .width = placement.width, .height = placement.height }, ui.Insets.all(6), 0, choices.items))
-            .id(.{ .string = "completion-list" })
-            .build();
-        try layers.append(b.allocator(), try b.fluent().div()
-            .padding(.{ .top = placement.y, .left = placement.x })
-            .stack()
-            .children(.{popup})
-            .build());
-    };
+    if (try completion_menu.render(self, b)) |menu| try layers.append(b.allocator(), menu);
     return b.fluent().div()
         .background(colors.document)
         .overflow_hidden()

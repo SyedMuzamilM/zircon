@@ -30,6 +30,32 @@ const Ops = struct {
         self.language.diagnostics_generation += 1;
         cx.notify();
     }
+    fn oneIssue(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        const tab = self.tabs.items[self.active];
+        const record = try self.workspace.getConst(tab.document);
+        var snapshot = record.doc.snapshot();
+        defer snapshot.deinit();
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        const a = arena.allocator();
+        const items = try a.alloc(zircon.language.Diagnostic, 1);
+        items[0] = .{
+            .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 5 } },
+            .message = "broken name",
+            .severity = .error_value,
+            .source = "fixture",
+        };
+        const uri = try zircon.language.fileUri(self.allocator, record.path.?);
+        try self.language.documents.append(self.allocator, .{
+            .id = tab.document,
+            .uri = uri,
+            .path = try self.allocator.dupe(u8, record.path.?),
+            .session = 0,
+            .version = snapshot.revision(),
+            .diagnostics = .{ .arena = arena, .data = .{ .diagnostics = .{ .uri = uri, .version = snapshot.revision(), .items = items } } },
+        });
+        self.language.diagnostics_generation += 1;
+        cx.notify();
+    }
     fn command(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), which: zircon.Command) !void {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onCommand(&event, cx, which);
@@ -67,6 +93,43 @@ fn click(app: *ui.App, h: ui.WindowHandle, label: []const u8) !void {
     try app.dispatch(h, .{ .pointer_down = .{ .position = point } });
     try app.dispatch(h, .{ .pointer_up = .{ .position = point } });
     _ = try app.step(0);
+}
+
+test "editor squiggles and diagnostic hover use the stored issue" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "alpha\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1100, .height = 760 }, try zircon.Shell.init(t.allocator, t.io, root, "main.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    try app.update(owner, Ops.oneIssue, .{});
+    try app.update(owner, zircon.Shell.pollLanguage, .{});
+    _ = try app.step(0);
+    const tint = try app.read(owner, struct {
+        fn deleted(self: *const zircon.Shell) ui.Color {
+            return self.tabs.items[self.active].editor.theme.git_deleted;
+        }
+    }.deleted, .{});
+    var waves: usize = 0;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .rect and std.meta.eql(item.color, tint) and item.rect.height <= 2 and item.rect.width <= 4) {
+        waves += 1;
+    };
+    try t.expect(waves >= 4);
+    const editor_bounds = try bounds(&app, h, "primary-editor");
+    const metrics = (try app.window(h)).surface.?.measurer();
+    const at: ui.Point = .{ .x = editor_bounds.x + 76 + metrics.caret("alpha", .{ .size = 14, .mono = true }, 1), .y = editor_bounds.y + 11 };
+    try app.dispatch(h, .{ .pointer_move = .{ .position = at } });
+    _ = try app.step(0);
+    var message = false;
+    for ((try app.window(h)).frames.committed.scene.items) |item| if (item.kind == .text and std.mem.indexOf(u8, item.text, "broken name") != null) {
+        message = true;
+    };
+    try t.expect(message);
+    try t.expect((try bounds(&app, h, "symbol-hover")).height >= 40);
 }
 
 test "diagnostics tab virtualizes issues filters severity and opens another source" {

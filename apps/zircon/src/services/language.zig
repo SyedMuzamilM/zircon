@@ -197,7 +197,7 @@ fn closeDocument(self: *Shell, index: usize) !void {
 /// Other documents retain their clients and diagnostics; retired slots keep
 /// resolver indices stable and are reused only with a new epoch.
 pub fn invalidateDocument(self: *Shell, id: ws.DocumentId) !void {
-    if (self.symbol_hover.target) |target| if (std.meta.eql(target.document, id)) self.symbol_hover.deinit();
+    if (self.symbol_hover.target) |target| if (std.meta.eql(target.document, id)) self.symbol_hover.deinit(self.allocator);
     cancelCompletion(self, id);
     const i = try syntaxDocument(self, id);
     const tracked = &self.language.syntax_documents.items[i];
@@ -255,9 +255,15 @@ fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const zircon_extens
 /// Reconciles the real open-document set before draining protocol messages.
 /// Full text is serialized only for didOpen or a newer document revision.
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
-    const snapshot = self.extension_snapshot orelse return;
+    const snapshot = self.extension_snapshot orelse {
+        if (try syncDiagnostics(self)) cx.notify();
+        return;
+    };
     try pollSyntax(self, cx);
-    if (self.language_stopped) return;
+    if (self.language_stopped) {
+        if (try syncDiagnostics(self)) cx.notify();
+        return;
+    }
     var changed = false;
     var i: usize = 0;
     while (i < self.language.documents.items.len) {
@@ -358,9 +364,26 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                         changed = true;
                         continue;
                     }
+                    var kept: [128]u8 = undefined;
+                    var kept_len: usize = 0;
+                    if (self.language.completions) |old| {
+                        const old_items = old.data.completion.items;
+                        if (self.language.completion_index < old_items.len) {
+                            const label = old_items[self.language.completion_index].label;
+                            if (label.len <= kept.len) {
+                                @memcpy(kept[0..label.len], label);
+                                kept_len = label.len;
+                            }
+                        }
+                    }
                     if (self.language.completions) |*old| old.deinit();
                     self.language.completions = message;
                     self.language.completion_index = 0;
+                    if (kept_len > 0) for (message.data.completion.items, 0..) |item, index| if (std.mem.eql(u8, item.label, kept[0..kept_len])) {
+                        self.language.completion_index = index;
+                        break;
+                    };
+                    symbol_hover.clear(self, cx);
                     moved = true;
                     changed = true;
                 },
@@ -421,7 +444,84 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             }
         }
     };
+    if (try syncDiagnostics(self)) changed = true;
     if (changed) cx.notify();
+}
+
+pub fn severityOf(value: @FieldType(lsp.Diagnostic, "severity")) zircon_editor.element.Severity {
+    return switch (value) {
+        .error_value => .@"error",
+        .warning => .warning,
+        .information => .information,
+        .hint => .hint,
+    };
+}
+
+pub const DiagnosticHit = struct {
+    range: text.Range,
+    severity: zircon_editor.element.Severity,
+    message: []const u8,
+    source: []const u8,
+};
+
+pub fn diagnosticAt(self: *const Shell, snapshot: text.Snapshot, id: ws.DocumentId, offset: usize) ?DiagnosticHit {
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, id)) {
+        const message = doc.diagnostics orelse return null;
+        const value = message.data.diagnostics;
+        if (value.version != snapshot.revision()) return null;
+        var best: ?DiagnosticHit = null;
+        for (value.items) |item| {
+            const start = lsp.offsetAt(snapshot, item.range.start) catch continue;
+            const end = lsp.offsetAt(snapshot, item.range.end) catch continue;
+            if (end < start) continue;
+            if (start == end) {
+                if (offset != start) continue;
+            } else if (offset < start or offset >= end) continue;
+            const hit: DiagnosticHit = .{ .range = .{ .start = start, .end = end }, .severity = severityOf(item.severity), .message = item.message, .source = item.source orelse "" };
+            if (best == null or hit.range.end - hit.range.start < best.?.range.end - best.?.range.start or (hit.range.end - hit.range.start == best.?.range.end - best.?.range.start and @intFromEnum(hit.severity) > @intFromEnum(best.?.severity))) best = hit;
+        }
+        return best;
+    };
+    return null;
+}
+
+pub fn syncDiagnostics(self: *Shell) !bool {
+    var changed = false;
+    for (self.tabs.items) |*tab| {
+        if (try syncEditorDiagnostics(self, &tab.editor, tab.document)) changed = true;
+        if (tab.secondary_state) |*state| {
+            if (try syncEditorDiagnostics(self, state, tab.document)) changed = true;
+        }
+    }
+    if (self.secondary) |*pane| {
+        if (try syncEditorDiagnostics(self, &pane.editor, pane.document)) changed = true;
+    }
+    for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| {
+        if (try syncEditorDiagnostics(self, &view.editor, view.document)) changed = true;
+    };
+    return changed;
+}
+
+fn syncEditorDiagnostics(self: *Shell, state: *zircon_editor.Editor, id: ws.DocumentId) !bool {
+    const record = self.workspace.getConst(id) catch return false;
+    var snapshot = record.doc.snapshot();
+    defer snapshot.deinit();
+    if (state.diagnostics_generation == self.language.diagnostics_generation and state.diagnostics_revision == snapshot.revision()) return false;
+    var marks: std.ArrayList(zircon_editor.element.Mark) = .empty;
+    defer marks.deinit(self.allocator);
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, id)) {
+        if (doc.diagnostics) |message| {
+            if (message.data.diagnostics.version == snapshot.revision()) for (message.data.diagnostics.items) |item| {
+                const start = lsp.offsetAt(snapshot, item.range.start) catch continue;
+                const end = lsp.offsetAt(snapshot, item.range.end) catch continue;
+                if (end < start) continue;
+                try marks.append(self.allocator, .{ .range = .{ .start = start, .end = end }, .severity = severityOf(item.severity), .message = item.message, .source = item.source orelse "" });
+            };
+        }
+        break;
+    };
+    try state.setDiagnostics(snapshot.revision(), self.language.diagnostics_generation, marks.items);
+    return true;
 }
 
 fn matchRank(candidate: []const u8, prefix: []const u8) ?usize {
@@ -498,15 +598,25 @@ fn acceptDiagnostics(self: *Shell, session: usize, message: *lsp.Message) !bool 
     return true;
 }
 
-pub fn completionTrigger(input: ui.Input) bool {
-    const bytes = switch (input) {
+fn completionBytes(input: ui.Input) []const u8 {
+    return switch (input) {
         .text => |value| value,
         .edit => |edit| if (edit.composing) "" else edit.text,
         else => "",
     };
+}
+
+pub fn completionTrigger(input: ui.Input) bool {
+    const bytes = completionBytes(input);
     if (bytes.len == 0) return false;
     for (bytes) |byte| if (!identifierByte(byte) and byte != '.' and byte != '@' and byte != ':' and byte != '"' and byte != '/' and byte != ']') return false;
     return true;
+}
+
+/// A typed character that cannot extend the open query. Deletes and caret motion are not breaks.
+pub fn completionBreaker(input: ui.Input) bool {
+    const bytes = completionBytes(input);
+    return bytes.len > 0 and !completionTrigger(input);
 }
 
 pub fn definitionPointer(self: *Shell, cx: *ui.Context(Shell), state: *zircon_editor.Editor, document: *const text.Document, event: *ui.Event(ui.Input)) !bool {
@@ -540,12 +650,15 @@ pub fn request(self: *Shell, cx: *ui.Context(Shell)) !void {
     const current = try actions.active(self);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
         const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
+        const same_document = if (self.language.pending) |old| std.meta.eql(old.document, current.id) else self.language.completions == null;
         if (self.language.pending) |old| if (old.session < self.language.sessions.items.len) if (self.language.sessions.items[old.session].client) |previous| previous.cancel(old.request) catch {};
         var snapshot = try self.workspace.snapshot(current.id);
         defer snapshot.deinit();
         const cursor = current.editor.primary().head;
         const id = try client.completion(doc.uri, snapshot.revision(), try lsp.positionAt(snapshot, cursor));
-        self.language.clearCompletion();
+        if (same_document) {
+            self.language.pending = null;
+        } else self.language.clearCompletion();
         self.language.pending = .{ .document = current.id, .session = doc.session, .request = id, .revision = snapshot.revision(), .cursor = cursor };
         cx.notify();
         return;

@@ -5,6 +5,7 @@ const text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const annotations = @import("annotations.zig");
 const brackets = @import("brackets.zig");
+const element = @import("element.zig");
 const canvas = @import("canvas.zig");
 const commands = @import("commands.zig");
 const comments = @import("comments.zig");
@@ -73,6 +74,9 @@ pub const Editor = struct {
     search_visible: bool = false,
     search_query: []u8 = &.{},
     search_case_sensitive: bool = true,
+    diagnostics: []element.Mark = &.{},
+    diagnostics_revision: ?u64 = null,
+    diagnostics_generation: u64 = std.math.maxInt(u64),
     pub fn init(a: std.mem.Allocator) !Editor {
         var selections = try selection.Set.init(a);
         errdefer selections.deinit(a);
@@ -96,7 +100,38 @@ pub const Editor = struct {
         self.history.deinit(self.allocator);
         self.allocator.free(self.search_ranges);
         self.allocator.free(self.search_query);
+        self.clearDiagnostics();
         self.* = undefined;
+    }
+    pub fn setDiagnostics(self: *Editor, revision: u64, generation: u64, items: []const element.Mark) !void {
+        const next = try self.allocator.alloc(element.Mark, items.len);
+        errdefer self.allocator.free(next);
+        var filled: usize = 0;
+        errdefer for (next[0..filled]) |mark| {
+            self.allocator.free(mark.message);
+            self.allocator.free(mark.source);
+        };
+        for (items) |item| {
+            const message = try self.allocator.dupe(u8, item.message);
+            const source = self.allocator.dupe(u8, item.source) catch |err| {
+                self.allocator.free(message);
+                return err;
+            };
+            next[filled] = .{ .range = item.range, .severity = item.severity, .message = message, .source = source };
+            filled += 1;
+        }
+        self.clearDiagnostics();
+        self.diagnostics = next;
+        self.diagnostics_revision = revision;
+        self.diagnostics_generation = generation;
+    }
+    fn clearDiagnostics(self: *Editor) void {
+        for (self.diagnostics) |mark| {
+            self.allocator.free(mark.message);
+            self.allocator.free(mark.source);
+        }
+        self.allocator.free(self.diagnostics);
+        self.diagnostics = &.{};
     }
     pub fn setHighlights(self: *Editor, snapshot: text.Snapshot, spans: []const syntax.Span) !void {
         if (spans.len > 1_000_000) return error.TooManyHighlights;

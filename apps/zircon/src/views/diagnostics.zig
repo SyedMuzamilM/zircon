@@ -6,6 +6,7 @@ const zircon_text = @import("zircon_text");
 const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
 const actions = @import("../actions.zig");
+const language = @import("../services/language.zig");
 const shell = @import("../shell.zig");
 const v = @import("components.zig");
 const Shell = shell.Shell;
@@ -195,18 +196,23 @@ fn issueExcerpt(self: *const Shell, b: *ui.Ui, issue: Issue, height: f32, line_h
         const bytes = if (range.end - range.start <= 65536) try snapshot.copy(b.allocator(), range) else "[Line exceeds the display limit]";
         var highlight: [1]editor.code_line.Highlight = undefined;
         var marks: []const editor.code_line.Highlight = &.{};
+        var underline: ?editor.element.Mark = null;
         if (row == diagnostic.range.start.line) {
             const start = lsp.offsetAt(snapshot, diagnostic.range.start) catch range.start;
             const end = lsp.offsetAt(snapshot, diagnostic.range.end) catch range.end;
             var tint = color;
             tint.a = 0.16;
-            highlight[0] = .{ .start = start -| range.start, .end = @min(range.end, end) -| range.start, .color = tint };
+            const local_start = start -| range.start;
+            const local_end = @min(range.end, end) -| range.start;
+            highlight[0] = .{ .start = local_start, .end = local_end, .color = tint };
             marks = &highlight;
+            underline = .{ .range = .{ .start = local_start, .end = local_end }, .severity = language.severityOf(diagnostic.severity), .message = diagnostic.message, .source = diagnostic.source orelse "" };
         }
         const code = try editor.code_line.element(b, bytes, record.path orelse "", font, line_height, self.editor_options.theme, marks, .{
             .tab_width = self.editor_options.tab_width,
             .indent_guides = self.editor_options.indent_guides,
             .indent_cells = if (editor.indent_guides.blank(bytes)) try editor.indent_guides.blankCells(snapshot, row, self.editor_options.tab_width, b.allocator()) else null,
+            .underline = underline,
         });
         const number = if (self.editor_options.line_numbers) try std.fmt.allocPrint(b.allocator(), "{d}", .{row + 1}) else "";
         try lines.append(b.allocator(), try b.fluent().row().h_px(line_height).shrink_0().children(.{

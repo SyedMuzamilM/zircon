@@ -8,6 +8,7 @@ const blame_view = @import("blame_view.zig");
 const brackets = @import("brackets.zig");
 const display = @import("display.zig");
 const editor = @import("editor.zig");
+const element = @import("element.zig");
 const indent_guides = @import("indent_guides.zig");
 const profile_module = @import("profile.zig");
 const selection = @import("selections.zig");
@@ -51,6 +52,7 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
     } else null;
     const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else if (state.selections.items.items.len > 0) state.primary().head else 0, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
     var canvas = value;
+    canvas.diagnostics = if (state.diagnostics_revision == snapshot.revision()) state.diagnostics else &.{};
     if (state.selections.items.items.len > 0) {
         canvas.scope = try state.bracket_cache.get(state, snapshot, b.allocator());
         canvas.scope_guide = state.bracket_cache.guide;
@@ -94,6 +96,7 @@ const Canvas = struct {
     search: []const u8,
     search_ranges: []const text.Range,
     external_search: bool,
+    diagnostics: []const element.Mark = &.{},
     pub const LayoutState = ui.layout.Measurer;
     pub const PrepaintState = Prepared;
     pub fn deinit(self: *Canvas) void {
@@ -281,6 +284,7 @@ const Canvas = struct {
                 at = span.end;
             }
             if (at < segment_end) try drawRun(cx, line, self.theme, metrics.*, style, x, at, segment_end, .plain);
+            try paintDiagnostics(self, cx, metrics.*, line, style, x, segment_start, segment_end);
             if (self.marked) |marked| if (!line.oversized and marked.start <= line.range.end and marked.end >= line.range.start) {
                 const left = line.display.caret(metrics.*, style, @max(marked.start, line.range.start) - line.range.start);
                 const right = line.display.caret(metrics.*, style, @min(marked.end, line.range.end) - line.range.start);
@@ -411,6 +415,28 @@ fn appendLexical(a: std.mem.Allocator, output: *std.ArrayList(syntax.Span), span
         if (span.end <= begin) continue;
         if (span.start >= end) break;
         try output.append(a, .{ .start = @max(begin, span.start), .end = @min(end, span.end), .kind = span.kind });
+    }
+}
+fn paintDiagnostics(self: *const Canvas, cx: *ui.PaintCx, metrics: ui.layout.Measurer, line: RenderLine, style: ui.TextStyle, x: f32, segment_start: usize, segment_end: usize) !void {
+    if (line.oversized) return;
+    for (self.diagnostics) |mark| {
+        if (mark.range.start > line.range.end or mark.range.end < line.range.start) continue;
+        const point = mark.range.start == mark.range.end;
+        if (point and (mark.range.start < line.range.start or mark.range.start > line.range.end)) continue;
+        if (!point and mark.range.end == line.range.start) continue;
+        var begin = @max(mark.range.start, line.range.start) - line.range.start;
+        var end = @min(@max(mark.range.end, mark.range.start), line.range.end) - line.range.start;
+        if (point) {
+            begin = mark.range.start - line.range.start;
+            end = begin;
+        }
+        begin = @max(begin, segment_start);
+        end = @min(if (point) begin else end, segment_end);
+        if (begin > segment_end or (!point and begin >= end) or (point and begin >= segment_end)) continue;
+        const left = line.display.caret(metrics, style, begin);
+        const right = if (point) left + @max(6, self.font_size * 0.55) else line.display.caret(metrics, style, end);
+        if (right <= left) continue;
+        try element.paint(cx, x + left, right - left, line.y, self.line_height, element.color(self.theme, mark.severity));
     }
 }
 fn drawRun(cx: *ui.PaintCx, line: RenderLine, theme: theme_module.Theme, metrics: ui.layout.Measurer, style: ui.TextStyle, x: f32, start: usize, end: usize, kind: syntax.Kind) !void {

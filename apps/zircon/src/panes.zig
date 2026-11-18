@@ -30,33 +30,37 @@ pub fn selectSecondary(self: *Shell, index: usize) !void {
         self.tabs.items[index].secondary = true;
         self.active_pane = .secondary;
         self.editor_focus_request +%= 1;
+        try self.installDiagnostics();
         return;
     };
-    var next = if (self.tabs.items[index].secondary_state) |state| state else try zircon_editor.Editor.init(self.allocator);
-    self.tabs.items[index].secondary_state = null;
-    errdefer next.deinit();
-    const record = try self.workspace.getConst(id);
-    self.configureEditor(&next, self.languagePath(id, record.path orelse ""));
-    var snapshot = record.doc.snapshot();
-    defer snapshot.deinit();
-    next.synchronize(snapshot);
-    if (self.secondary) |pane| {
-        var stored = false;
-        for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, pane.document)) {
-            if (tab.secondary_state) |*old| old.deinit();
-            tab.secondary_state = pane.editor;
-            stored = true;
-            break;
-        };
-        if (!stored) {
-            var editor = pane.editor;
-            editor.deinit();
+    {
+        var next = if (self.tabs.items[index].secondary_state) |state| state else try zircon_editor.Editor.init(self.allocator);
+        self.tabs.items[index].secondary_state = null;
+        errdefer next.deinit();
+        const record = try self.workspace.getConst(id);
+        self.configureEditor(&next, self.languagePath(id, record.path orelse ""));
+        var snapshot = record.doc.snapshot();
+        defer snapshot.deinit();
+        next.synchronize(snapshot);
+        if (self.secondary) |pane| {
+            var stored = false;
+            for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, pane.document)) {
+                if (tab.secondary_state) |*old| old.deinit();
+                tab.secondary_state = pane.editor;
+                stored = true;
+                break;
+            };
+            if (!stored) {
+                var editor = pane.editor;
+                editor.deinit();
+            }
         }
+        self.tabs.items[index].secondary = true;
+        self.secondary = .{ .document = id, .editor = next };
+        self.active_pane = .secondary;
+        self.editor_focus_request +%= 1;
     }
-    self.tabs.items[index].secondary = true;
-    self.secondary = .{ .document = id, .editor = next };
-    self.active_pane = .secondary;
-    self.editor_focus_request +%= 1;
+    try self.installDiagnostics();
 }
 
 pub fn normalizePrimary(self: *Shell) void {

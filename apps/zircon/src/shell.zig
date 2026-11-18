@@ -159,7 +159,7 @@ pub const Shell = struct {
         return self;
     }
     pub fn deinit(self: *Shell, _: std.mem.Allocator) void {
-        self.symbol_hover.deinit();
+        self.symbol_hover.deinit(self.allocator);
         panes.cancel(self);
         self.recent.deinit(self.allocator);
         self.terminal.deinit(self.allocator);
@@ -589,7 +589,7 @@ pub const Shell = struct {
     }
     pub fn onTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: u32) !void {
         self.language.clearCompletion();
-        self.symbol_hover.deinit();
+        self.symbol_hover.deinit(self.allocator);
         const index = target & 0x7fffffff;
         if (target & 0x80000000 != 0) {
             if (index < self.tabs.items.len) try panes.selectSecondary(self, index);
@@ -724,6 +724,9 @@ pub const Shell = struct {
     }
     pub fn onFindQuery(self: *Shell, cx: *ui.Context(Shell), _: ui.Entity(ui.controls.TextInput)) !void {
         if (self.find.visible) try buffer_find.changed(self, cx);
+    }
+    pub fn installDiagnostics(self: *Shell) !void {
+        _ = try services_language.syncDiagnostics(self);
     }
     pub fn pollLanguage(self: *Shell, cx: *ui.Context(Shell)) !void {
         if (self.window) |handle| _ = cx.app.window(handle) catch |err| switch (err) {
