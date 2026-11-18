@@ -1,8 +1,8 @@
 //! Diagnostic underline geometry shared by the editor canvas and excerpt rows.
-const ui = @import("zircon_ui");
-const text = @import("zircon_text");
-const theme_module = @import("theme.zig");
 
+const text = @import("zircon_text");
+const ui = @import("zircon_ui");
+const theme_module = @import("theme.zig");
 pub const Severity = enum { hint, information, warning, @"error" };
 
 pub const Mark = struct {

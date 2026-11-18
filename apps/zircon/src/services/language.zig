@@ -478,7 +478,7 @@ pub fn diagnosticAt(self: *const Shell, snapshot: text.Snapshot, id: ws.Document
                 if (offset != start) continue;
             } else if (offset < start or offset >= end) continue;
             const hit: DiagnosticHit = .{ .range = .{ .start = start, .end = end }, .severity = severityOf(item.severity), .message = item.message, .source = item.source orelse "" };
-            if (best == null or hit.range.end - hit.range.start < best.?.range.end - best.?.range.start or (hit.range.end - hit.range.start == best.?.range.end - best.?.range.start and @intFromEnum(hit.severity) > @intFromEnum(best.?.severity))) best = hit;
+            if (best == null or hit.range.end - hit.range.start < best.?.range.end - best.?.range.start or (hit.range.end - hit.range.start == best.?.range.end - best.?.range.start and @backingInt(hit.severity) > @backingInt(best.?.severity))) best = hit;
         }
         return best;
     };
