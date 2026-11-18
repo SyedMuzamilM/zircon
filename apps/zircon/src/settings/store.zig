@@ -208,7 +208,7 @@ fn validate(value: std.json.Value) !void {
 fn persist(io: std.Io, path: []const u8, bytes: []const u8) !void {
     const parent = std.fs.path.dirname(path) orelse ".";
     try std.Io.Dir.cwd().createDirPath(io, parent);
-    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{});
+    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true });
     defer atomic.deinit(io);
     try atomic.file.writeStreamingAll(io, bytes);
     try atomic.file.sync(io);

@@ -11,6 +11,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.1
+      - run: cargo build --release --locked --manifest-path tools/zed-extension-host/Cargo.toml
       - run: ./tools/zig build check
       - run: python3 -B tools/test_zig_stdlib_overlay.py
       - run: cargo test --release --locked --manifest-path tools/zed-extension-host/Cargo.toml

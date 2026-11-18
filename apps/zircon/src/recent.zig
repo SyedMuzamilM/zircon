@@ -37,7 +37,7 @@ pub const Recent = struct {
         const json = try std.json.Stringify.valueAlloc(a, self.entries.items, .{});
         defer a.free(json);
         try std.Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(self.path.?) orelse ".");
-        var atomic = try std.Io.Dir.cwd().createFileAtomic(io, self.path.?, .{});
+        var atomic = try std.Io.Dir.cwd().createFileAtomic(io, self.path.?, .{ .replace = true });
         defer atomic.deinit(io);
         try atomic.file.writeStreamingAll(io, json);
         try atomic.file.sync(io);

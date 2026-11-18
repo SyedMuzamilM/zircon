@@ -7,8 +7,8 @@ const ui = @import("zircon_ui");
 const ws = @import("zircon_workspace");
 const actions = @import("../actions.zig");
 const shell = @import("../shell.zig");
-const markdown = @import("../views/markdown.zig");
 const hover_popover = @import("../views/hover_popover.zig");
+const markdown = @import("../views/markdown.zig");
 const language = @import("language.zig");
 const Shell = shell.Shell;
 
