@@ -56,6 +56,14 @@ const Ops = struct {
         self.language.diagnostics_generation += 1;
         cx.notify();
     }
+    fn republish(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+        const message = &self.language.documents.items[0].diagnostics.?;
+        const items = try message.arena.allocator().dupe(zircon.language.Diagnostic, message.data.diagnostics.items);
+        items[0].message = "updated diagnostic";
+        message.data.diagnostics.items = items;
+        self.language.diagnostics_generation += 1;
+        cx.notify();
+    }
     fn command(self: *zircon.Shell, cx: *ui.Context(zircon.Shell), which: zircon.Command) !void {
         var event: ui.Event(ui.Click) = .{ .data = .{} };
         try self.onCommand(&event, cx, which);
@@ -129,6 +137,15 @@ test "editor squiggles and diagnostic hover use the stored issue" {
         message = true;
     };
     try t.expect(message);
+    try app.update(owner, Ops.republish, .{});
+    try app.update(owner, zircon.Shell.pollLanguage, .{});
+    _ = try app.step(0);
+    const note = try app.read(owner, struct {
+        fn refreshed(self: *const zircon.Shell) bool {
+            return std.mem.eql(u8, self.symbol_hover.note.?.message, "updated diagnostic");
+        }
+    }.refreshed, .{});
+    try t.expect(note);
     try t.expect((try bounds(&app, h, "symbol-hover")).height >= 40);
 }
 

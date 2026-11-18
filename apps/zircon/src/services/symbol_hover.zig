@@ -23,6 +23,7 @@ pub const Model = struct {
     pending: ?Pending = null,
     preview: ?markdown.Preview = null,
     note: ?Note = null,
+    note_generation: u64 = 0,
     height: f32 = 120,
     width: f32 = 480,
 
@@ -41,6 +42,12 @@ pub const Note = struct {
     message: []u8,
     source: []u8,
 };
+
+fn copyNote(a: std.mem.Allocator, hit: language.DiagnosticHit) !Note {
+    const message = try a.dupe(u8, hit.message);
+    errdefer a.free(message);
+    return .{ .severity = hit.severity, .message = message, .source = try a.dupe(u8, hit.source) };
+}
 
 pub fn clear(self: *Shell, cx: *ui.Context(Shell)) void {
     if (self.symbol_hover.pending) |pending| if (pending.session < self.language.sessions.items.len) {
@@ -77,10 +84,8 @@ pub fn pointer(self: *Shell, cx: *ui.Context(Shell), state: *editing.Editor, doc
     const now = try cx.app.currentTime();
     clear(self, cx);
     if (diagnostic) |hit| {
-        const message = try self.allocator.dupe(u8, hit.message);
-        errdefer self.allocator.free(message);
-        const source = try self.allocator.dupe(u8, hit.source);
-        self.symbol_hover.note = .{ .severity = hit.severity, .message = message, .source = source };
+        self.symbol_hover.note = try copyNote(self.allocator, hit);
+        self.symbol_hover.note_generation = self.language.diagnostics_generation;
         self.symbol_hover.width = 440;
         self.symbol_hover.height = 48;
     }
@@ -110,6 +115,19 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     const target = self.symbol_hover.target orelse return;
     const record = self.workspace.getConst(target.document) catch return clear(self, cx);
     if (record.doc.revision() != target.revision or self.language_stopped) return clear(self, cx);
+    if (self.symbol_hover.note) |old| {
+        if (self.symbol_hover.note_generation != self.language.diagnostics_generation) {
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            const hit = language.diagnosticAt(self, snapshot, target.document, target.offset) orelse return clear(self, cx);
+            if (!std.meta.eql(hit.range, target.range)) return clear(self, cx);
+            self.symbol_hover.note = try copyNote(self.allocator, hit);
+            self.allocator.free(old.message);
+            self.allocator.free(old.source);
+            self.symbol_hover.note_generation = self.language.diagnostics_generation;
+            cx.notify();
+        }
+    }
     if (self.symbol_hover.requested or try cx.app.currentTime() < self.symbol_hover.due) return;
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, target.document)) {
         if (doc.session >= self.language.sessions.items.len) break;

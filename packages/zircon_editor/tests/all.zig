@@ -1396,3 +1396,12 @@ test "Git gutter markers follow inserted rows in the edited buffer and its other
         try t.expect(markers[0].expanded);
     }
 }
+
+test "point diagnostics belong to one visual segment including empty and final rows" {
+    const contains = editor.element.containsPoint;
+    try t.expect(!contains(3, 0, 3, 5));
+    try t.expect(contains(3, 3, 5, 5));
+    try t.expect(!contains(2, 3, 5, 5));
+    try t.expect(contains(5, 3, 5, 5));
+    try t.expect(contains(0, 0, 0, 0));
+}
