@@ -31,9 +31,8 @@ pub const Recent = struct {
                 }
             }
         }
-        const copy = try a.dupe(u8, root);
-        errdefer a.free(copy);
-        try self.entries.insert(a, 0, copy);
+        try self.entries.ensureUnusedCapacity(a, 1);
+        self.entries.insertAssumeCapacity(0, try a.dupe(u8, root));
         const json = try std.json.Stringify.valueAlloc(a, self.entries.items, .{});
         defer a.free(json);
         try std.Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(self.path.?) orelse ".");

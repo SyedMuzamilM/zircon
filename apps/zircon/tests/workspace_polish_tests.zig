@@ -692,6 +692,30 @@ test "recent-project menu loads persisted paths and layout selection preserves t
     try t.expect(store.values().panel_layout == .classic);
 }
 
+test "recent projects remain readable when the history file cannot be replaced" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    // A directory at the storage path makes the atomic replacement fail.
+    try tmp.dir.createDirPath(t.io, "recent-projects.json");
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const settings_path = try std.fs.path.join(t.allocator, &.{ root, "settings.json" });
+    defer t.allocator.free(settings_path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, settings_path);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Read = struct {
+        fn recent(self: *const zircon.Shell) !void {
+            try t.expectEqual(@as(usize, 1), self.recent.entries.items.len);
+            try t.expectEqualStrings(self.workspace.root_path, self.recent.entries.items[0]);
+        }
+    };
+    try app.read(owner, Read.recent, .{});
+    try app.update(owner, Ops.command, .{.recent_projects});
+    _ = try app.step(0);
+}
+
 test "native split workspace and control menus render in both themes" {
     if (comptime ui.testing.native == void) return error.SkipZigTest;
     var app = try ui.App.init(.{ .allocator = t.allocator });
