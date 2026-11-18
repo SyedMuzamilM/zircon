@@ -139,6 +139,7 @@ pub fn build(b: *std.Build) void {
     const import_check = b.addSystemCommand(&.{ "python3", "tools/hoist_zig_imports.py", "--check", "apps", "packages", "examples", "tools", "build.zig" });
     examples_compile.dependOn(&import_check.step);
     b.step("counter", "Inspect a declarative counter without a window").dependOn(&example_run.step);
+    sidebarBenchmark(b, module, target, optimize, false);
     const list_bench = b.addExecutable(.{ .name = "zircon-ui-list-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_ui_list.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "zircon_ui", .module = module }} }) });
     b.step("build-bench-list", "Build the million-item virtual list benchmark").dependOn(&b.addInstallArtifact(list_bench, .{}).step);
     const extension_host_build = b.addSystemCommand(&.{ "cargo", "build", "--release", "--locked", "--manifest-path" });
@@ -240,6 +241,7 @@ pub fn build(b: *std.Build) void {
 
         b.step("run", "Open the Zircon native text editor").dependOn(&zircon_run.step);
         b.step("build-editor", "Compile the native Zircon editor").dependOn(&zircon.step);
+        sidebarBenchmark(b, native_ui, target, optimize, true);
         const counter_native = b.addExecutable(.{ .name = "zircon-counter", .root_module = b.createModule(.{
             .root_source_file = b.path("examples/counter_native/main.zig"),
             .target = target,
@@ -315,4 +317,14 @@ pub fn build(b: *std.Build) void {
     check.dependOn(&app_run.step);
     check.dependOn(&format.step);
     b.getInstallStep().dependOn(check);
+}
+
+fn sidebarBenchmark(b: *std.Build, ui: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, native: bool) void {
+    const name = if (native) "bench-sidebar-native" else "bench-sidebar";
+    const module = b.createModule(.{ .root_source_file = b.path("tools/bench_sidebar.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "zircon_ui", .module = ui }} });
+    const options = b.addOptions();
+    options.addOption(bool, "native_timings", native);
+    module.addOptions("sidebar_options", options);
+    const exe = b.addExecutable(.{ .name = name, .root_module = module });
+    b.step(name, "Build the single-row sidebar selection benchmark").dependOn(&b.addInstallArtifact(exe, .{}).step);
 }
