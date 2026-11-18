@@ -1,7 +1,8 @@
 //! One selected project row changes per committed frame.
-const std = @import("std");
-const ui = @import("zircon_ui");
 
+const std = @import("std");
+const sidebar_options = @import("sidebar_options");
+const ui = @import("zircon_ui");
 const rows = 32;
 const highlight = ui.Color.rgb(0x345678);
 const Sidebar = struct {
@@ -47,7 +48,7 @@ pub fn main(init: std.process.Init) !void {
         phases: ?@TypeOf(window.last_frame_timings),
     };
     var samples: [1024]Sample = undefined;
-    const native = @import("sidebar_options").native_timings;
+    const native = sidebar_options.native_timings;
     for (0..samples.len + rows) |i| {
         const selected = (i + 1) % rows;
         const m = window.layout_cache.measurement_hits;
