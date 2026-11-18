@@ -161,3 +161,54 @@ test "invalid grammar spans retry without escaping application dispatch" {
 test "older source grammar failures cannot overwrite the current operation error" {
     try journey("stale", true);
 }
+
+test "bundled highlighting reuses its worker and retries after the worker exits" {
+    // The macOS app test target builds the real Rust worker.
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    try tmp.dir.createDirPath(t.io, "extensions/org.zircon.highlight-session");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.rs", .data = "fn main() {}\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.highlight-session/extension.json", .data =
+        \\{"schema_version":1,"id":"org.zircon.highlight-session","name":"Session test","version":"1.0.0","contributes":{"languages":[{"id":"rust","name":"Rust","extensions":["rs"],"grammar":{"builtin":true,"name":"rust","wasm":"","highlights":""}}]}}
+    });
+    const home = try std.fs.path.join(t.allocator, &.{ root, "extensions" });
+    defer t.allocator.free(home);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, "main.rs"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+    try app.update(owner, zircon.Shell.loadExtensions, .{home});
+    const check = struct {
+        fn highlighted(self: *const zircon.Shell) bool {
+            const tab = self.tabs.items[0];
+            const record = self.workspace.getConst(tab.document) catch return false;
+            for (self.language.syntax_documents.items) |tracked| {
+                if (std.meta.eql(tracked.id, tab.document) and !tracked.pending and tracked.revision == record.doc.revision()) {
+                    return tab.editor.grammar_revision == record.doc.revision() and tab.editor.grammar_spans.len > 0;
+                }
+            }
+            return false;
+        }
+        fn workerId(self: *const zircon.Shell) std.process.Child.Id {
+            return self.highlight_session.?.child.?.id.?;
+        }
+    };
+    var now: f64 = 1;
+    try wait(&app, owner, &now, check.highlighted);
+    const first_worker = try app.read(owner, check.workerId, .{});
+    try app.dispatch(h, .{ .text = "// 🙂\n" });
+    try wait(&app, owner, &now, check.highlighted);
+    try t.expectEqual(first_worker, try app.read(owner, check.workerId, .{}));
+    try t.expectEqual(@as(u64, 2), try app.read(owner, Ops.count, .{}));
+
+    try std.posix.kill(first_worker, .KILL);
+    try app.dispatch(h, .{ .text = "// restarted\n" });
+    try wait(&app, owner, &now, check.highlighted);
+    try t.expect(first_worker != try app.read(owner, check.workerId, .{}));
+    try t.expectEqual(@as(u64, 4), try app.read(owner, Ops.count, .{}));
+    try app.read(owner, Ops.checkError, .{false});
+}

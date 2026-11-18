@@ -19,6 +19,7 @@ const search_selection = @import("search_selection.zig");
 const services_agents = @import("services/agents.zig");
 const buffer_find = @import("services/buffer_find.zig");
 const services_catalog = @import("services/catalog.zig");
+const extension_host = @import("services/extension_host.zig");
 const services_extensions = @import("services/extensions.zig");
 const services_git = @import("services/git.zig");
 const services_icons = @import("services/icons.zig");
@@ -134,6 +135,7 @@ pub const Shell = struct {
     find: buffer_find.Model = .{},
     catalog: services_catalog.Model = .{},
     extension_host_path: ?[]const u8 = null,
+    highlight_session: ?*extension_host.HighlightSession = null,
     language: services_language.Model = .{},
     symbol_hover: symbol_hover.Model = .{},
     agents: services_agents.Model = .{},
@@ -192,6 +194,7 @@ pub const Shell = struct {
         self.catalog.deinit();
         self.agents.deinit(self.allocator);
         self.language.deinit(self.allocator);
+        if (self.highlight_session) |session| session.release();
         if (self.image) |*asset| asset.deinit(self.allocator);
         if (self.preview) |*preview| preview.view.deinit();
         if (self.extension_snapshot) |*snapshot| snapshot.deinit();

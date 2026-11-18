@@ -50,9 +50,9 @@ fn run() -> Result<Value> {
         "highlight" => {
             let mut source = String::new();
             io::stdin()
-                .take(8 * 1024 * 1024 + 1)
+                .take(highlight::SOURCE_LIMIT as u64 + 1)
                 .read_to_string(&mut source)?;
-            if source.len() > 8 * 1024 * 1024 {
+            if source.len() > highlight::SOURCE_LIMIT {
                 anyhow::bail!("source exceeds 8 MiB");
             }
             highlight::run(Path::new(arg(2)?), arg(3)?, Path::new(arg(4)?), &source)
@@ -61,8 +61,13 @@ fn run() -> Result<Value> {
     }
 }
 fn main() {
-    match run() {
-        Ok(value) => println!("{value}"),
+    let result = if std::env::args().nth(1).as_deref() == Some("highlight-session") {
+        highlight::serve()
+    } else {
+        run().map(|value| println!("{value}"))
+    };
+    match result {
+        Ok(()) => {}
         Err(error) => {
             eprintln!("{error:#}");
             std::process::exit(1);

@@ -27,15 +27,93 @@ pub const Result = struct {
     }
 };
 pub const Box = handoff.Handoff(Result);
+
+/// One isolated highlighter per window. Jobs serialize exchanges on the pipe;
+/// losing a process drops that exchange and the next retry starts a fresh one.
+pub const HighlightSession = struct {
+    io: std.Io,
+    refs: usize = 1,
+    mutex: std.Io.Mutex = .init,
+    child: ?std.process.Child = null,
+
+    fn create(io: std.Io) !*HighlightSession {
+        const self = try a.create(HighlightSession);
+        self.* = .{ .io = io };
+        return self;
+    }
+
+    fn retain(self: *HighlightSession) *HighlightSession {
+        self.refs += 1;
+        return self;
+    }
+
+    pub fn release(self: *HighlightSession) void {
+        self.refs -= 1;
+        if (self.refs == 0) {
+            self.close();
+            a.destroy(self);
+        }
+    }
+
+    fn close(self: *HighlightSession) void {
+        if (self.child) |*child| child.kill(self.io);
+        self.child = null;
+    }
+
+    fn run(self: *HighlightSession, path: []const u8, grammar: []const []const u8, source: []const u8, cancel: *ui.tasks.Cancellation) !Result {
+        const metadata = try std.json.Stringify.valueAlloc(a, grammar, .{});
+        defer a.free(metadata);
+        if (metadata.len > 64 * 1024 or source.len > 8 * 1024 * 1024) return error.StreamTooLong;
+        var header: [8]u8 = undefined;
+        std.mem.writeInt(u32, header[0..4], @intCast(metadata.len), .little);
+        std.mem.writeInt(u32, header[4..8], @intCast(source.len), .little);
+
+        const io = self.io;
+        try self.mutex.lock(io);
+        defer self.mutex.unlock(io);
+        try cancel.check();
+        if (self.child == null) self.child = try std.process.spawn(io, .{
+            .argv = &.{ path, "highlight-session" },
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        });
+        errdefer self.close();
+        const child = &self.child.?;
+        try child.stdin.?.writeStreamingAll(io, &header);
+        try child.stdin.?.writeStreamingAll(io, metadata);
+        try child.stdin.?.writeStreamingAll(io, source);
+
+        var buffer: std.Io.File.MultiReader.Buffer(1) = undefined;
+        var reader: std.Io.File.MultiReader = undefined;
+        reader.init(a, io, buffer.toStreams(), &.{child.stdout.?});
+        defer reader.deinit();
+        const timeout: std.Io.Timeout = .{ .deadline = .fromNow(io, .{ .raw = .fromSeconds(30), .clock = .awake }) };
+        const stream = reader.reader(0);
+        while (stream.bufferedLen() < 5) try reader.fill(5, timeout);
+        const response_header = stream.buffered()[0..5];
+        const status = response_header[0];
+        if (status > 1) return error.InvalidHighlightFrame;
+        const size = std.mem.readInt(u32, response_header[1..5], .little);
+        if (size > (if (status == 1) @as(u32, 64 * 1024 * 1024) else 64 * 1024)) return error.StreamTooLong;
+        const frame_size: usize = 5 + size;
+        while (stream.bufferedLen() < frame_size) try reader.fill(4096, timeout);
+        if (stream.bufferedLen() != frame_size) return error.InvalidHighlightFrame;
+        const body = try a.dupe(u8, stream.buffered()[5..]);
+        return .{ .stamp = .{}, .success = status == 1, .stdout = if (status == 1) body else &.{}, .stderr = if (status == 0) body else &.{} };
+    }
+};
+
 const Job = struct {
     pub const Output = *Box;
     io: std.Io,
     argv: [][]const u8,
     input: ?[]const u8,
     stamp: Stamp,
+    highlight_session: ?*HighlightSession = null,
     pub fn run(self: *Job, cancel: *ui.tasks.Cancellation) !*Box {
         try cancel.check();
-        var result = self.perform() catch |err| Result{ .stamp = self.stamp, .success = false, .stdout = try a.dupe(u8, ""), .stderr = try std.fmt.allocPrint(a, "Extension host: {s}", .{@errorName(err)}) };
+        var result = self.perform(cancel) catch |err| Result{ .stamp = self.stamp, .success = false, .stdout = &.{}, .stderr = try std.fmt.allocPrint(a, "Extension host: {s}", .{@errorName(err)}) };
         errdefer result.deinit();
         result.stamp = self.stamp;
         if (result.success and self.argv.len > 1 and std.mem.eql(u8, self.argv[1], "highlight")) {
@@ -63,7 +141,8 @@ const Job = struct {
         try cancel.check();
         return Box.create(a, result);
     }
-    fn perform(self: *Job) !Result {
+    fn perform(self: *Job, cancel: *ui.tasks.Cancellation) !Result {
+        if (self.highlight_session) |session| return session.run(self.argv[0], self.argv[2..], self.input.?, cancel);
         if (self.input) |input| return runInput(self.io, self.argv, input);
         const output = try std.process.run(a, self.io, .{ .argv = self.argv, .stdout_limit = .limited(64 * 1024 * 1024), .stderr_limit = .limited(64 * 1024), .timeout = .{ .duration = .{ .raw = .fromSeconds(120), .clock = .awake } } });
         return .{ .stamp = self.stamp, .success = output.term.success(), .stdout = output.stdout, .stderr = output.stderr };
@@ -75,6 +154,7 @@ const Job = struct {
         for (self.argv) |arg| a.free(arg);
         a.free(self.argv);
         if (self.input) |input| a.free(input);
+        if (self.highlight_session) |session| session.release();
     }
 };
 fn runInput(io: std.Io, argv: []const []const u8, input: []const u8) !Result {
@@ -115,6 +195,7 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), args: []const []const u8, inp
         for (job.argv[0..count]) |arg| a.free(arg);
         a.free(job.argv);
         if (job.input) |bytes| a.free(bytes);
+        if (job.highlight_session) |session| session.release();
     }
     job.argv[0] = try executable(self);
     count = 1;
@@ -123,5 +204,9 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell), args: []const []const u8, inp
         count += 1;
     }
     if (input) |bytes| job.input = try a.dupe(u8, bytes);
+    if (self.extension_host_path == null and job.input != null and args.len == 4 and std.mem.eql(u8, args[0], "highlight")) {
+        if (self.highlight_session == null) self.highlight_session = try HighlightSession.create(job.io);
+        job.highlight_session = self.highlight_session.?.retain();
+    }
     _ = try cx.spawn(Job, job, callback);
 }
