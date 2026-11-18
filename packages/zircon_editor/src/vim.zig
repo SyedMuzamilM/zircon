@@ -323,8 +323,8 @@ fn motion(self: *Editor, s: text.Snapshot, key: u8, count: usize, event: *ui.Eve
                 for (0..count) |_| {
                     const target_range = try s.lineRange(row);
                     const index = self.wrap_cache.atOffset(if (key == 'j') target_range.end else target_range.start);
-                    const next = if (key == 'j') @min(self.wrap_cache.rows.items.len - 1, index + 1) else index -| 1;
-                    const line = self.wrap_cache.rows.items[next].line;
+                    const next = if (key == 'j') @min(self.wrap_cache.rowCount() - 1, index + 1) else index -| 1;
+                    const line = self.wrap_cache.rowAt(next).line;
                     if (line == row) break;
                     row = line;
                 }

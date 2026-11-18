@@ -9,6 +9,7 @@ const brackets = @import("brackets.zig");
 const display = @import("display.zig");
 const editor = @import("editor.zig");
 const element = @import("element.zig");
+const folding = @import("folding.zig");
 const indent_guides = @import("indent_guides.zig");
 const profile_module = @import("profile.zig");
 const selection = @import("selections.zig");
@@ -108,10 +109,9 @@ const Canvas = struct {
     }
     pub fn prepaint(self: *Canvas, cx: *ui.PrepaintCx, bounds: ui.Rect, metrics: *LayoutState) !Prepared {
         const gutter: f32 = if (self.show_line_numbers) gutterWidth(self.snapshot.lineCount(), self.font_size) else 20;
-        try self.wrap_cache.folding.ensure(self.wrap_cache.allocator, self.snapshot, self.tab_width);
         if (self.soft_wrap) try self.wrap_cache.ensure(self.snapshot, if (self.wrap_enabled) bounds.width - gutter - 12 else 1e12, self.font_size, self.tab_width, metrics.*);
         const first = if (self.soft_wrap) self.wrap_cache.visualAt(self.scroll, self.line_height, self.git_changes) else annotations.sourceRow(self.scroll, self.line_height, self.git_changes);
-        const total_rows = if (self.soft_wrap) self.wrap_cache.rows.items.len else self.snapshot.lineCount();
+        const total_rows = if (self.soft_wrap) self.wrap_cache.rowCount() else self.snapshot.lineCount();
         const visible = try ui.controls.visibleRows(total_rows, self.line_height, @as(f32, @floatFromInt(first)) * self.line_height, bounds.height, 2);
         const lines = try cx.allocator.alloc(RenderLine, visible.end - visible.start);
         var caret: ui.Rect = .{ .x = bounds.x + gutter - self.horizontal, .y = bounds.y, .width = 1.5, .height = self.line_height - 4 };
@@ -119,9 +119,10 @@ const Canvas = struct {
         var content_width: f32 = 0;
         for (lines, 0..) |*line, i| {
             const visual_row = visible.start + i;
-            const segment: ?wrap.Row = if (self.soft_wrap) self.wrap_cache.rows.items[visual_row] else null;
+            const segment: ?wrap.Row = if (self.soft_wrap) self.wrap_cache.rowAt(visual_row) else null;
             const row = if (segment) |part| part.line else visual_row;
-            const y = bounds.y + (if (self.soft_wrap) self.wrap_cache.rowY(visual_row, self.line_height, self.git_changes) else annotations.rowY(row, self.line_height, self.git_changes)) - self.scroll;
+            const display_row = visual_row + annotations.insertedRows(self.git_changes, row);
+            const y = bounds.y + @as(f32, @floatFromInt(display_row)) * self.line_height - self.scroll;
             if (i > 0 and lines[i - 1].row == row) {
                 line.* = lines[i - 1];
                 line.y = y;
@@ -308,11 +309,11 @@ const Canvas = struct {
             };
             cx.painter.popClip();
 
-            if (self.fold_controls and self.show_line_numbers and (line.segment == null or line.segment.?.first)) if (self.wrap_cache.folding.region(line.row)) |fold| {
-                const folded = self.wrap_cache.folding.isCollapsed(fold.start);
-                if (folded or self.gutter_hovered) try ui.controls.icons.draw(if (folded) .chevron_right else .chevron_down, cx.painter, .{ .x = bounds.x + prepared.gutter - 24, .y = line.y + (self.line_height - 12) / 2, .width = 12, .height = 12 }, self.theme.line_number);
+            if (self.fold_controls and self.show_line_numbers and (line.segment == null or line.segment.?.first)) {
+                const folded = self.wrap_cache.folding.isCollapsed(line.range.start);
+                if (folded or (self.gutter_hovered and folding.isHeader(self.snapshot, line.row, self.tab_width))) try ui.controls.icons.draw(if (folded) .chevron_right else .chevron_down, cx.painter, .{ .x = bounds.x + prepared.gutter - 24, .y = line.y + (self.line_height - 12) / 2, .width = 12, .height = 12 }, self.theme.line_number);
                 if (folded) try cx.painter.drawText(.{ .bounds = .{ .x = bounds.x + prepared.gutter - self.horizontal + (try metrics.text(metrics.context, line.display.bytes, style)).width + 10, .y = line.y + 2, .width = 20, .height = self.line_height }, .text = "…", .style = .{ .size = self.font_size, .color = self.theme.line_number } });
-            };
+            }
             if (self.show_line_numbers and (line.segment == null or line.segment.?.first)) {
                 const number = try std.fmt.allocPrint(cx.painter.allocator, "{d}", .{line.row + 1});
                 const number_style: ui.TextStyle = .{ .size = self.font_size - 1, .mono = true };
@@ -334,7 +335,7 @@ const Canvas = struct {
                 .deleted => self.theme.git_deleted,
             } });
         }
-        if (self.blame) |blame| if (try blame_view.layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .source_y = if (self.soft_wrap) self.wrap_cache.rowY(self.wrap_cache.starts.items[blame.line + 1] - 1, self.line_height, self.git_changes) else null, .source_x = if (self.soft_wrap) self.wrap_cache.rows.items[self.wrap_cache.starts.items[blame.line + 1] - 1].x else 0, .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
+        if (self.blame) |blame| if (try blame_view.layout(cx.painter.allocator, self.snapshot, blame, self.git_changes, .{ .source_y = if (self.soft_wrap) self.wrap_cache.rowY(self.wrap_cache.rowStart(blame.line + 1) - 1, self.line_height, self.git_changes) else null, .source_x = if (self.soft_wrap) self.wrap_cache.rowAt(self.wrap_cache.rowStart(blame.line + 1) - 1).x else 0, .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
             try blame_view.paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
         };
         if (!self.show_scrollbars) return;

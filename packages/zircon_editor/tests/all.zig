@@ -813,12 +813,13 @@ test "word wrapping preserves UTF8 source boundaries and reuses its visual map" 
     defer cache.release();
     var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
     try cache.ensure(source, 80, 14, 4, fixed.measurer());
-    try t.expect(cache.rows.items.len > source.lineCount());
-    const first = cache.rows.items[0];
+    try t.expect(cache.rowCount() > source.lineCount());
+    const first = cache.rowAt(0);
     const bytes = try source.copy(t.allocator, .{ .start = first.start, .end = first.end });
     defer t.allocator.free(bytes);
     try t.expectEqualStrings("alpha ", bytes);
-    for (cache.rows.items) |row| {
+    for (0..cache.rowCount()) |visual| {
+        const row = cache.rowAt(visual);
         try t.expect(source.isBoundary(row.start) and source.isBoundary(row.end));
         try t.expectEqual(row.line, (try source.pointAt(row.start)).line);
     }
@@ -848,7 +849,7 @@ test "wrapped canvas paints continuation rows and pointer and arrow navigation u
             return self.state.primary().head;
         }
         fn part(self: *const View) editor.wrap.Row {
-            return self.state.wrap_cache.rows.items[1];
+            return self.state.wrap_cache.rowAt(1);
         }
     };
     const part = try app.read(owner, Read.part, .{});
@@ -879,7 +880,7 @@ test "active source line has the same background across every wrapped row" {
     _ = try app.step(0);
     const Read = struct {
         fn rows(self: *const View) usize {
-            return self.state.wrap_cache.starts.items[1];
+            return self.state.wrap_cache.rowStart(1);
         }
     };
     const owner = try app.windowEntity(View, h);
@@ -909,9 +910,10 @@ test "wrapped continuation text retains leading space and tab indentation" {
         defer arena.deinit();
         const line = try editor.display.Line.build(arena.allocator(), source, 4);
         try cache.ensure(snapshot, 120, 14, 4, metrics);
-        try t.expect(cache.rows.items.len > 1);
+        try t.expect(cache.rowCount() > 1);
         var next: usize = 0;
-        for (cache.rows.items) |row| {
+        for (0..cache.rowCount()) |visual| {
+            const row = cache.rowAt(visual);
             try t.expectEqual(next, row.start);
             try t.expect(row.end > row.start);
             const left = line.caret(metrics, .{ .size = 14, .mono = true }, row.start) - row.x;
@@ -939,7 +941,7 @@ test "indented wrapped rows keep clicks carets and vertical navigation aligned" 
     _ = try app.step(0);
     const Read = struct {
         fn part(self: *const View) editor.wrap.Row {
-            return self.state.wrap_cache.rows.items[1];
+            return self.state.wrap_cache.rowAt(1);
         }
         fn head(self: *const View) usize {
             return self.state.primary().head;
@@ -976,8 +978,9 @@ test "deep indentation and unbroken Unicode tokens wrap with bounded progress" {
     defer cache.release();
     var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
     try cache.ensure(snapshot, 48, 14, 4, fixed.measurer());
-    try t.expect(cache.rows.items.len < snapshot.byteLen());
-    for (cache.rows.items) |row| {
+    try t.expect(cache.rowCount() < snapshot.byteLen());
+    for (0..cache.rowCount()) |visual| {
+        const row = cache.rowAt(visual);
         const range = try snapshot.lineRange(row.line);
         try t.expect(row.end > row.start or range.start == range.end);
         try t.expect(snapshot.isBoundary(row.start) and snapshot.isBoundary(row.end));
@@ -1026,6 +1029,11 @@ fn backgroundAt(items: @FieldType(ui.graphics.Scene, "items"), point: ui.Point) 
     return result;
 }
 
+fn expectSameWrap(expected: *const editor.wrap.Cache, actual: *const editor.wrap.Cache) !void {
+    try t.expectEqual(expected.rowCount(), actual.rowCount());
+    for (0..expected.rowCount()) |row| try t.expectEqual(expected.rowAt(row), actual.rowAt(row));
+}
+
 test "wrapped edits reshape changed lines and retain UTF8 mappings in the suffix" {
     var doc = try text.Document.init(t.allocator, "one two three four five\nunchanged 日🙂 line\nlast\n");
     defer doc.deinit();
@@ -1046,14 +1054,90 @@ test "wrapped edits reshape changed lines and retain UTF8 mappings in the suffix
     const fresh = try editor.wrap.Cache.init(t.allocator);
     defer fresh.release();
     try fresh.ensure(after, 80, 14, 4, fixed.measurer());
-    try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
+    try expectSameWrap(fresh, state.wrap_cache);
     var deletion = try state.applyEdits(&doc, &.{.{ .range = .{ .start = 0, .end = 13 }, .text = "" }}, 0);
     defer release(&deletion);
     var deleted = doc.snapshot();
     defer deleted.deinit();
     try state.wrap_cache.ensure(deleted, 80, 14, 4, fixed.measurer());
     try fresh.ensure(deleted, 80, 14, 4, fixed.measurer());
-    try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
+    try expectSameWrap(fresh, state.wrap_cache);
+}
+
+test "distant wrapped edits reuse the intervening index and preserve CRLF and UTF8 positions" {
+    const line_bytes = "\talpha beta 日本語 delta 🙂 epsilon\r\n";
+    const source = try t.allocator.alloc(u8, 8192 * line_bytes.len);
+    defer t.allocator.free(source);
+    for (0..8192) |line| @memcpy(source[line * line_bytes.len ..][0..line_bytes.len], line_bytes);
+    var doc = try text.Document.init(t.allocator, source);
+    defer doc.deinit();
+    var allocation = std.testing.FailingAllocator.init(t.allocator, .{});
+    const cache = try editor.wrap.Cache.init(allocation.allocator());
+    defer cache.release();
+    const fresh = try editor.wrap.Cache.init(t.allocator);
+    defer fresh.release();
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    var before = doc.snapshot();
+    defer before.deinit();
+    try cache.ensure(before, 160, 14, 4, fixed.measurer());
+    const first = try before.lineStart(27);
+    const last = try before.lineStart(8100);
+    var change = try doc.apply(before.revision(), &.{
+        .{ .range = .{ .start = first, .end = first }, .text = "new 🙂\r\n" },
+        .{ .range = .{ .start = first + 1, .end = first + 2 }, .text = "日" },
+        .{ .range = .{ .start = last - 2, .end = last + 1 }, .text = " " },
+    }, 0);
+    defer change.deinit();
+    cache.noteChange(&change);
+    var after = doc.snapshot();
+    defer after.deinit();
+    const shaped = cache.shaped_lines;
+    const allocated = allocation.allocated_bytes;
+    try cache.ensure(after, 160, 14, 4, fixed.measurer());
+    try t.expectEqual(shaped + 3, cache.shaped_lines);
+    try t.expect(allocation.allocated_bytes - allocated < 32 * 1024);
+    try t.expectEqual(@as(u64, 0), cache.folding.scanned_bytes);
+
+    try fresh.ensure(after, 160, 14, 4, fixed.measurer());
+    try expectSameWrap(fresh, cache);
+    for (0..after.lineCount() + 1) |line| try t.expectEqual(fresh.rowStart(line), cache.rowStart(line));
+    for (0..cache.rowCount()) |visual| {
+        const row = cache.rowAt(visual);
+        try t.expectEqual(visual, cache.atOffset(row.start));
+        try t.expectEqual(visual, cache.visualAt(cache.rowY(visual, 22.4, &.{}), 22.4, &.{}));
+    }
+    try t.expectEqual(cache.rowCount() - 1, cache.atOffset(after.byteLen()));
+}
+
+test "wrap index keeps the previous map when an incremental build runs out of memory" {
+    var doc = try text.Document.init(t.allocator, "one two three four five\nsecond line\n");
+    defer doc.deinit();
+    var before = doc.snapshot();
+    defer before.deinit();
+    var change = try doc.apply(before.revision(), &.{.{ .range = .{ .start = 6, .end = 6 }, .text = "🙂\n" }}, 0);
+    defer change.deinit();
+    var after = doc.snapshot();
+    defer after.deinit();
+    const check = struct {
+        fn run(a: std.mem.Allocator, old: text.Snapshot, new: text.Snapshot, edit: *const text.Change) !void {
+            const cache = try editor.wrap.Cache.init(a);
+            defer cache.release();
+            var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+            try cache.ensure(old, 80, 14, 4, fixed.measurer());
+            const old_count = cache.rowCount();
+            const old_last = cache.rowAt(old_count - 1);
+            cache.noteChange(edit);
+            // noteChange may fall back to a rebuild if it can't record the patch.
+            cache.ensure(new, 80, 14, 4, fixed.measurer()) catch |err| {
+                try t.expect(cache.valid(old.revision()));
+                try t.expectEqual(old_count, cache.rowCount());
+                try t.expectEqual(old_last, cache.rowAt(old_count - 1));
+                return err;
+            };
+            try t.expect(cache.valid(new.revision()));
+        }
+    };
+    try t.checkAllAllocationFailures(t.allocator, check.run, .{ before, after, &change });
 }
 
 test "wrapped Git deletion blocks map to the changed source and unwrap clamps scroll" {
@@ -1068,7 +1152,7 @@ test "wrapped Git deletion blocks map to the changed source and unwrap clamps sc
     try state.prepareView(snapshot, .{ .width = 160, .height = 44 }, metrics.measurer());
     const changes = [_]editor.annotations.GitChange{.{ .kind = .modified, .start = 1, .end = 2, .old_count = 2, .expanded = true }};
     const bottom = state.wrap_cache.y(1, 22, &changes);
-    try t.expectEqual(state.wrap_cache.starts.items[1], state.wrap_cache.visualAt(bottom - 30, 22, &changes));
+    try t.expectEqual(state.wrap_cache.rowStart(1), state.wrap_cache.visualAt(bottom - 30, 22, &changes));
     try state.setSelection(snapshot, .{ .start = snapshot.byteLen(), .end = snapshot.byteLen() });
     state.reveal(snapshot);
     try t.expect(state.scroll.offset > 0);
@@ -1105,8 +1189,28 @@ test "composite wrapping shapes displayed excerpts and maps newline edits" {
     defer fresh.release();
     try fresh.setExcerpts(state.wrap_cache.excerpt_ranges.?.items);
     try fresh.ensure(after, 160, 14, 4, fixed.measurer());
-    try t.expectEqualSlices(editor.wrap.Row, fresh.rows.items, state.wrap_cache.rows.items);
-    try t.expectEqualSlices(usize, fresh.starts.items, state.wrap_cache.starts.items);
+    try expectSameWrap(fresh, state.wrap_cache);
+    for (0..after.lineCount() + 1) |line| try t.expectEqual(fresh.rowStart(line), state.wrap_cache.rowStart(line));
+}
+
+test "wrap index clamps offsets in hidden lines and accepts a Unicode excerpt endpoint" {
+    var doc = try text.Document.init(t.allocator, "hidden\n日本🙂\r\nhidden again\nvisible\n");
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    const cache = try editor.wrap.Cache.init(t.allocator);
+    defer cache.release();
+    const unicode = try snapshot.lineRange(1);
+    const visible = try snapshot.lineRange(3);
+    try cache.setExcerpts(&.{ unicode, visible });
+    var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
+    try cache.ensure(snapshot, 200, 14, 4, fixed.measurer());
+    try t.expectEqual(@as(usize, 2), cache.rowCount());
+    try t.expectEqual(unicode.end, cache.rowAt(0).end);
+    try t.expectEqual(@as(usize, 0), cache.atOffset(0));
+    try t.expectEqual(@as(usize, 0), cache.atOffset(try snapshot.lineStart(2)));
+    try t.expectEqual(@as(usize, 1), cache.atOffset(visible.start));
+    try t.expectEqual(@as(usize, 1), cache.atOffset(snapshot.byteLen()));
 }
 
 test "Cmd slash toggles selected lines with indentation and undo while gcc comments the current line" {
@@ -1167,7 +1271,7 @@ test "folding hides body rows without wrapping and revealing a hidden cursor unf
     var fixed: ui.layout.FixedMetrics = .{ .advance = 8, .line_height = 22 };
     try t.expect(try state.toggleFold(source, 0));
     try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
-    try t.expectEqual(@as(usize, 3), state.wrap_cache.rows.items.len);
+    try t.expectEqual(@as(usize, 3), state.wrap_cache.rowCount());
     try t.expectEqual(@as(usize, 4), state.rowAt(22, source.revision()));
     try t.expectApproxEqAbs(@as(f32, 22), state.rowY(4, source.revision()), 0.01);
     var result = try state.execute(&doc, .{ .move = .{ .direction = .right } });
@@ -1217,11 +1321,11 @@ test "folds survive edits before a header and unfolding restores all wrapped sou
     try state.setSelection(source, .{ .start = header, .end = header });
     try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
     try t.expectEqual(@as(usize, 1), state.wrap_cache.folding.collapsed.items.len);
-    try t.expectEqual(@as(usize, 5), state.wrap_cache.rows.items.len);
+    try t.expectEqual(@as(usize, 5), state.wrap_cache.rowCount());
     try t.expect(try state.toggleFold(source, 2));
     try state.prepareView(source, .{ .width = 400, .height = 200 }, fixed.measurer());
-    try t.expectEqual(source.lineCount(), state.wrap_cache.rows.items.len);
-    for (state.wrap_cache.rows.items, 0..) |row, i| try t.expectEqual(i, row.line);
+    try t.expectEqual(source.lineCount(), state.wrap_cache.rowCount());
+    for (0..state.wrap_cache.rowCount()) |i| try t.expectEqual(i, state.wrap_cache.rowAt(i).line);
 }
 
 test "excerpt editing refuses hidden source bytes and remaps its range after insertion" {

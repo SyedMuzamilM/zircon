@@ -284,7 +284,7 @@ test "gutter fold clicks hide source rows and buffer search reveals a match insi
     const Read = struct {
         fn folded(self: *const zircon.Shell) bool {
             const state = &self.tabs.items[self.active].editor;
-            return state.wrap_cache.folding.collapsed.items.len == 1 and state.wrap_cache.rows.items.len == 3;
+            return state.wrap_cache.folding.collapsed.items.len == 1 and state.wrap_cache.rowCount() == 3;
         }
         fn revealed(self: *const zircon.Shell) !bool {
             const tab = &self.tabs.items[self.active];

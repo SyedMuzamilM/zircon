@@ -44,18 +44,19 @@ pub fn vertical(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
         const amount: usize = if (key == .page_up or key == .page_down) @max(1, @as(usize, @intFromFloat(e.bounds.height / self.line_height))) else 1;
         const wrapped = self.projected() and self.wrap_cache.valid(snapshot.revision());
         const current_visual = if (wrapped) self.wrap_cache.atOffset(item.head) else 0;
-        const target_visual = if (key == .up or key == .page_up) current_visual -| amount else @min(self.wrap_cache.rows.items.len -| 1, current_visual +| amount);
-        const row = if (wrapped) self.wrap_cache.rows.items[target_visual].line else if (key == .up or key == .page_up) point.line -| amount else @min(snapshot.lineCount() - 1, point.line +| amount);
+        const target_visual = if (key == .up or key == .page_up) current_visual -| amount else @min(self.wrap_cache.rowCount() -| 1, current_visual +| amount);
+        const segment = if (wrapped) self.wrap_cache.rowAt(target_visual) else null;
+        const row = if (segment) |part| part.line else if (key == .up or key == .page_up) point.line -| amount else @min(snapshot.lineCount() - 1, point.line +| amount);
         const target_range = try snapshot.lineRange(row);
         if (current_range.end - current_range.start > 64 * 1024 or target_range.end - target_range.start > 64 * 1024) continue;
         const current = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), current_range), self.tab_width);
         const target = try display.Line.build(arena.allocator(), try snapshot.copy(arena.allocator(), target_range), self.tab_width);
-        const origin = if (wrapped) self.wrap_cache.rows.items[current_visual].x else 0;
+        const origin = if (wrapped) self.wrap_cache.rowAt(current_visual).x else 0;
         const x = if (i == 0) self.preferred_x orelse current.caret(metrics, style, @min(point.byte_column, current_range.end - current_range.start)) - origin else current.caret(metrics, style, @min(point.byte_column, current_range.end - current_range.start)) - origin;
         if (i == 0) self.preferred_x = x;
-        const target_origin = if (wrapped) self.wrap_cache.rows.items[target_visual].x else 0;
+        const target_origin = if (segment) |part| part.x else 0;
         item.head = target_range.start + target.index(metrics, style, x + target_origin);
-        if (wrapped) item.head = std.math.clamp(item.head, self.wrap_cache.rows.items[target_visual].start, self.wrap_cache.rows.items[target_visual].end);
+        if (segment) |part| item.head = std.math.clamp(item.head, part.start, part.end);
         if (!extend) item.anchor = item.head;
     }
     self.selections.normalize();
@@ -66,7 +67,7 @@ pub fn position(self: *Editor, snapshot: text.Snapshot, e: *ui.Event(ui.Input), 
     const metrics = try e.textMetrics();
     const relative = @max(0, point.y - e.bounds.y + self.scroll.offset);
     const wrapped = self.projected() and self.wrap_cache.valid(snapshot.revision());
-    const part = if (wrapped) self.wrap_cache.rows.items[self.wrap_cache.visualAt(relative, self.line_height, self.visibleChanges(snapshot.revision()))] else null;
+    const part = if (wrapped) self.wrap_cache.rowAt(self.wrap_cache.visualAt(relative, self.line_height, self.visibleChanges(snapshot.revision()))) else null;
     const row = @min(snapshot.lineCount() - 1, self.rowAt(relative, snapshot.revision()));
     const range = try snapshot.lineRange(row);
     if (range.end - range.start > 64 * 1024) return range.start;

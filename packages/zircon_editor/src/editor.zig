@@ -278,7 +278,7 @@ pub const Editor = struct {
         return true;
     }
     pub fn rowAt(self: *const Editor, y: f32, revision: u64) usize {
-        if (self.projected() and self.wrap_cache.valid(revision)) return self.wrap_cache.rows.items[self.wrap_cache.visualAt(y, self.line_height, self.visibleChanges(revision))].line;
+        if (self.projected() and self.wrap_cache.valid(revision)) return self.wrap_cache.rowAt(self.wrap_cache.visualAt(y, self.line_height, self.visibleChanges(revision))).line;
         return annotations.sourceRow(y, self.line_height, self.visibleChanges(revision));
     }
     pub fn primary(self: *const Editor) selection.Selection {

@@ -1,7 +1,42 @@
 //! Indentation folding. Regions and collapsed byte ranges are revision-bound.
 const std = @import("std");
 const text = @import("zircon_text");
+const byte_limit = 8 * 1024 * 1024;
 pub const Region = struct { start: usize, end: usize, body: usize, line: usize, last: usize };
+
+/// The gutter only needs to know whether the next nonblank line is deeper.
+/// Compute the full region when a fold is toggled or already collapsed.
+pub fn isHeader(snapshot: text.Snapshot, line: usize, tabs: usize) bool {
+    if (snapshot.byteLen() > byte_limit) return false;
+    const indent = lineIndent(snapshot, line, tabs) orelse return false;
+    for (line + 1..snapshot.lineCount()) |next| {
+        if (lineIndent(snapshot, next, tabs)) |body| return body > indent;
+    }
+    return false;
+}
+
+fn lineIndent(snapshot: text.Snapshot, line: usize, tabs: usize) ?usize {
+    const range = snapshot.lineRange(line) catch unreachable;
+    var chunks = snapshot.chunks(range) catch unreachable;
+    var indent: usize = 0;
+    var trailing_cr = false;
+    while (chunks.next()) |chunk| {
+        for (chunk) |byte| {
+            if (byte == '\r') {
+                trailing_cr = true;
+                continue;
+            }
+            if (trailing_cr or (byte != ' ' and byte != '\t')) return indent;
+            indent += indentWidth(byte, indent, tabs);
+        }
+    }
+    return null;
+}
+
+fn indentWidth(byte: u8, indent: usize, tabs: usize) usize {
+    return if (byte == '\t') tabs - indent % tabs else 1;
+}
+
 pub const State = struct {
     scanned_bytes: u64 = 0,
     regions: std.ArrayList(Region) = .empty,
@@ -24,7 +59,7 @@ pub const State = struct {
         if (self.revision == snapshot.revision() and self.state_id == snapshot.stateId() and self.tabs == tabs) return;
         var regions: std.ArrayList(Region) = .empty;
         errdefer regions.deinit(a);
-        if (snapshot.byteLen() <= 8 * 1024 * 1024) {
+        if (snapshot.byteLen() <= byte_limit) {
             const source = try snapshot.copy(a, .{ .start = 0, .end = snapshot.byteLen() });
             self.scanned_bytes +%= source.len;
             defer a.free(source);
@@ -38,7 +73,7 @@ pub const State = struct {
                 const line = std.mem.trimEnd(u8, raw, "\r");
                 var leading: usize = 0;
                 var indent: usize = 0;
-                while (leading < line.len and (line[leading] == ' ' or line[leading] == '\t')) : (leading += 1) indent += if (line[leading] == '\t') tabs - indent % tabs else 1;
+                while (leading < line.len and (line[leading] == ' ' or line[leading] == '\t')) : (leading += 1) indent += indentWidth(line[leading], indent, tabs);
                 if (leading < line.len) try lines.append(a, .{ .start = at, .end = at + line.len, .row = row, .indent = indent, .closer = std.mem.indexOfScalar(u8, "}])", line[leading]) != null });
                 at += raw.len + 1;
                 row += 1;

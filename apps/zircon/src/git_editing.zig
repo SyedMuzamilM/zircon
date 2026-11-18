@@ -227,8 +227,8 @@ fn navigate(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !b
     if ((key.key == .up or key.key == .down) and current.editor.soft_wrap != .none and current.editor.wrap_cache.valid(before.revision())) {
         const cache = current.editor.wrap_cache;
         const visual = cache.atOffset(current.editor.primary().head);
-        if (forward and visual + 1 < cache.rows.items.len and cache.rows.items[visual + 1].line == point.line) return false;
-        if (!forward and visual > 0 and cache.rows.items[visual - 1].line == point.line) return false;
+        if (forward and visual + 1 < cache.rowCount() and cache.rowAt(visual + 1).line == point.line) return false;
+        if (!forward and visual > 0 and cache.rowAt(visual - 1).line == point.line) return false;
     }
     const next = projection.adjacent(diff, &self.git.diff_view, absolute[root.len + 1 ..], point.line, forward);
     if (next) |hit| {
@@ -397,7 +397,7 @@ fn reveal(self: *Shell, cx: *ui.Context(Shell), view: *const View) !void {
     var y = projection.sourceOffset(diff, &self.git.diff_view, absolute[root.len + 1 ..], row, view.editor.line_height) orelse return;
     if (view.editor.soft_wrap != .none and view.editor.wrap_cache.valid(snapshot.revision())) {
         const cache = view.editor.wrap_cache;
-        y += @as(f32, @floatFromInt(cache.atOffset(view.editor.primary().head) - cache.starts.items[row])) * view.editor.line_height;
+        y += @as(f32, @floatFromInt(cache.atOffset(view.editor.primary().head) - cache.rowStart(row))) * view.editor.line_height;
     }
     if (y < self.git.diff_scroll.offset) self.git.diff_scroll.offset = y;
     if (y + view.editor.line_height > self.git.diff_scroll.offset + bounds.height) self.git.diff_scroll.offset = @max(0, y + view.editor.line_height - bounds.height);
