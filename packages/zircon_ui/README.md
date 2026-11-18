@@ -67,3 +67,9 @@ Set `WindowOptions.chrome = .integrated` for a full-size content view with hidde
 `App.watchExternal(owner, callback)` registers a UI-thread inbox drain tied to a generational entity. A producer publishes owned data and calls the static, thread-safe `App.wake()`. AppKit receives a coalesced application event, so an idle app can block between real events. Stop/join the producer before destroying its inbox storage. Registration does not authorize transport threads to access entities.
 
 See the [compact composition guide](../../docs/zircon-ui-composition.md) for eager tuple children, inline button keys/listeners and callback payload inference. The root `check` compiles both counter examples and verifies that documented source matches.
+
+## Taffy flex layout
+
+Run the framework tests and counter from the repository root with `./tools/zig build test counter -Dtaffy=true --summary all`. On macOS, `./tools/zig build run -Dtaffy=true` uses the same backend in the editor. The build requires Cargo and Rust for the build host and compiles the static library using the committed Cargo lockfile. This option supports host Linux and macOS builds.
+
+Taffy arranges the direct children of rows and columns on cache misses. Zircon measures text and custom elements, resolves its units, arranges overlays, and owns scene and layout caches. Fractional positions are preserved. The default build uses Zig flex. The initial backend creates a Taffy tree per arranged container. Grid and wrapping remain future API work.

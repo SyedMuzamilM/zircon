@@ -2,6 +2,7 @@
 //! Supports padding, margins, gap, grow/shrink with min/max freezing and alignment.
 //! Text measurement is injected. CSS wrapping/grid/baseline alignment are not claimed.
 const std = @import("std");
+const zircon_options = @import("zircon_options");
 const cache_key = @import("../ui/cache_key.zig");
 const ui_custom = @import("../ui/custom.zig");
 const elements = @import("../ui/element.zig");
@@ -10,6 +11,7 @@ const tree = @import("../ui/tree.zig");
 const layout_cache = @import("cache.zig");
 const geometry = @import("geometry.zig");
 const measure_module = @import("measure.zig");
+const taffy = @import("taffy.zig");
 const Measurer = measure_module.Measurer;
 pub const Constraints = struct { viewport: geometry.Size, rem: f32 = 16 };
 pub const Layout = struct {
@@ -203,6 +205,35 @@ const Engine = struct {
                     else => 0,
                 };
                 try e.arrange(child, .{ .x = content.x + cs.margin.left + x, .y = content.y + cs.margin.top + y, .width = size.width, .height = size.height }, depth + 1);
+            }
+            return;
+        }
+        if (zircon_options.taffy) {
+            const items = try e.scratch.alloc(taffy.Item, node.children.len);
+            const bounds = try e.scratch.alloc(taffy.Bounds, node.children.len);
+            for (node.children, items) |child, *item| {
+                const cs = e.frame.nodes.items[child].style;
+                const size = try e.resolveSize(cs, available, e.intrinsic[child]);
+                const x = e.limits(cs, available, true);
+                const y = e.limits(cs, available, false);
+                item.* = .{
+                    .width = if (!horizontal and style.align_items == .stretch and cs.width == .auto) -1 else size.width,
+                    .height = if (horizontal and style.align_items == .stretch and cs.height == .auto) -1 else size.height,
+                    .min_width = x.min,
+                    .min_height = y.min,
+                    .max_width = x.max,
+                    .max_height = y.max,
+                    .left = cs.margin.left,
+                    .right = cs.margin.right,
+                    .top = cs.margin.top,
+                    .bottom = cs.margin.bottom,
+                    .grow = cs.flex_grow,
+                    .shrink = cs.flex_shrink,
+                };
+            }
+            try taffy.arrange(items, bounds, available, style);
+            for (node.children, bounds) |child, b| {
+                try e.arrange(child, .{ .x = content.x + b.x, .y = content.y + b.y, .width = b.width, .height = b.height }, depth + 1);
             }
             return;
         }

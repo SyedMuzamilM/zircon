@@ -1,0 +1,11 @@
+[package]
+name = "zircon-taffy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+taffy = { version = "=0.15.0", default-features = false, features = ["std", "taffy_tree", "flexbox"] }

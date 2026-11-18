@@ -2,9 +2,10 @@
 const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
+    const taffy = b.option(bool, "taffy", "Use Taffy for native-target row and column arrangement") orelse false;
     const optimize = b.standardOptimizeOption(.{});
     const test_filters: []const []const u8 = if (b.option([]const u8, "test-filter", "Run portable editor/application tests matching this substring")) |filter| b.allocator.dupe([]const u8, &.{filter}) catch @panic("OOM") else &.{};
-    const dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = false });
+    const dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = false, .taffy = taffy });
     const module = dependency.module("zircon_ui");
     const text_dependency = b.dependency("zircon_text", .{ .target = target, .optimize = optimize });
     const text_module = text_dependency.module("zircon_text");
@@ -12,10 +13,10 @@ pub fn build(b: *std.Build) void {
     const workspace_module = workspace_dependency.module("zircon_workspace");
     const multibuffer_dependency = b.dependency("zircon_multibuffer", .{ .target = target, .optimize = optimize });
     const multibuffer_module = multibuffer_dependency.module("zircon_multibuffer");
-    const editor_dependency = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize, .native = false });
+    const editor_dependency = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize, .native = false, .taffy = taffy });
     const editor_module = editor_dependency.module("zircon_editor");
-    const widgets_module = b.dependency("zircon_widgets", .{ .target = target, .optimize = optimize, .native = false }).module("zircon_widgets");
-    const git_ui_module = b.dependency("zircon_git_ui", .{ .target = target, .optimize = optimize, .native = false }).module("zircon_git_ui");
+    const widgets_module = b.dependency("zircon_widgets", .{ .target = target, .optimize = optimize, .native = false, .taffy = taffy }).module("zircon_widgets");
+    const git_ui_module = b.dependency("zircon_git_ui", .{ .target = target, .optimize = optimize, .native = false, .taffy = taffy }).module("zircon_git_ui");
     const git_module = b.dependency("zircon_git", .{ .target = target, .optimize = optimize }).module("zircon_git");
     const extension_module = b.dependency("zircon_extensions", .{ .target = target, .optimize = optimize }).module("zircon_extensions");
     const search_module = b.dependency("zircon_search", .{ .target = target, .optimize = optimize }).module("zircon_search");
@@ -150,11 +151,11 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .macos) {
         b.getInstallStep().dependOn(&extension_host_install.step);
 
-        const native_dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = true });
+        const native_dependency = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = true, .taffy = taffy });
         const native_ui = native_dependency.module("zircon_ui");
-        const native_editor = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize, .native = true }).module("zircon_editor");
-        const native_widgets = b.dependency("zircon_widgets", .{ .target = target, .optimize = optimize, .native = true }).module("zircon_widgets");
-        const native_git_ui = b.dependency("zircon_git_ui", .{ .target = target, .optimize = optimize, .native = true }).module("zircon_git_ui");
+        const native_editor = b.dependency("zircon_editor", .{ .target = target, .optimize = optimize, .native = true, .taffy = taffy }).module("zircon_editor");
+        const native_widgets = b.dependency("zircon_widgets", .{ .target = target, .optimize = optimize, .native = true, .taffy = taffy }).module("zircon_widgets");
+        const native_git_ui = b.dependency("zircon_git_ui", .{ .target = target, .optimize = optimize, .native = true, .taffy = taffy }).module("zircon_git_ui");
         const native_app = b.createModule(.{
             .root_source_file = b.path("apps/zircon/src/root.zig"),
             .target = target,
@@ -252,6 +253,8 @@ pub fn build(b: *std.Build) void {
         const native = b.createModule(.{ .root_source_file = b.path("packages/zircon_ui/src/native_test_root.zig"), .target = target, .optimize = optimize, .link_libc = true });
         const native_options = b.addOptions();
         native_options.addOption(bool, "native", true);
+        native_options.addOption(bool, "taffy", taffy);
+        if (taffy) native.addObjectFile(native_dependency.namedLazyPath("taffy_archive"));
         native.addOptions("zircon_options", native_options);
         for ([_][]const u8{ "AppKit", "Metal", "QuartzCore", "CoreText", "CoreGraphics", "ImageIO", "CoreFoundation", "Foundation" }) |framework| native.linkFramework(framework, .{});
         native.linkSystemLibrary("objc", .{});

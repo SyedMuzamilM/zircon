@@ -1,9 +1,10 @@
 const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
+    const taffy = b.option(bool, "taffy", "Use Taffy for native-target row and column arrangement") orelse false;
     const optimize = b.standardOptimizeOption(.{});
     const native = b.option(bool, "native", "Enable native rendering") orelse false;
-    const zircon_ui = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = native }).module("zircon_ui");
+    const zircon_ui = b.dependency("zircon_ui", .{ .target = target, .optimize = optimize, .native = native, .taffy = taffy }).module("zircon_ui");
     const module = b.addModule("zircon_widgets", .{ .root_source_file = b.path("src/root.zig"), .target = target, .optimize = optimize, .imports = &.{
         .{ .name = "zircon_ui", .module = zircon_ui },
     } });
