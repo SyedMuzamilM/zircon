@@ -14,6 +14,7 @@ pub const max_file_bytes = persistence.max_file_bytes;
 pub const DocumentId = struct { workspace: u64, slot: u32, generation: u32 };
 var next_workspace = std.atomic.Value(u64).init(1);
 pub const CloseDecision = enum { if_clean, cancel, discard, save };
+pub const DiskUpdate = union(enum) { unchanged, state_changed, reloaded: u64 };
 pub const ChangeOrigin = enum { typing, undo, redo, completion, formatting, agent, external_reload, project_edit, recovery_restore };
 pub const DocumentChange = struct {
     document: DocumentId,
@@ -75,6 +76,7 @@ pub const Record = struct {
     path: ?[]u8,
     saved_state: ?u64,
     disk: ?DiskStamp,
+    disk_conflict: bool = false,
     untitled_name: []u8 = &.{},
     pub fn title(record: *const Record) []const u8 {
         return if (record.path) |path| std.fs.path.basename(path) else record.untitled_name;
@@ -210,30 +212,42 @@ pub const Workspace = struct {
         record.untitled_name = &.{};
         record.disk = stamp;
         record.saved_state = content_state;
+        record.disk_conflict = false;
     }
-    /// Refresh a clean open buffer after a Git worktree mutation. Recheck dirty
-    /// state at completion so edits made while Git ran are never overwritten.
-    pub fn reloadClean(workspace: *Workspace, id: DocumentId) !bool {
+    /// Dirty documents use a metadata check for the warning. A save still
+    /// compares the full disk stamp, including the digest, before writing.
+    pub fn refreshFromDisk(workspace: *Workspace, id: DocumentId) !DiskUpdate {
         const record = try workspace.get(id);
-        if (record.dirty() or record.path == null) return false;
-        const loaded = persistence.read(workspace.allocator, workspace.io, record.path.?) catch |err| {
-            if (err == error.FileNotFound) {
+        const path = record.path orelse return .unchanged;
+        if (record.dirty()) {
+            const conflict = try persistence.metadataChanged(workspace.io, path, record.disk);
+            if (record.disk_conflict == conflict) return .unchanged;
+            record.disk_conflict = conflict;
+            return .state_changed;
+        }
+        const loaded = persistence.read(workspace.allocator, workspace.io, path) catch |err| switch (err) {
+            error.DiskChanged => return .unchanged,
+            error.FileNotFound => {
                 record.saved_state = null;
                 record.disk = null;
-                return false;
-            }
-            return err;
+                record.disk_conflict = false;
+                return .state_changed;
+            },
+            else => return err,
         };
         defer workspace.allocator.free(loaded.bytes);
         try validateText(loaded.bytes);
-        if (record.disk != null and std.meta.eql(record.disk.?, loaded.stamp)) return false;
+        if (record.disk != null and record.disk.?.eql(loaded.stamp) and !record.disk_conflict) return .unchanged;
         var snapshot_value = record.doc.snapshot();
         defer snapshot_value.deinit();
-        var change = try record.doc.apply(record.doc.revision(), &.{.{ .range = .{ .start = 0, .end = snapshot_value.byteLen() }, .text = loaded.bytes }}, 0);
-        change.deinit();
+        var change = try record.doc.apply(snapshot_value.revision(), &.{.{ .range = .{ .start = 0, .end = snapshot_value.byteLen() }, .text = loaded.bytes }}, 0);
+        defer change.deinit();
+        const had_conflict = record.disk_conflict;
         record.saved_state = record.doc.stateId();
         record.disk = loaded.stamp;
-        return true;
+        record.disk_conflict = false;
+        if (change.before != change.after) return .{ .reloaded = change.before };
+        return if (had_conflict) .state_changed else .unchanged;
     }
     pub fn close(workspace: *Workspace, id: DocumentId, decision: CloseDecision) !bool {
         const record = try workspace.get(id);

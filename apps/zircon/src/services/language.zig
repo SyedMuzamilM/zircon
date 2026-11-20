@@ -174,7 +174,7 @@ fn retireUnused(self: *Shell, index: usize) void {
     session.retired = true;
 }
 
-fn cancelCompletion(self: *Shell, id: ws.DocumentId) void {
+pub fn cancelCompletion(self: *Shell, id: ws.DocumentId) void {
     if (self.language.pending) |pending| if (std.meta.eql(pending.document, id)) {
         if (pending.session < self.language.sessions.items.len) if (self.language.sessions.items[pending.session].client) |client| client.cancel(pending.request) catch {};
         self.language.clearCompletion();

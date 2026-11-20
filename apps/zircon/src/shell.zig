@@ -741,9 +741,9 @@ pub const Shell = struct {
         try search_selection.poll(self, cx);
         try terminal_module.poll(self, cx);
         try buffer_find.poll(self, cx);
+        try services_project.poll(self, cx);
         try services_language.poll(self, cx);
         try symbol_hover.poll(self, cx);
-        try services_project.poll(self, cx);
         try services_git.pollBlame(self, cx);
         if (!self.git.busy) {
             const current: ?workspace.DocumentId = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else null;

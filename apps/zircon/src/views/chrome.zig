@@ -472,12 +472,18 @@ pub fn statusbar(self: *const Shell, b: *ui.Ui) !ui.Element {
                 try v.icon(b, if (recovery.last_error != null) .warning else .check, if (recovery.last_error != null) c.warning else c.muted, 13),
             }).build());
     }
-    if (self.status.len > 0) try items.append(b.allocator(), try b.fluent().adopt(try v.text(b, self.status, if (self.status_is_error) c.warning else c.muted, 11))
+    const conflict = if (self.tabs.items.len == 0) false else blk: {
+        const id = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document;
+        break :blk (try self.workspace.getConst(id)).disk_conflict;
+    };
+    const status = if (conflict) "File changed on disk · Use Save As to keep both versions" else self.status;
+    const status_color = if (conflict or self.status_is_error) c.warning else c.muted;
+    if (status.len > 0) try items.append(b.allocator(), try b.fluent().adopt(try v.text(b, status, status_color, 11))
         .style(.{
             .flex_shrink = 1,
             .min_width = .{ .px = 0 },
             .max_width = .{ .percent = 35 },
-            .text = .{ .size = 11, .color = if (self.status_is_error) c.warning else c.muted },
+            .text = .{ .size = 11, .color = status_color },
             .overflow = .hidden,
         }).build());
     if (self.tab_drag) |drag| if (drag.moved) try items.append(b.allocator(), try v.text(b, "Drop on a tab strip or any editor edge · Esc cancels", c.muted, 11));

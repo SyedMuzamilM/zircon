@@ -100,6 +100,30 @@ const Ops = struct {
     fn hoverReady(self: *const zircon.Shell) bool {
         return self.language.documents.items.len > 0 and self.language.documents.items[0].version != null and self.language.sessions.items[self.language.documents.items[0].session].client.?.ready();
     }
+    fn splitRevision(self: *const zircon.Shell, revision: u64) !bool {
+        const tab = &self.tabs.items[self.active];
+        const pane = self.secondary orelse return false;
+        try t.expectEqual(tab.document, pane.document);
+        if ((try self.workspace.getConst(tab.document)).doc.revision() != revision) return false;
+        if (self.language.documents.items.len != 1) return false;
+        const doc = self.language.documents.items[0];
+        const diagnostics = doc.diagnostics orelse return false;
+        return doc.version == revision and diagnostics.data.diagnostics.version == revision and
+            tab.editor.diagnostics_revision == revision and pane.editor.diagnostics_revision == revision and
+            tab.editor.diagnostics_generation == self.language.diagnostics_generation and pane.editor.diagnostics_generation == self.language.diagnostics_generation;
+    }
+    fn checkReload(self: *const zircon.Shell) !void {
+        const id = self.tabs.items[self.active].document;
+        const event = self.documentChangeSince(id, 0, 1) orelse return error.MissingExternalReload;
+        try t.expectEqual(.external_reload, event.origin);
+        try t.expectEqual((try self.workspace.getConst(id)).doc.stateId(), event.state);
+        try t.expect(!(try self.workspace.dirty(id)));
+        const doc = self.language.documents.items[0];
+        try t.expectEqual(@as(u64, 1), self.language.sessions.items[doc.session].client.?.stats().document_changes);
+    }
+    fn saveConflict(self: *const zircon.Shell) bool {
+        return self.status_is_error and std.mem.indexOf(u8, self.status, "changed on disk") != null;
+    }
     fn definitionPending(self: *const zircon.Shell) bool {
         return self.language.definition_pending != null;
     }
@@ -192,6 +216,80 @@ fn openLanguageFixture(root: []const u8, file: []const u8) !struct { app: ui.App
     try app.update(owner, zircon.Shell.bootstrap, .{handle});
     _ = try app.step(0);
     return .{ .app = app, .handle = handle, .owner = owner };
+}
+
+test "external file changes update two panes and their language server and protect unsaved edits" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "// original bytes\n" });
+    try tmp.dir.createDirPath(t.io, "extensions/org.zircon.reload");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "server.py", .data = @embedFile("language_fixture") });
+    const server = try tmp.dir.realPathFileAlloc(t.io, "server.py", t.allocator);
+    defer t.allocator.free(server);
+    const manifest = try std.json.Stringify.valueAlloc(t.allocator, .{
+        .schema_version = 1,
+        .id = "org.zircon.reload",
+        .name = "Reload fixture",
+        .version = "1.0.0",
+        .contributes = .{ .language_servers = .{.{ .id = "reload", .languages = .{"zig"}, .command = "python3", .args = .{ server, "incremental" } }} },
+    }, .{});
+    defer t.allocator.free(manifest);
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "extensions/org.zircon.reload/extension.json", .data = manifest });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const home = try std.fs.path.join(t.allocator, &.{ root, "extensions" });
+    defer t.allocator.free(home);
+    var fixture = try openLanguageFixture(root, "main.zig");
+    defer fixture.app.deinit();
+    const app = &fixture.app;
+    const owner = fixture.owner;
+    const handle = fixture.handle;
+    try app.update(owner, Ops.configure, .{home});
+    try app.update(owner, Ops.command, .{.split_right});
+    try waitSplitRevision(app, owner, 0, 0);
+
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = "// new disk bytes 行\n" });
+    try waitSplitRevision(app, owner, 1, 2);
+    try app.read(owner, Ops.checkReload, .{});
+    var reloaded: []u8 = undefined;
+    try app.read(owner, Ops.source, .{ t.allocator, &reloaded });
+    defer t.allocator.free(reloaded);
+    try t.expectEqualStrings("// new disk bytes 行\n", reloaded);
+
+    try app.dispatch(handle, .{ .text = " " });
+    try waitSplitRevision(app, owner, 2, 2);
+    var unsaved: []u8 = undefined;
+    try app.read(owner, Ops.source, .{ t.allocator, &unsaved });
+    defer t.allocator.free(unsaved);
+    try t.expect(!std.mem.eql(u8, reloaded, unsaved));
+    const external = "// conflicting disk bytes\n";
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "main.zig", .data = external });
+    _ = try app.step(4);
+    _ = try app.step(4);
+    try t.expect(try app.read(owner, Ops.splitRevision, .{2}));
+    const frame = &(try app.window(handle)).frames.committed;
+    const conflict_visible = for (frame.nodes.items) |node| {
+        if (node.kind == .text and std.mem.eql(u8, node.kind.text, "File changed on disk · Use Save As to keep both versions")) break true;
+    } else false;
+    try t.expect(conflict_visible);
+    try app.update(owner, Ops.command, .{.save});
+    try t.expect(try app.read(owner, Ops.saveConflict, .{}));
+    var retained: []u8 = undefined;
+    try app.read(owner, Ops.source, .{ t.allocator, &retained });
+    defer t.allocator.free(retained);
+    try t.expectEqualStrings(unsaved, retained);
+    const disk = try tmp.dir.readFileAlloc(t.io, "main.zig", t.allocator, .limited(1024));
+    defer t.allocator.free(disk);
+    try t.expectEqualStrings(external, disk);
+}
+
+fn waitSplitRevision(app: *ui.App, owner: ui.Entity(zircon.Shell), revision: u64, now: f64) !void {
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (!try app.read(owner, Ops.splitRevision, .{revision})) {
+        _ = try app.step(now);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.SplitRevisionTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
 }
 
 test "completion without textEdit replaces the current identifier" {

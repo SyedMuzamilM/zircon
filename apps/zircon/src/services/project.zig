@@ -10,11 +10,8 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (now < self.project_watch.next_check) return;
     self.project_watch.next_check = now + 1;
     const stamp = try fingerprint(self);
-    const reloaded = try actions.refreshExternalDocuments(self);
-    if (self.project_watch.fingerprint == stamp) {
-        if (reloaded) cx.notify();
-        return;
-    }
+    try actions.refreshExternalDocuments(self, cx);
+    if (self.project_watch.fingerprint == stamp) return;
     try actions.refreshTree(self);
     self.project_watch.fingerprint = try fingerprint(self);
     cx.notify();

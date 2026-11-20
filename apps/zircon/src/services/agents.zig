@@ -288,13 +288,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         if ((old == .running or old == .permission) and session.conversation.state == .ready) {
             if (self.git.repository) try git_module.start(self, cx, .refresh);
             try actions.refreshTree(self);
-            for (self.tabs.items) |*tab| if (try self.workspace.reloadClean(tab.document)) {
-                var source = try self.workspace.snapshot(tab.document);
-                defer source.deinit();
-                tab.editor.synchronize(source);
-                if (self.secondary) |*pane| if (std.meta.eql(pane.document, tab.document)) pane.editor.synchronize(source);
-                if (self.preview) |*preview| if (std.meta.eql(preview.document, tab.document)) try preview.view.refresh(source);
-            };
+            try actions.refreshExternalDocuments(self, cx);
         }
     }
 }

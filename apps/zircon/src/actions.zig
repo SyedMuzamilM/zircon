@@ -98,27 +98,19 @@ pub fn refreshTree(self: *Shell) !void {
     previous.deinit(self.allocator);
 }
 
-/// Reload clean file documents whose disk stamp changed outside the editor.
-/// Dirty documents stay untouched so a later save can surface the conflict.
-pub fn refreshExternalDocuments(self: *Shell) !bool {
-    var changed = false;
+pub fn refreshExternalDocuments(self: *Shell, cx: *ui.Context(Shell)) !void {
     for (self.workspace.slots.items, 0..) |slot, index| if (slot.record != null) {
         const id: ws.DocumentId = .{ .workspace = self.workspace.identity, .slot = @intCast(index), .generation = slot.generation };
-        if (!try self.workspace.reloadClean(id)) continue;
-        var snapshot = try self.workspace.snapshot(id);
-        defer snapshot.deinit();
-        for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
-            tab.editor.synchronize(snapshot);
-            if (tab.secondary_state) |*state| state.synchronize(snapshot);
-        };
-        if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) pane.editor.synchronize(snapshot);
-        for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) view.editor.synchronize(snapshot);
-        try git_selection.changed(self, id);
-        try search_editing.changed(self, id, null, 255);
-        services_language.invalidateDocument(self, id) catch |err| try self.reportError(err);
-        changed = true;
+        switch (try self.workspace.refreshFromDisk(id)) {
+            .unchanged => {},
+            .state_changed => cx.notify(),
+            .reloaded => |before| {
+                self.publishDocumentReset(id, .external_reload, before);
+                var outcome: editing.Outcome = .{ .reset = true };
+                try applyOutcome(self, cx, id, 255, &outcome, .external_reload);
+            },
+        }
     };
-    return changed;
 }
 
 fn copyRow(a: std.mem.Allocator, entry: ws.Entry, depth: u16) !model.TreeRow {
@@ -384,7 +376,9 @@ fn applyEditorOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, p
     } else if (outcome.history_reset) |reset| self.publishDocumentReset(id, if (reset.action == .undo) .undo else .redo, reset.before);
     if (outcome.change == null and !outcome.reset) return;
     defer cx.notify();
-    if (!refreshing_completion) self.language.clearCompletion();
+    if (origin == .external_reload) {
+        services_language.cancelCompletion(self, id);
+    } else if (!refreshing_completion) self.language.clearCompletion();
     try git_selection.changed(self, id);
     try search_editing.changed(self, id, if (outcome.change) |*change| change else null, pane);
     var snapshot = try self.workspace.snapshot(id);

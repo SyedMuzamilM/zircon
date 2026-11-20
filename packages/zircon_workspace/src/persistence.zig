@@ -14,6 +14,15 @@ pub const DiskStamp = struct {
     }
 };
 pub const Loaded = struct { bytes: []u8, stamp: DiskStamp };
+pub fn metadataChanged(io: std.Io, path: []const u8, expected: ?DiskStamp) !bool {
+    const actual = std.Io.Dir.cwd().statFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return expected != null,
+        else => return err,
+    };
+    const old = expected orelse return true;
+    return actual.kind != .file or actual.inode != old.inode or actual.size != old.size or
+        actual.mtime.nanoseconds != old.modified or actual.permissions != old.permissions;
+}
 pub fn read(a: std.mem.Allocator, io: std.Io, path: []const u8) !Loaded {
     const before = try std.Io.Dir.cwd().statFile(io, path, .{});
     if (before.kind != .file) return error.NotRegularFile;

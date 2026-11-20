@@ -869,7 +869,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
     }
     if (value.reload_worktree) {
         self.git.needs_refresh = true;
-        _ = try actions.refreshExternalDocuments(self);
+        try actions.refreshExternalDocuments(self, cx);
         try actions.refreshTree(self);
     }
     if (value.status) |status| {
