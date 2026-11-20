@@ -1,4 +1,4 @@
-//! Code-point and word navigation plus glyph-based vertical/pointer mapping.
+//! Grapheme and word navigation plus glyph-based vertical/pointer mapping.
 const std = @import("std");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
@@ -10,15 +10,15 @@ const Editor = editor.Editor;
 pub fn move(self: *Editor, snapshot: text.Snapshot, request: commands.Move) !void {
     for (self.selections.items.items) |*item| {
         var head = item.head;
-        const point = try snapshot.pointAt(head);
         if (!request.extend and !item.empty() and (request.direction == .left or request.direction == .right)) head = if (request.direction == .left) item.range().start else item.range().end else head = switch (request.direction) {
-            .left => if (request.word) try wordBoundary(snapshot, head, false) else try snapshot.previousBoundary(head),
-            .right => if (request.word) try wordBoundary(snapshot, head, true) else try snapshot.nextBoundary(head),
-            .home => (try snapshot.lineRange(point.line)).start,
-            .end => (try snapshot.lineRange(point.line)).end,
+            .left => if (request.word) try wordBoundary(snapshot, head, false) else try snapshot.previousGraphemeBoundary(head),
+            .right => if (request.word) try wordBoundary(snapshot, head, true) else try snapshot.nextGraphemeBoundary(head),
+            .home => (try snapshot.lineRange((try snapshot.pointAt(head)).line)).start,
+            .end => (try snapshot.lineRange((try snapshot.pointAt(head)).line)).end,
             .document_start => 0,
             .document_end => snapshot.byteLen(),
             .up, .down, .page_up, .page_down => blk: {
+                const point = try snapshot.pointAt(head);
                 const count: usize = if (request.direction == .page_up or request.direction == .page_down) @max(1, @as(usize, @intFromFloat(self.last_viewport.height / self.line_height))) else 1;
                 const row = if (request.direction == .up or request.direction == .page_up) point.line -| count else @min(snapshot.lineCount() - 1, point.line +| count);
                 const range = try snapshot.lineRange(row);

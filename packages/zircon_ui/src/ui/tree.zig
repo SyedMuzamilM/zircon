@@ -53,6 +53,7 @@ pub const Frame = struct {
     next_deadline: ?f64 = null,
     viewport: geometry.Size = .{ .width = 0, .height = 0 },
     text_input: ?interface.TextSnapshot = null,
+    accessibility: std.ArrayList(interface.AccessibilityTree.Node) = .empty,
     focused_node: ?u32 = null,
     hovered_node: ?u32 = null,
     hover_started: f64 = 0,
@@ -83,6 +84,7 @@ pub const Frame = struct {
         frame.timeline = null;
         frame.time = 0;
         frame.text_input = null;
+        frame.accessibility = .empty;
         frame.focused_node = null;
         frame.hovered_node = null;
         frame.hover_started = 0;
@@ -103,6 +105,7 @@ pub const Frame = struct {
         frame.timeline = null;
         frame.time = 0;
         frame.text_input = null;
+        frame.accessibility = .empty;
         frame.focused_node = null;
         frame.next_deadline = null;
     }

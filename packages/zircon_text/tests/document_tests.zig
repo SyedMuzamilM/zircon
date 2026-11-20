@@ -52,6 +52,39 @@ test "line indexing retains CRLF bytes and UTF16 mapping refuses surrogate inter
     };
     try t.expectError(error.InvalidLine, s.lineRange(3));
 }
+test "streamed line ranges match indexed ranges including a CRLF across rope leaves" {
+    const prefix: [4095]u8 = @splat('a');
+    const source = prefix ++ "\r\n\n日🙂\r\nlast\r\n";
+    var doc = try text.Document.init(t.allocator, source);
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    for (0..snapshot.lineCount()) |start| {
+        var lines = try snapshot.linesFrom(start);
+        for (start..snapshot.lineCount()) |row| {
+            const line = lines.next() orelse return error.MissingLine;
+            const expected = try snapshot.lineRange(row);
+            try t.expectEqual(expected, line.range);
+            if (line.bytes) |bytes| try t.expectEqualStrings(source[expected.start..expected.end], bytes);
+        }
+        try t.expectEqual(null, lines.next());
+    }
+    try t.expectError(error.InvalidLine, snapshot.linesFrom(snapshot.lineCount()));
+}
+
+test "grapheme navigation and deletion cross rope leaves" {
+    const prefix: [4095]u8 = @splat('a');
+    var doc = try text.Document.init(t.allocator, prefix ++ "e\xcc\x81" ++ "z");
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    const cluster: text.Range = .{ .start = prefix.len, .end = prefix.len + 3 };
+    try t.expectEqual(cluster.end, try snapshot.nextGraphemeBoundary(cluster.start));
+    try t.expectEqual(cluster.start, try snapshot.previousGraphemeBoundary(cluster.end));
+    try t.expectEqual(cluster, try snapshot.graphemeDeletionRange(prefix.len + 1, true));
+    try t.expectEqual(cluster, try snapshot.graphemeDeletionRange(prefix.len + 1, false));
+}
+
 test "batch edits map affinities and publish one atomic content state" {
     var doc = try text.Document.init(t.allocator, "0123456789");
     defer doc.deinit();

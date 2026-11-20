@@ -13,6 +13,9 @@ const Counts = struct {
     lsp_messages: u64 = 0,
     lsp_bytes: u64 = 0,
     lsp_changes: u64 = 0,
+    lsp_incremental_changes: u64 = 0,
+    lsp_resync_changes: u64 = 0,
+    lsp_change_text_bytes: u64 = 0,
     syntax_jobs: u64 = 0,
     wrap_builds: usize = 0,
     shaped_lines: usize = 0,
@@ -84,6 +87,9 @@ const Ops = struct {
             result.lsp_messages += s.queued_messages;
             result.lsp_bytes += s.queued_bytes;
             result.lsp_changes += s.document_changes;
+            result.lsp_incremental_changes += s.incremental_changes;
+            result.lsp_resync_changes += s.resync_changes;
+            result.lsp_change_text_bytes += s.change_text_bytes;
         };
         for (self.tabs.items) |tab| {
             result.wrap_builds += tab.editor.wrap_cache.builds;

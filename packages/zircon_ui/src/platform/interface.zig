@@ -77,6 +77,39 @@ pub const TextEdit = struct {
         try edit.selection.validate(edit.text);
     }
 };
+
+/// Stable semantic identity within a window. A parent, when supplied, is
+/// another accessibility element in the same committed frame.
+pub const Accessibility = struct {
+    pub const Role = enum { text_area, list, button };
+    id: u64,
+    role: Role,
+    label: []const u8,
+    parent: ?u64 = null,
+    selected: bool = false,
+};
+pub const AccessibilityTree = struct {
+    pub const Node = struct { element: Accessibility, index: u32 };
+    nodes: []const Node = &.{},
+    bounds: []const g.Rect = &.{},
+    focused: ?u32 = null,
+    text: ?TextSnapshot = null,
+    viewport: g.Rect = .{},
+
+    pub fn find(tree: AccessibilityTree, id: u64) ?Node {
+        for (tree.nodes) |node| {
+            if (node.element.id != id) continue;
+            const bounds = tree.rect(node);
+            return if (bounds.width > 0 and bounds.height > 0) node else null;
+        }
+        return null;
+    }
+
+    pub fn rect(tree: AccessibilityTree, node: Node) g.Rect {
+        return tree.bounds[node.index].intersection(tree.viewport);
+    }
+};
+
 pub const Input = union(enum) {
     pointer_down: Pointer,
     pointer_up: Pointer,
@@ -99,6 +132,7 @@ pub const Sink = struct {
     context: *anyopaque,
     event: *const fn (*anyopaque, Input) anyerror!void,
     drag_region: ?*const fn (*anyopaque, g.Point) bool = null,
+    accessibility_press: ?*const fn (*anyopaque, u64) anyerror!bool = null,
 };
 pub const Surface = struct {
     pub const PathKind = enum { file, folder };
@@ -116,6 +150,7 @@ pub const Surface = struct {
         consume_key: ?*const fn (*anyopaque) void = null,
         set_cursor: ?*const fn (*anyopaque, Cursor) void = null,
         set_text_input: ?*const fn (*anyopaque, ?TextSnapshot) void = null,
+        set_accessibility: ?*const fn (*anyopaque, AccessibilityTree) void = null,
         accept_close: ?*const fn (*anyopaque) void = null,
         set_parent: ?*const fn (*anyopaque, ?Surface) void = null,
         raise: ?*const fn (*anyopaque) void = null,
@@ -167,6 +202,9 @@ pub const Surface = struct {
     }
     pub fn setTextInput(s: Surface, value: ?TextSnapshot) void {
         if (s.ops.set_text_input) |function| function(s.context, value);
+    }
+    pub fn setAccessibility(s: Surface, value: AccessibilityTree) void {
+        if (s.ops.set_accessibility) |function| function(s.context, value);
     }
     /// Completes an accepted close request. The native object stays allocated
     /// until ordinary window teardown outside the event callback.

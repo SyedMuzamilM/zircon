@@ -5,6 +5,72 @@ const ui = @import("zircon_ui");
 const pairing_tests = @import("pairing_tests.zig");
 const t = std.testing;
 
+test "character movement and deletion keep visible Unicode characters together" {
+    for ([_][]const u8{ "e\xcc\x81", "🇮🇳", "👍🏽", "👩‍💻", "क्‍ष" }) |cluster| {
+        const source = try std.mem.concat(t.allocator, u8, &.{ "a", cluster, "z" });
+        defer t.allocator.free(source);
+        var document = try text.Document.init(t.allocator, source);
+        defer document.deinit();
+        var state = try editor.Editor.init(t.allocator);
+        defer state.deinit();
+        state.selections.single(.{ .anchor = 1, .head = 1 });
+        var right = try state.execute(&document, .{ .move = .{ .direction = .right } });
+        release(&right);
+        try t.expectEqual(source.len - 1, state.primary().head);
+        var left = try state.execute(&document, .{ .move = .{ .direction = .left } });
+        release(&left);
+        try t.expectEqual(@as(usize, 1), state.primary().head);
+        state.selections.single(.{ .anchor = source.len - 1, .head = source.len - 1 });
+        var backward = try state.execute(&document, .delete_backward);
+        release(&backward);
+        var after = document.snapshot();
+        defer after.deinit();
+        const remaining = try after.copy(t.allocator, .{ .start = 0, .end = after.byteLen() });
+        defer t.allocator.free(remaining);
+        try t.expectEqualStrings("az", remaining);
+        var undo = try state.execute(&document, .undo);
+        release(&undo);
+        var restored = document.snapshot();
+        defer restored.deinit();
+        const original = try restored.copy(t.allocator, .{ .start = 0, .end = restored.byteLen() });
+        defer t.allocator.free(original);
+        try t.expectEqualStrings(source, original);
+
+        // A pointer or protocol range may place an empty caret inside a cluster.
+        const interior = try restored.nextBoundary(1);
+        state.selections.single(.{ .anchor = interior, .head = interior });
+        try state.selections.items.append(t.allocator, .{ .anchor = source.len - 1, .head = source.len - 1 });
+        var forward = try state.execute(&document, .delete_forward);
+        release(&forward);
+        var final = document.snapshot();
+        defer final.deinit();
+        const final_text = try final.copy(t.allocator, .{ .start = 0, .end = final.byteLen() });
+        defer t.allocator.free(final_text);
+        try t.expectEqualStrings("a", final_text);
+    }
+}
+
+test "bracket highlighting can start its byte window inside UTF-8" {
+    const middle = 64 * 1024 + 1;
+    const source = try t.allocator.alloc(u8, middle + 3);
+    defer t.allocator.free(source);
+    @memset(source, 'x');
+    @memcpy(source[0..3], "é\n");
+    source[middle - 10] = '\n';
+    source[middle - 1] = '(';
+    source[middle + 1] = ')';
+    var document = try text.Document.init(t.allocator, source);
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    state.selections.single(.{ .anchor = middle, .head = middle });
+    const scope = try state.bracket_cache.get(&state, snapshot, t.allocator) orelse return error.NoBracketScope;
+    try t.expectEqual(middle - 1, scope.open);
+    try t.expectEqual(middle + 1, scope.close);
+}
+
 test "polish typing retains unaffected grammar colors until the parser catches up" {
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
@@ -536,6 +602,20 @@ test "Vim counts operators register paste and history use document transactions"
     try t.expectEqual(.normal, state.vim.mode);
     try vimKeys(&state, &document, "Q");
     try expectText(&document, "new two three\nfour five\nsix seven\n");
+}
+
+test "Vim moves across a grapheme and deletes it as one character" {
+    var document = try text.Document.init(t.allocator, "a👩‍💻z");
+    defer document.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.setVim(true);
+    try vimKeys(&state, &document, "ll");
+    try t.expectEqual("a👩‍💻".len, state.primary().head);
+    try vimKeys(&state, &document, "hx");
+    try expectText(&document, "az");
+    try vimKeys(&state, &document, "u");
+    try expectText(&document, "a👩‍💻z");
 }
 test "Vim g slash opens the project search request and clears the pending prefix" {
     var document = try text.Document.init(t.allocator, "one\ntwo\n");

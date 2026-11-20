@@ -220,7 +220,7 @@ pub fn replace(a: Allocator, root: ?*Node, start: usize, end: usize, text: []con
     defer release(a, beginning);
     return join(a, beginning, suffix.right);
 }
-pub fn byteAt(root: *const Node, offset: usize) u8 {
+pub fn leafAt(root: *const Node, offset: usize) struct { bytes: []const u8, start: usize } {
     std.debug.assert(offset < root.summary.bytes);
     var node = root;
     var at = offset;
@@ -231,7 +231,11 @@ pub fn byteAt(root: *const Node, offset: usize) u8 {
             node = b.right;
         }
     }
-    return node.data.leaf[at];
+    return .{ .bytes = node.data.leaf, .start = offset - at };
+}
+pub fn byteAt(root: *const Node, offset: usize) u8 {
+    const found = leafAt(root, offset);
+    return found.bytes[offset - found.start];
 }
 pub fn isBoundary(root: ?*const Node, offset: usize) bool {
     const length = summary(root).bytes;

@@ -83,7 +83,7 @@ pub fn enable(self: *Editor, enabled: bool) void {
 }
 fn normalPosition(s: text.Snapshot, at: usize) !usize {
     const range = try s.lineRange((try s.pointAt(@min(at, s.byteLen()))).line);
-    return if (at >= range.end and range.end > range.start) try s.previousBoundary(range.end) else @min(at, range.end);
+    return if (at >= range.end and range.end > range.start) try s.previousGraphemeBoundary(range.end) else @min(at, range.end);
 }
 fn select(self: *Editor, s: text.Snapshot, event: *ui.Event(ui.Input)) !void {
     const v = &self.vim;
@@ -97,7 +97,7 @@ fn select(self: *Editor, s: text.Snapshot, event: *ui.Event(ui.Input)) !void {
     } else if (v.mode == .visual_block) {
         try vim_geometry.block(self, s, event);
     } else {
-        self.selections.single(.{ .anchor = @min(v.anchor, v.cursor), .head = try s.nextBoundary(@max(v.anchor, v.cursor)) });
+        self.selections.single(.{ .anchor = @min(v.anchor, v.cursor), .head = try s.nextGraphemeBoundary(@max(v.anchor, v.cursor)) });
     }
     self.reveal(s);
 }
@@ -113,7 +113,7 @@ fn enterNormal(self: *Editor, document: *text.Document, from_insert: bool, event
     v.cursor = if (v.visual()) v.cursor else self.primary().head;
     if (from_insert) {
         const range = try s.lineRange((try s.pointAt(v.cursor)).line);
-        if (v.cursor > range.start) v.cursor = try s.previousBoundary(v.cursor);
+        if (v.cursor > range.start) v.cursor = try s.previousGraphemeBoundary(v.cursor);
     }
     try vim_repeat.finish(self, s);
     self.preferred_x = null;
@@ -307,13 +307,13 @@ fn motion(self: *Editor, s: text.Snapshot, key: u8, count: usize, event: *ui.Eve
         'h' => {
             for (0..count) |_| {
                 if (at == range.start) break;
-                at = try s.previousBoundary(at);
+                at = try s.previousGraphemeBoundary(at);
             }
         },
         'l' => {
             for (0..count) |_| {
                 if (at >= range.end) break;
-                at = try s.nextBoundary(at);
+                at = try s.nextGraphemeBoundary(at);
             }
         },
         'j', 'k' => {
@@ -653,7 +653,7 @@ fn token(self: *Editor, doc: *text.Document, key: u8, event: *ui.Event(ui.Input)
             }
             var at = old;
             const range = try s.lineRange((try s.pointAt(old)).line);
-            if (key == 'a' and at < range.end) at = try s.nextBoundary(at);
+            if (key == 'a' and at < range.end) at = try s.nextGraphemeBoundary(at);
             if (key == 'I') at = (try motion(self, s, '^', 1, event)).?;
             if (key == 'A') at = range.end;
             self.selections.single(.{ .anchor = at, .head = at });
@@ -687,8 +687,8 @@ fn token(self: *Editor, doc: *text.Document, key: u8, event: *ui.Event(ui.Input)
                     end = line.end;
                 } else for (0..count) |_| {
                     if (key == 'X') {
-                        if (start > line.start) start = try s.previousBoundary(start);
-                    } else if (end < line.end) end = try s.nextBoundary(end);
+                        if (start > line.start) start = try s.previousGraphemeBoundary(start);
+                    } else if (end < line.end) end = try s.nextGraphemeBoundary(end);
                 }
                 self.selections.single(.{ .anchor = start, .head = end });
             }

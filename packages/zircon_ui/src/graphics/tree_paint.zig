@@ -18,13 +18,11 @@ pub fn paint(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, 
 pub fn paintWithCache(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer, cache: ?*cache_module.SceneCache) !void {
     const root = frame.root orelse return error.NoFrameRoot;
     if (layout.frame_epoch != frame.epoch) return error.InvalidFrame;
-    const fingerprints = try painter.allocator.alloc(u64, frame.nodes.items.len);
-    @memset(fingerprints, 0);
-    if (cache != null) _ = fingerprintNode(frame, layout, root.index, measurer.generation, fingerprints, 0);
-    try node(frame, layout, painter, root.index, 1, 0, measurer, cache, fingerprints);
+    var fingerprints: ?[]?u64 = null;
+    try node(frame, layout, painter, root.index, 1, 0, measurer, cache, &fingerprints);
     try tooltip(frame, layout, painter, measurer);
 }
-fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer, cache: ?*cache_module.SceneCache, fingerprints: []const u64) anyerror!void {
+fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer, cache: ?*cache_module.SceneCache, fingerprints: *?[]?u64) anyerror!void {
     if (depth > 128) return error.PaintDepthExceeded;
     const value = frame.nodes.items[index];
     const bounds = layout.bounds[index];
@@ -36,9 +34,17 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
         break;
     };
     const background_value = if (within_hover) value.style.hover_background orelse value.style.background else value.style.background;
-    const cache_key = if (value.cache) if (value.key != null) cache_key_module.scoped(frame, index) else null else null;
-    const fingerprint = cache_key_module.hash(fingerprints[index], inherited_opacity);
-    const cacheable = fingerprints[index] != 0;
+    const cache_key = if (cache != null and value.cache and value.key != null) cache_key_module.scoped(frame, index) else null;
+    const own_fingerprint = if (cache_key != null) blk: {
+        if (fingerprints.* == null) {
+            const memo = try painter.allocator.alloc(?u64, frame.nodes.items.len);
+            @memset(memo, null);
+            fingerprints.* = memo;
+        }
+        break :blk fingerprintNode(frame, layout, index, measurer.generation, fingerprints.*.?, depth);
+    } else 0;
+    const cacheable = own_fingerprint != 0;
+    const fingerprint = if (cacheable) cache_key_module.hash(own_fingerprint, inherited_opacity) else 0;
     const cache_clip = painter.clip();
     if (cache_key) |key| if (cache) |store| if (cacheable) if (store.lookup(key, fingerprint, bounds, cache_clip)) |items| {
         store.hits += 1;
@@ -93,8 +99,9 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
     };
 }
 
-fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: u32, generation: u64, fingerprints: []u64, depth: usize) u64 {
+fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: u32, generation: u64, fingerprints: []?u64, depth: usize) u64 {
     if (depth > 128) return 0;
+    if (fingerprints[index]) |known| return known;
     const value = frame.nodes.items[index];
     var within_hover = false;
     var hovered = frame.hovered_node;
@@ -124,8 +131,9 @@ fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: 
         if (child_hash == 0) cacheable = false;
         hash = cache_key_module.hash(hash, child_hash);
     }
-    fingerprints[index] = if (cacheable) hash else 0;
-    return fingerprints[index];
+    const result = if (cacheable) hash else 0;
+    fingerprints[index] = result;
+    return result;
 }
 
 fn tooltip(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer) !void {

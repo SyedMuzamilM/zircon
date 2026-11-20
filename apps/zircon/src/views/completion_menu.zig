@@ -5,6 +5,7 @@ const shell = @import("../shell.zig");
 const v = @import("components.zig");
 const Shell = shell.Shell;
 const row_height: f32 = 30;
+const accessibility_id: u64 = 3;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
     if (self.overlay != .none) return null;
@@ -17,7 +18,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
     const visible = items[start..@min(start + 8, items.len)];
     var choices: std.ArrayList(ui.Element) = .empty;
     for (visible, start..) |item, index| {
-        try choices.append(b.allocator(), try b.fluent().button(.{ .label = item.label })
+        const choice = try b.fluent().button(.{ .label = item.label })
             .h_px(row_height)
             .shrink_0()
             .padding(.{ .left = 12, .right = 12 })
@@ -33,7 +34,17 @@ pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
                 v.text(b, item.detail orelse "", colors.muted, 12),
             })
             .id(.{ .number = @intCast(index) })
-            .build());
+            .build();
+        var identity = std.hash.Wyhash.init(message.data.completion.id);
+        std.hash.autoHash(&identity, index);
+        identity.update(item.label);
+        try choices.append(b.allocator(), try b.accessible(choice, .{
+            .id = identity.final() | (1 << 63),
+            .role = .button,
+            .parent = accessibility_id,
+            .label = item.label,
+            .selected = index == self.language.completion_index,
+        }));
     }
     const requested: ui.Size = .{ .width = @min(480, viewport.width - 24), .height = @as(f32, @floatFromInt(choices.items.len)) * row_height + 12 };
     var anchor: ui.Rect = .{ .x = if (self.sidebar_visible) self.panelWidth() + 60 else 60, .y = 100, .height = 22 };
@@ -48,6 +59,6 @@ pub fn render(self: *const Shell, b: *ui.Ui) !?ui.Element {
     return try b.fluent().div()
         .padding(.{ .top = placement.y, .left = placement.x })
         .stack()
-        .children(.{popup})
+        .children(.{try b.accessible(popup, .{ .id = accessibility_id, .role = .list, .label = "Completions" })})
         .build();
 }

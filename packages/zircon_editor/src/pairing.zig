@@ -147,23 +147,9 @@ pub fn typeText(self: *model.Editor, document: *text.Document, bytes: []const u8
     return outcome;
 }
 
-pub fn backspace(self: *model.Editor, document: *text.Document, snapshot: text.Snapshot) !?model.Outcome {
-    var arena = std.heap.ArenaAllocator.init(self.allocator);
-    defer arena.deinit();
-    const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
-    var special = false;
-    for (self.selections.items.items, edits) |item, *edit| {
-        var range = item.range();
-        if (item.empty()) {
-            range.start = try snapshot.previousBoundary(item.head);
-            if (item.head < snapshot.byteLen()) if (try self.pairs.atCloser(snapshot, item.head, try snapshot.byteAt(item.head))) |pair| if (pair.open + 1 == item.head) {
-                range.end = item.head + 1;
-                special = true;
-            };
-        }
-        edit.* = .{ .range = range, .text = "" };
-    }
-    if (!special) return null;
-    self.typing_group = 0;
-    return try self.applyEdits(document, edits, 0);
+pub fn pairedBackspaceEnd(self: *const model.Editor, snapshot: text.Snapshot, caret: usize) !?usize {
+    if (self.pairs.items.items.len == 0 or caret == snapshot.byteLen()) return null;
+    const pair = try self.pairs.atCloser(snapshot, caret, try snapshot.byteAt(caret)) orelse return null;
+    if (pair.open + 1 != caret) return null;
+    return try snapshot.nextGraphemeBoundary(caret);
 }

@@ -67,6 +67,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **TEXT-03: Grapheme-safe movement, deletion and selection.**
   Depends: BASE-01. Scope: text boundaries, editor navigation, Vim/display mapping and inputs. Done: combining marks, flags, modifiers and joined emoji are indivisible where users expect characters; CRLF and UTF-16 surrogate handling remain correct; wrapped hit testing and multicursor edits agree.
+  Progress: Unicode 17 grapheme boundaries drive ordinary horizontal movement and character deletion, as well as Vim `h`, `l`, `x` and `X`. Editor tests cover undo and deletion with a caret inside a cluster. Pointer hit testing, vertical movement, text fields and native acceptance remain open.
 
 - [ ] **TEXT-04: Snapshot-based async open/save/hash/reload.**
   Depends: TEXT-07 contract; BASE-04 for UI integration. Scope: workspace persistence and owned jobs. Done: slow file I/O does not block input; atomic save/permissions/conflict policy survive; a save completion marks only its captured content saved; later edits remain dirty; closing/canceling cannot publish into another document. Document publication/cancellation limits.
@@ -161,6 +162,7 @@ Original owner for EXT-01..08: <t3-thread://v2/b79b85d5-1375-4bbb-b783-8d130943f
 
 - [ ] **UX-05: Native accessibility semantics and acceptance.**
   Depends: UX-04; TEXT-02/03 for editable-text semantics. Scope: framework roles/names/actions/text selection and platform bridge. Done: actual accessibility tree and assistive-technology journeys cover editor, fields, menus, tree, dialogs, diagnostics and terminal; focus/selection/range queries match displayed text. Record supported scope and unresolved limitations explicitly.
+  Progress: AppKit exposes source-editor panes and the completion list from the committed frame. The focused editor exposes its current surrounding-text excerpt and selection. Choices expose their label, selection and activation. Live VoiceOver acceptance and broader text and control coverage remain open.
 
 - [ ] **UX-06: Native menus, dialogs and OS file opening/drops.**
   Depends: EXT-05/06, TEXT-06; UX-04. Scope: macOS application menu, open/save dialogs, file associations/drop routing. Done: actions target the active document/window, preserve dirty-close/conflict policies, accept OS files into the correct pane and remain keyboard-accessible.

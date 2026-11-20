@@ -10,6 +10,7 @@ const shaping = @import("../../text/shaping.zig");
 const text_style = @import("../../text/style.zig");
 const text_typography = @import("../../text/typography.zig");
 const platform = @import("../interface.zig");
+const accessibility = @import("accessibility.zig");
 const icon_module = @import("icon.zig");
 const objc = @import("objc.zig");
 const TextStyle = text_style.TextStyle;
@@ -60,6 +61,7 @@ const State = struct {
     view: Id,
     layer: Id,
     renderer: *metal.Renderer,
+    accessibility_context: accessibility.Context,
     marked: Id = null,
     pending_icon: Id = null,
     input: ?platform.TextSnapshot = null,
@@ -162,7 +164,16 @@ pub fn open(allocator: std.mem.Allocator, options: platform.WindowOptions, sink:
     errdefer objc.release(layer);
     const s = try allocator.create(State);
     errdefer allocator.destroy(s);
-    s.* = .{ .allocator = allocator, .sink = sink, .window = window, .view = view, .layer = layer, .renderer = renderer, .pending_icon = icon };
+    s.* = .{
+        .allocator = allocator,
+        .sink = sink,
+        .window = window,
+        .view = view,
+        .layer = layer,
+        .renderer = renderer,
+        .pending_icon = icon,
+        .accessibility_context = .{ .allocator = allocator, .window = window, .view = view, .sink = sink },
+    };
     _ = object_setInstanceVariable(view, "zirconState", s);
     errdefer _ = object_setInstanceVariable(view, "zirconState", null);
     objc.send(void, layer, "setDevice:", .{renderer.device});
@@ -213,6 +224,7 @@ const ops: platform.Surface.Ops = .{
     .clipboard_read = clipboardRead,
     .clipboard_write = clipboardWrite,
     .set_text_input = setTextInput,
+    .set_accessibility = setAccessibility,
     .set_parent = setParent,
     .raise = raise,
     .accept_close = acceptClose,
@@ -274,6 +286,7 @@ fn deinit(raw: *anyopaque) void {
     const pool = objc.Pool.init();
     defer pool.deinit();
     s.closed = true;
+    s.accessibility_context.deinit();
     setParent(raw, null);
     objc.send(void, s.window, "setDelegate:", .{@as(Id, null)});
     _ = object_setInstanceVariable(s.view, "zirconState", null);
@@ -458,6 +471,7 @@ fn add(comptime function: anytype, selector: [:0]const u8, encoding: [:0]const u
 }
 fn registerView() !void {
     if (view_class != null) return;
+    try accessibility.register();
     view_class = objc_allocateClassPair(objc.class("NSView"), "ZirconFrameworkView", 0) orelse return error.NativeClassRegistrationFailed;
     errdefer {
         objc_disposeClassPair(view_class);
@@ -468,6 +482,8 @@ fn registerView() !void {
     try add(yes, "acceptsFirstResponder", "B@:");
     try add(acceptsFirstMouse, "acceptsFirstMouse:", "B@:@");
     try add(yes, "isOpaque", "B@:");
+    try add(accessibilityChildren, "accessibilityChildren", "@@:");
+    try add(accessibilityFocused, "accessibilityFocusedUIElement", "@@:");
     try add(pointerDown, "mouseDown:", "v@:@");
     try add(pointerDown, "rightMouseDown:", "v@:@");
     try add(pointerDown, "otherMouseDown:", "v@:@");
@@ -508,6 +524,29 @@ fn registerView() !void {
     const protocol = objc_getProtocol("NSTextInputClient");
     if (protocol != null) _ = class_addProtocol(view_class, protocol);
     objc_registerClassPair(view_class);
+}
+
+fn setAccessibility(raw: *anyopaque, tree: platform.AccessibilityTree) void {
+    const context = &state(raw).accessibility_context;
+    if (!context.observed) {
+        context.tree = tree;
+        return;
+    }
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    context.update(tree);
+}
+
+fn accessibilityChildren(object: Id, _: Sel) callconv(.c) Id {
+    const s = nativeState(object) orelse return null;
+    if (s.closed) return null;
+    return s.accessibility_context.children(null, false);
+}
+
+fn accessibilityFocused(object: Id, _: Sel) callconv(.c) Id {
+    const s = nativeState(object) orelse return null;
+    if (s.closed) return null;
+    return s.accessibility_context.focused();
 }
 fn menuAction(object: Id, _: Sel, sender: Id) callconv(.c) void {
     const target_state = nativeState(object) orelse return;

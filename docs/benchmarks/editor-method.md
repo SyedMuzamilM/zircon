@@ -9,9 +9,12 @@ Build the driver and its real grammar worker, then choose a new output directory
 python3 tools/run_editor_baseline.py --output /tmp/zircon-editor-smoke --smoke
 python3 tools/run_editor_baseline.py --output /tmp/zircon-editor-profile --profile
 python3 tools/run_editor_baseline.py --output /tmp/zircon-editor-baseline --runs 5
+python3 tools/run_editor_baseline.py --output /tmp/zircon-editor-incremental --runs 5 --lsp-sync incremental
 ```
 
 The driver reads only generated fixtures and isolated settings/extensions. Each project lives in an owned temporary directory; disk bytes must remain unchanged. No remote/model request is sent and no user preferences are loaded. Results, diagnostics and source hashes survive fixture cleanup. Output directories must not already exist, so a rerun cannot silently replace earlier evidence.
+
+The default fixture advertises full-document synchronization. The incremental run uses the same edits and completion responses with incremental synchronization, checks the negotiated change mode, and records change-text bytes and whole-document resynchronizations separately.
 
 ## Workload
 

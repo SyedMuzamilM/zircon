@@ -76,7 +76,7 @@ pub const Window = struct {
         errdefer a.destroy(window);
         window.* = .{ .app = app, .allocator = a, .scope = scope, .root = .{ .app_id = scope.app_id, .slot = std.math.maxInt(u32), .generation = 0 }, .render_root = Render.call, .frames = try tree.Frames.init(a), .dimensions = .{ .width = options.width, .height = options.height }, .background = options.background, .animations = .init(a), .scene_cache = .init(a), .layout_cache = .init(a) };
         errdefer window.frames.deinit();
-        window.surface = try backend.open(a, options, .{ .context = window, .event = receive, .drag_region = dragRegion });
+        window.surface = try backend.open(a, options, .{ .context = window, .event = receive, .drag_region = dragRegion, .accessibility_press = accessibilityPress });
         errdefer window.surface.?.deinit();
         window.dimensions = window.surface.?.size();
         // Ownership of value transfers only here, after native allocation. No
@@ -143,6 +143,16 @@ pub const Window = struct {
             } else next_focus = @intCast(i);
         }
         staging.focused_node = if (w.active) next_focus else null;
+        if (modalRoot(staging)) |modal| {
+            var count: usize = 0;
+            for (staging.accessibility.items) |node| {
+                if (descendant(staging, node.index, modal)) {
+                    staging.accessibility.items[count] = node;
+                    count += 1;
+                }
+            }
+            staging.accessibility.items.len = count;
+        }
         var painter = try Painter.init(staging.allocator(), .{ .width = w.dimensions.width, .height = w.dimensions.height });
         try tree_paint.paintWithCache(staging, &layout, &painter, metrics, &w.scene_cache);
         staging.scene = try painter.finish(w.background);
@@ -166,6 +176,7 @@ pub const Window = struct {
         w.pressed = reconcile(&w.frames.committed, staging, w.pressed);
         w.frames.commitPrepared();
         surface.setTextInput(w.frames.committed.text_input);
+        surface.setAccessibility(w.accessibilityTree());
         if (w.pointer_position != null or w.capture != null) w.updateCursor();
         w.animations.commitFrame();
         w.animating = w.animations.active(w.time);
@@ -179,6 +190,31 @@ pub const Window = struct {
         _ = try w.draw();
         if (w.frames.committed.root == null) return error.NoCommittedFrame;
         try w.surface.?.snapshot(w.frames.committed.scene, path);
+    }
+    pub fn accessibilityTree(w: *const Window) platform.AccessibilityTree {
+        const frame = &w.frames.committed;
+        return .{
+            .nodes = frame.accessibility.items,
+            .bounds = frame.bounds,
+            .focused = frame.focused_node,
+            .text = frame.text_input,
+            .viewport = .{ .width = w.dimensions.width, .height = w.dimensions.height },
+        };
+    }
+    fn accessibilityPress(raw: *anyopaque, id: u64) !bool {
+        const w: *Window = @ptrCast(@alignCast(raw));
+        if (w.closed) return false;
+        const ax = w.accessibilityTree();
+        const node = ax.find(id) orelse return false;
+        const button = w.frames.committed.nodes.items[node.index];
+        if (node.element.role != .button or button.kind != .button or button.kind.button.on_click == null) return false;
+        try w.frames.beginDispatch();
+        defer w.frames.endDispatch();
+        try w.app.beginTransaction();
+        defer w.app.endTransaction();
+        const bounds = ax.rect(node);
+        try w.click(node.index, .{ .x = bounds.x + bounds.width / 2, .y = bounds.y + bounds.height / 2 }, .{});
+        return true;
     }
     fn receive(raw: *anyopaque, input: platform.Input) !void {
         const w: *Window = @ptrCast(@alignCast(raw));

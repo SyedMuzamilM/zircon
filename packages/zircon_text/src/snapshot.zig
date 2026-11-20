@@ -1,10 +1,50 @@
 //! Immutable borrowed reads with one owned rope-root reference. clone/deinit
 //! change UI-thread reference counts; read-only operations may run on a worker
 //! while that owner retains the snapshot until the worker has joined.
+
 const std = @import("std");
+const grapheme = @import("grapheme.zig");
 const rope = @import("rope.zig");
 const search = @import("search.zig");
 const types = @import("types.zig");
+/// Borrowed iteration over consecutive line ranges without repeatedly seeking
+/// the same rope leaves. The source snapshot must outlive the iterator.
+pub const LineIterator = struct {
+    pub const Line = struct {
+        range: types.Range,
+        /// Borrowed directly from the rope when the content fits one leaf.
+        bytes: ?[]const u8 = null,
+    };
+
+    leaves: rope.Iterator,
+    remaining: []const u8 = &.{},
+    offset: usize,
+    done: bool = false,
+
+    pub fn next(self: *LineIterator) ?Line {
+        if (self.done) return null;
+        const start = self.offset;
+        var previous_cr = false;
+        while (true) {
+            if (self.remaining.len == 0) self.remaining = self.leaves.next() orelse {
+                self.done = true;
+                return .{ .range = .{ .start = start, .end = self.offset } };
+            };
+            if (std.mem.indexOfScalar(u8, self.remaining, '\n')) |lf| {
+                const cr = if (lf == 0) previous_cr else self.remaining[lf - 1] == '\r';
+                const end = self.offset + lf - @intFromBool(cr);
+                const bytes = if (self.offset == start) self.remaining[0 .. end - start] else null;
+                self.offset += lf + 1;
+                self.remaining = self.remaining[lf + 1 ..];
+                return .{ .range = .{ .start = start, .end = end }, .bytes = bytes };
+            }
+            previous_cr = self.remaining[self.remaining.len - 1] == '\r';
+            self.offset += self.remaining.len;
+            self.remaining = &.{};
+        }
+    }
+};
+
 pub const Snapshot = struct {
     allocator: std.mem.Allocator,
     root: ?*rope.Node,
@@ -62,6 +102,10 @@ pub const Snapshot = struct {
         var end = if (line + 1 < self.lineCount()) rope.newline(self.root.?, line) else self.byteLen();
         if (line + 1 < self.lineCount() and end > start and rope.byteAt(self.root.?, end - 1) == '\r') end -= 1;
         return .{ .start = start, .end = end };
+    }
+    pub fn linesFrom(self: Snapshot, line: usize) !LineIterator {
+        const start = try self.lineStart(line);
+        return .{ .leaves = rope.Iterator.init(self.root, start, self.byteLen()), .offset = start };
     }
     /// Includes the original CRLF or LF bytes when this line has an ending.
     pub fn lineRangeIncludingEnding(self: Snapshot, line: usize) !types.Range {
@@ -121,6 +165,17 @@ pub const Snapshot = struct {
         if (rope.byteAt(self.root.?, offset) == '\r' and offset + 1 < self.byteLen() and rope.byteAt(self.root.?, offset + 1) == '\n') return offset + 2;
         const length = std.unicode.utf8ByteSequenceLength(rope.byteAt(self.root.?, offset)) catch unreachable;
         return offset + length;
+    }
+    pub fn previousGraphemeBoundary(self: Snapshot, offset: usize) !usize {
+        return grapheme.previous(self.root, offset);
+    }
+    pub fn nextGraphemeBoundary(self: Snapshot, offset: usize) !usize {
+        return grapheme.next(self.root, offset);
+    }
+    /// Selects one grapheme in the requested direction, or the full grapheme
+    /// if a code-point-indexed caller placed the caret inside one.
+    pub fn graphemeDeletionRange(self: Snapshot, offset: usize, backward: bool) !types.Range {
+        return grapheme.deletion(self.root, offset, backward);
     }
     /// Literal search streams chunks. Insensitive search folds ASCII only.
     /// Scratch for long needles uses page_allocator, safe for read-only workers.

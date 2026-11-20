@@ -6,6 +6,8 @@ import sys
 import time
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "normal"
+benchmark = mode in ("benchmark", "benchmark-incremental")
+incremental = mode in ("incremental", "incremental-object", "benchmark-incremental")
 if mode == "early":
     sys.stderr.write("fixture exited early\n")
     sys.exit(3)
@@ -79,7 +81,7 @@ while True:
                 {"openClose": True, "change": 2} if mode == "incremental-object"
                 else {"openClose": True, "change": 0} if mode == "sync-none-open"
                 else 0 if mode == "sync-none"
-                else 2 if mode == "incremental" else 1
+                else 2 if incremental else 1
             )
         if mode == "unsupported-encoding":
             capabilities["positionEncoding"] = "utf-8"
@@ -105,7 +107,7 @@ while True:
         assert mode not in ("sync-none", "sync-none-open", "sync-omitted")
         old.update(document)
         for change in params["contentChanges"]:
-            if mode in ("incremental", "incremental-object"):
+            if incremental:
                 assert "range" in change
                 start = offset_at(old["text"], change["range"]["start"])
                 end = offset_at(old["text"], change["range"]["end"])
@@ -148,7 +150,7 @@ while True:
             continue
         send({"jsonrpc": "2.0", "id": message["id"], "result": [{"title": "Fix answer", "edit": {"changes": {params["textDocument"]["uri"]: [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}, "newText": "fixed"}]}}}]})
     elif method == "textDocument/completion":
-        if mode == "benchmark":
+        if benchmark:
             assert params["textDocument"]["uri"] in opened
             send({"jsonrpc": "2.0", "id": message["id"], "result": []})
             continue

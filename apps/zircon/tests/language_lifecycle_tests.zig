@@ -420,7 +420,24 @@ fn hoverJourney(comptime check: HoverCheck) !void {
                 if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.CompletionTimeout;
                 try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
             }
-            if (check == .completion_filter) try app.read(owner, Ops.filtered, .{});
+            if (check == .completion_filter) {
+                try app.read(owner, Ops.filtered, .{});
+                const accessibility = (try app.window(h)).accessibilityTree();
+                const list = accessibility.find(3) orelse return error.MissingAccessibleCompletions;
+                try t.expectEqual(.list, list.element.role);
+                var selected: usize = 0;
+                var has_editor = false;
+                for (accessibility.nodes) |node| {
+                    if (node.element.role == .text_area and accessibility.find(node.element.id) != null) has_editor = true;
+                    if (node.element.parent == list.element.id and node.element.selected) {
+                        try t.expectEqualStrings("aaaAnswer", node.element.label);
+                        try t.expect(accessibility.find(node.element.id) != null);
+                        selected += 1;
+                    }
+                }
+                try t.expect(has_editor);
+                try t.expectEqual(@as(usize, 1), selected);
+            }
             if (check == .completion_exit) {
                 try app.dispatch(h, .{ .text = "w" });
                 while (!try app.read(owner, Ops.serverStopped, .{})) {

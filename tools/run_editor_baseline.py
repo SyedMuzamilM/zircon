@@ -27,7 +27,7 @@ def source_bytes(size):
     return (line * (size // len(line)) + b" " * (size % len(line) - 1) + b"\n")[:size]
 
 
-def make_project(root, size, services, wrap):
+def make_project(root, size, services, wrap, lsp_sync):
     data = source_bytes(size)
     (root / "main.py").write_bytes(data)
     (root / "settings.json").write_text(json.dumps({"theme": "zircon.dark", "git_inline_blame": False,
@@ -35,13 +35,14 @@ def make_project(root, size, services, wrap):
     if services:
         extension = root / "extensions" / "org.zircon.baseline"
         extension.mkdir(parents=True)
+        mode = "benchmark-incremental" if lsp_sync == "incremental" else "benchmark"
         manifest = {
             "schema_version": 1, "id": "org.zircon.baseline", "name": "Baseline fixtures", "version": "1.0.0",
             "contributes": {
                 "languages": [{"id": "python", "name": "Python", "extensions": ["py"],
                                "grammar": {"builtin": True, "name": "python", "wasm": "", "highlights": ""}}],
                 "language_servers": [{"id": "baseline.fixture", "languages": ["python"], "command": sys.executable,
-                                      "args": [str(REPO / "packages/zircon_language/tests/fixture.py"), "benchmark"]}]
+                                      "args": [str(REPO / "packages/zircon_language/tests/fixture.py"), mode]}]
             }
         }
         (extension / "extension.json").write_text(json.dumps(manifest))
@@ -72,6 +73,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--lsp-sync", choices=("full", "incremental"), default="full")
     parser.add_argument("--smoke", action="store_true", help="One 32 KiB services case for validating the driver")
     parser.add_argument("--profile", action="store_true", help="One separate instrumented 1 MiB wrap/services run")
     args = parser.parse_args()
@@ -88,6 +90,7 @@ def main():
             "commit": command("git", "rev-parse", "HEAD"), "worktree_status": command("git", "status", "--short"),
             "driver_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
             "worker_sha256": hashlib.sha256((executable.parent / "zircon-extension-host").read_bytes()).hexdigest(),
+            "lsp_sync": args.lsp_sync,
             "toolchain_sources_sha256": {name: hashlib.sha256((REPO / name).read_bytes()).hexdigest()
                                           for name in ("tools/zig", "tools/zig_stdlib_overlay.py", "tools/verify_spawn_isolation.zig")},
             "source_sha256": {str(path.relative_to(REPO)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -109,7 +112,7 @@ def main():
                 name = f"{size}-{'wrap' if wrap else 'plain'}-{'services' if services else 'core'}-{run + 1}"
                 root = Path(temporary) / name
                 root.mkdir()
-                expected_hash = make_project(root, size, services, wrap)
+                expected_hash = make_project(root, size, services, wrap, args.lsp_sync)
                 result_path = output / (name + ".json")
                 log_path = output / (name + ".log")
                 started = time.monotonic()
@@ -140,6 +143,10 @@ def main():
                 if result["errors"] or result["revision"] != 20 or result["frames"] < 20 or len(result["input_to_submit_ms"]) != 20:
                     failures.append({"case": name, "reason": "invalid work counts"})
                     continue
+                expected_incremental = result["counts"]["lsp_changes"] if services and args.lsp_sync == "incremental" else 0
+                if result["counts"]["lsp_incremental_changes"] != expected_incremental:
+                    failures.append({"case": name, "reason": "wrong LSP synchronization mode"})
+                    continue
                 result.update({"case": name, "run": run + 1, "process_elapsed_s": time.monotonic() - started,
                                "sampled_tree_peak_rss_kib": peak_rss, "rss_samples": snapshots,
                                "source_sha256": expected_hash, "disk_unchanged": True})
@@ -159,7 +166,7 @@ def main():
                         "step_p95_median_ms": statistics.median(percentile(s["step_ms"], .95) for s in group),
                         "sampled_tree_peak_median_kib": statistics.median(s["sampled_tree_peak_rss_kib"] for s in group),
                         "raw_cases": [s["case"] for s in group]})
-    (output / "summary.json").write_text(json.dumps({"profiled": args.profile, "cases": summary, "failures": failures, "load_end": os.getloadavg()}, indent=2))
+    (output / "summary.json").write_text(json.dumps({"profiled": args.profile, "lsp_sync": args.lsp_sync, "cases": summary, "failures": failures, "load_end": os.getloadavg()}, indent=2))
     print(str(output / "summary.json"))
     if failures:
         raise SystemExit(1)

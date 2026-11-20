@@ -37,21 +37,31 @@ fn find(state: *const Editor, snapshot: text.Snapshot, cursor: usize, a: std.mem
     var depth: usize = 0;
     var result: Result = .{};
     const begin = cursor -| (scan_limit / 2);
-    var row = (try snapshot.pointAt(begin)).line;
+    var boundary = begin;
+    while (!snapshot.isBoundary(boundary)) boundary -= 1;
+    var row = (try snapshot.pointAt(boundary)).line;
     if (begin > try snapshot.lineStart(row)) row += 1;
+    if (row == snapshot.lineCount()) return .{};
     const end = @min(snapshot.byteLen(), cursor +| (scan_limit / 2));
+    boundary = end;
+    while (!snapshot.isBoundary(boundary)) boundary -= 1;
+    const last_row = (try snapshot.pointAt(boundary)).line;
+    const last_range = try snapshot.lineRange(last_row);
+    var lines = try snapshot.linesFrom(row);
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const scratch = arena.allocator();
-    while (row < snapshot.lineCount()) : (row += 1) {
-        const range = try snapshot.lineRange(row);
-        if (range.start > end) break;
+    while (row <= last_row) : (row += 1) {
+        // Avoid streaming the tail of a long line beyond the search window.
+        if (row == last_row and last_range.end - last_range.start > 64 * 1024) break;
+        const line = lines.next() orelse unreachable;
+        const range = line.range;
         if (range.end - range.start > 64 * 1024) {
             depth = 0;
             continue;
         }
         const initial = state.syntax_cache.state(snapshot, row) orelse if (state.language == .plain) syntax.State{} else return .{};
-        const bytes = try snapshot.copy(scratch, range);
+        const bytes = line.bytes orelse try snapshot.copy(scratch, range);
         const lexed = if (state.language_profile) |value| try profile.lex(scratch, bytes, value, initial) else try syntax.lex(scratch, bytes, state.language, initial);
         var indent: usize = 0;
         for (bytes) |byte| {

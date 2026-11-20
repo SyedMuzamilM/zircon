@@ -8,6 +8,7 @@ const controls_svg = @import("../controls/svg.zig");
 const identity = @import("../entity/entity.zig");
 const event = @import("../event/event.zig");
 const geometry = @import("../layout/geometry.zig");
+const platform = @import("../platform/interface.zig");
 const adapter = @import("adapter.zig");
 const custom_module = @import("custom.zig");
 const elements = @import("element.zig");
@@ -102,6 +103,17 @@ pub const Ui = struct {
         const element = try resolveElement(value);
         _ = try ui.frame.get(element);
         ui.frame.nodes.items[element.index].cache = true;
+        return element;
+    }
+    pub fn accessible(ui: *Ui, element: elements.Element, options: platform.Accessibility) !elements.Element {
+        _ = try ui.frame.get(element);
+        if (!std.unicode.utf8ValidateSlice(options.label)) return error.InvalidUtf8;
+        for (ui.frame.accessibility.items) |existing| {
+            if (existing.element.id == options.id or existing.index == element.index) return error.DuplicateAccessibilityElement;
+        }
+        var owned = options;
+        owned.label = try ui.frame.allocator().dupe(u8, options.label);
+        try ui.frame.accessibility.append(ui.frame.allocator(), .{ .element = owned, .index = element.index });
         return element;
     }
     /// Takes focus when this logical element first enters a committed frame.

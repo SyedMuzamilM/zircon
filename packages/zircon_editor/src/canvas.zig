@@ -298,7 +298,7 @@ const Canvas = struct {
                 if (line.segment != null and self.wrap_cache.atOffset(head) != self.wrap_cache.atOffset(line.segment.?.start)) continue;
                 const offset = @min(head - line.range.start, line.original.len);
                 const left = line.display.caret(metrics.*, style, offset);
-                const next = @min(line.original.len, (try self.snapshot.nextBoundary(head)) - line.range.start);
+                const next = if (self.block_cursor) @min(line.original.len, (try self.snapshot.nextGraphemeBoundary(head)) - line.range.start) else offset;
                 const width = if (self.block_cursor) (if (offset < line.original.len and line.original[offset] == '\t') self.font_size * 0.6 else @max(self.font_size * 0.6, line.display.caret(metrics.*, style, next) - left)) else @as(f32, 1.5);
                 try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y + (if (self.block_cursor) @as(f32, 0) else 3), .width = width, .height = if (self.block_cursor) self.line_height else self.line_height - 4 }, .color = self.theme.caret });
                 if (self.block_cursor and next > offset) {

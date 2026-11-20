@@ -23,6 +23,78 @@ fn event(raw: *anyopaque, input: platform.Input) !void {
         else => {},
     }
 }
+
+test "native accessibility reads committed editor text and activates a completion" {
+    const pool = objc.Pool.init();
+    defer pool.deinit();
+    const Fixture = struct {
+        pressed: ?u64 = null,
+
+        fn ignore(_: *anyopaque, _: platform.Input) !void {}
+        fn press(raw: *anyopaque, id: u64) !bool {
+            const fixture: *@This() = @ptrCast(@alignCast(raw));
+            fixture.pressed = id;
+            return true;
+        }
+    };
+    var fixture: Fixture = .{};
+    const title = "Zircon accessibility test";
+    const surface = try window.open(std.testing.allocator, .{ .title = title, .visible = false }, .{
+        .context = &fixture,
+        .event = Fixture.ignore,
+        .accessibility_press = Fixture.press,
+    });
+    defer surface.deinit();
+    const app = objc.send(objc.Id, objc.class("NSApplication"), "sharedApplication", .{});
+    const native_window = findWindow(app, title) orelse return error.TestWindowNotFound;
+    const view = objc.send(objc.Id, native_window, "contentView", .{});
+    const nodes: []const platform.AccessibilityTree.Node = &.{
+        .{ .element = .{ .id = 1, .role = .text_area, .label = "Editor" }, .index = 0 },
+        .{ .element = .{ .id = 2, .role = .list, .label = "Completions" }, .index = 1 },
+        .{ .element = .{ .id = 3, .parent = 2, .role = .button, .label = "answer", .selected = true }, .index = 2 },
+    };
+    const bounds: []const geometry.Rect = &.{
+        .{ .width = 300, .height = 120 },
+        .{ .x = 20, .y = 20, .width = 130, .height = 40 },
+        .{ .x = 20, .y = 20, .width = 130, .height = 20 },
+    };
+    var tree: platform.AccessibilityTree = .{
+        .nodes = nodes,
+        .bounds = bounds,
+        .focused = 0,
+        .viewport = .{ .width = 300, .height = 120 },
+        .text = .{
+            .text = "a🙂b",
+            .selection = .{ .start = 1, .end = 5 },
+            .revision = 1,
+            .caret = .{},
+        },
+    };
+    surface.setAccessibility(tree);
+    const roots = objc.send(objc.Id, view, "accessibilityChildren", .{});
+    try std.testing.expectEqual(@as(usize, 2), objc.send(usize, roots, "count", .{}));
+    const editor = objc.send(objc.Id, roots, "objectAtIndex:", .{@as(usize, 0)});
+    try std.testing.expectEqual(editor, objc.send(objc.Id, view, "accessibilityFocusedUIElement", .{}));
+    try std.testing.expectEqualStrings("AXTextArea", objc.fromString(objc.send(objc.Id, editor, "accessibilityRole", .{})));
+    try std.testing.expectEqualStrings("a🙂b", objc.fromString(objc.send(objc.Id, editor, "accessibilityValue", .{})));
+    try std.testing.expectEqualStrings("🙂", objc.fromString(objc.send(objc.Id, editor, "accessibilitySelectedText", .{})));
+    const Range = extern struct { location: usize, length: usize };
+    try std.testing.expectEqual(Range{ .location = 1, .length = 2 }, objc.send(Range, editor, "accessibilitySelectedTextRange", .{}));
+
+    const list = objc.send(objc.Id, roots, "objectAtIndex:", .{@as(usize, 1)});
+    const choices = objc.send(objc.Id, list, "accessibilitySelectedChildren", .{});
+    try std.testing.expectEqual(@as(usize, 1), objc.send(usize, choices, "count", .{}));
+    const answer = objc.send(objc.Id, choices, "objectAtIndex:", .{@as(usize, 0)});
+    try std.testing.expectEqualStrings("answer", objc.fromString(objc.send(objc.Id, answer, "accessibilityLabel", .{})));
+    try std.testing.expect(objc.send(bool, answer, "accessibilityPerformPress", .{}));
+    try std.testing.expectEqual(@as(?u64, 3), fixture.pressed);
+
+    tree.nodes = nodes[0..1];
+    surface.setAccessibility(tree);
+    try std.testing.expectEqual(editor, objc.send(objc.Id, view, "accessibilityFocusedUIElement", .{}));
+    try std.testing.expect(!objc.send(bool, answer, "accessibilityPerformPress", .{}));
+}
+
 test "native window presents and routes queued pointer, text, resize and close events" {
     const allocator = std.testing.allocator;
     const pool = objc.Pool.init();

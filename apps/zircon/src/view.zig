@@ -189,6 +189,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             .build())
             .request_focus(if (self.active_pane == .primary) self.editor_focus_request else 0)
             .build();
+        if (primary_source) primary = try accessibleEditor(b, primary, tab.document, 0);
         try panes.append(b.allocator(), try b.fluent().div()
             .w(.{ .px = primary_width })
             .h(primary_height)
@@ -250,6 +251,7 @@ fn editorContent(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             if (secondary_source) secondary_canvas = try b.fluent().adopt(secondary_canvas)
                 .request_focus(if (self.active_pane == .secondary) self.editor_focus_request else 0)
                 .build();
+            if (secondary_source) secondary_canvas = try accessibleEditor(b, secondary_canvas, secondary.document, 1);
             try panes.append(b.allocator(), try b.fluent().div()
                 .grow()
                 .min_w(.{ .px = 0 })
@@ -290,6 +292,16 @@ fn panelBody(self: *const Shell, b: *ui.Ui, tool: ?Shell.Tool, pane: u8, width: 
         .extensions => views_extensions.render(self, b),
     };
     return views_image.render(self, b);
+}
+
+fn accessibleEditor(b: *ui.Ui, canvas: ui.Element, document: workspace.DocumentId, pane: u8) !ui.Element {
+    var identity = std.hash.Wyhash.init(pane);
+    std.hash.autoHash(&identity, document);
+    return b.accessible(canvas, .{
+        .id = (identity.final() & ((1 << 62) - 1)) | (1 << 62),
+        .role = .text_area,
+        .label = if (pane == 0) "Primary editor" else "Secondary editor",
+    });
 }
 
 fn paneChildren(self: *const Shell, b: *ui.Ui, record: *const workspace.Record, document: workspace.DocumentId, state: *const zircon_editor.Editor, canvas: ui.Element, pane: u8, pane_width: f32) ![]const ui.Element {

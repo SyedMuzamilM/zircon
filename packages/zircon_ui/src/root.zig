@@ -50,6 +50,7 @@ pub const PaintCx = custom.PaintCx;
 pub const TextRange = interface.TextRange;
 pub const TextSnapshot = interface.TextSnapshot;
 pub const TextEdit = interface.TextEdit;
+pub const Accessibility = interface.Accessibility;
 pub const Keymap = actions.Keymap;
 pub const SequenceMap = actions.SequenceMap;
 pub const Chord = actions.Chord;

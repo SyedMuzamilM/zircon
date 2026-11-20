@@ -491,19 +491,29 @@ pub const Editor = struct {
             },
             .delete_backward, .delete_forward => {
                 self.selections.normalize();
-                if (command == .delete_backward) if (try pairing.backspace(self, document, snapshot)) |outcome| return outcome;
                 var arena = std.heap.ArenaAllocator.init(self.allocator);
                 defer arena.deinit();
                 const edits = try arena.allocator().alloc(text.Edit, self.selections.items.items.len);
-                for (self.selections.items.items, 0..) |item, i| {
+                var count: usize = 0;
+                for (self.selections.items.items) |item| {
                     var range = item.range();
-                    if (range.start == range.end) {
-                        if (command == .delete_backward) range.start = try snapshot.previousBoundary(range.start) else range.end = try snapshot.nextBoundary(range.end);
+                    if (item.empty()) {
+                        const backward = command == .delete_backward;
+                        range = try snapshot.graphemeDeletionRange(item.head, backward);
+                        if (backward and range.end == item.head) {
+                            if (try pairing.pairedBackspaceEnd(self, snapshot, item.head)) |end| range.end = end;
+                        }
                     }
-                    edits[i] = .{ .range = range, .text = "" };
+                    while (count > 0 and edits[count - 1].range.end > range.start) {
+                        count -= 1;
+                        range.start = @min(range.start, edits[count].range.start);
+                        range.end = @max(range.end, edits[count].range.end);
+                    }
+                    edits[count] = .{ .range = range, .text = "" };
+                    count += 1;
                 }
                 self.typing_group = 0;
-                return self.applyEdits(document, edits, 0);
+                return self.applyEdits(document, edits[0..count], 0);
             },
             .undo, .redo => {
                 self.typing_group = 0;
