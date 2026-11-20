@@ -1,0 +1,51 @@
+flowchart TD
+    subgraph UI ["Layer 1: GPUI Presentation & Shell"]
+        Window["GPUI Window & Render Loop (Metal / Vulkan / DirectX)"]
+        Workspace["workspace (Panes, Docks, Status Bar)"]
+        EditorView["editor (Cursors, Selections, Minimap)"]
+        TerminalView["terminal_view (Alacritty PTY via GPUI)"]
+        AgentUI["agent_ui (Assistant Chat & Diff Reviews)"]
+    end
+
+    subgraph DataCore ["Layer 2: Text & State Engine"]
+        SumTree["sum_tree (CoW B+ Tree with Monoid Summaries)"]
+        Buffer["text::Buffer (CRDT Edit History & Undo Log)"]
+        MultiBuffer["multi_buffer (Excerpt Compositions)"]
+    end
+
+    subgraph LangAI ["Layer 3: Language & AI Subsystems"]
+        TreeSitter["language (Tree-sitter & Syntax Layers)"]
+        LSP["lsp & dap (Language Servers & Debug Adapters)"]
+        WasmExt["extension_host (WASI / Wasm Plugins)"]
+        Agent["agent & context_server (MCP Tools & Skills)"]
+        Predict["edit_prediction (Zeta Inline Autocomplete)"]
+    end
+
+    subgraph ProjectNet ["Layer 4: Project, OS & Collaboration"]
+        Worktree["worktree (Async File Indexing & Watchers)"]
+        Project["project (Central Coordinator)"]
+        Collab["collab & rpc (CRDT Synchronization & WebSockets)"]
+        Remote["remote_server (Headless SSH / WSL Daemon)"]
+    end
+
+    %% Interactions
+    Window --> Workspace
+    Workspace --> EditorView & TerminalView & AgentUI
+
+    EditorView -->|Views & Edits| MultiBuffer
+    MultiBuffer -->|Maps into| Buffer
+    Buffer -->|Storage & Indexing| SumTree
+
+    Buffer -.->|Immutable Snapshot| TreeSitter
+    Buffer -.->|Debounced Notification| LSP
+    Buffer -.->|Context Windows| Predict
+
+    Project -->|Owns & Coordinates| Worktree
+    Project -->|Spawns & Routes| LSP
+    Project -->|Loads Buffers| Buffer
+
+    Agent -->|Queries & Edits| Project
+    Agent -->|Calls Tools| WasmExt
+
+    Buffer -->|Publishes Ops| Collab
+    Collab <-->|Protobuf RPC| Remote

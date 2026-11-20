@@ -1,0 +1,42 @@
+flowchart TD
+    subgraph UI ["zircon_ui (Native Zig UI Framework)"]
+        AppKit["AppKit & Window Host (comptime objc_msgSend)"]
+        Staging["Staging Frame Arena (Layout, Hitbox, Scene)"]
+        SwapCommit["Transactional Swap & Rollback"]
+        MetalPipeline["Metal Pipeline (1 Shader, 4 Modes, Glyph Atlas)"]
+    end
+
+    subgraph Shell ["Presentation & Canvas (Zig Packages)"]
+        Workspace["zircon_workspace (Panes, Tabs, Splits)"]
+        Editor["zircon_editor (Multi-cursor, Gutter, Selection)"]
+        Widgets["zircon_widgets (Buttons, Inputs, Status Bar)"]
+        Canvas["Canvas Leaf Element (Custom Drawing)"]
+    end
+
+    subgraph TextEngine ["Text & Buffer Layer"]
+        Rope["zircon_text (AVL Rope, 4 KiB Leaves)"]
+        History["Grouped Undo/Redo (Content State Identity)"]
+        MultiBuf["zircon_multibuffer (Excerpt Compositions)"]
+    end
+
+    subgraph BackgroundServices ["Worker Processes & Services"]
+        JobQueue["Job Queue (Entity-tied Workers + App.wake())"]
+        ExtHost["zircon-extension-host (Out-of-Process Rust Worker)"]
+        LSP["zircon_language (Stdio JSON-RPC Client)"]
+        Git["zircon_git & zircon_git_ui (Status, Gutters, Blame)"]
+    end
+
+    %% Wiring
+    AppKit --> Staging
+    Staging -->|Success| SwapCommit --> MetalPipeline
+    Staging -.->|"Failure (Alloc/Layout)"| Staging
+
+    Workspace --> Editor & Widgets
+    Editor --> Canvas
+    Canvas --> MultiBuf --> Rope
+    Rope --> History
+
+    Editor -.->|Snapshots| LSP
+    Editor -.->|Snapshots| Git
+    ExtHost <-->|IPC| Workspace
+    JobQueue -->|"App.wake()"| AppKit

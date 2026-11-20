@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zed and Zircon architecture</title>
+<style>
+  :root { color-scheme: light; font: 16px/1.6 system-ui, sans-serif; color: #192628; background: #f5f6f3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 990px; padding: 44px clamp(16px, 5vw, 50px) 56px; margin: 0 auto; }
+  header { border-bottom: 1px solid #c5cfca; margin-bottom: 36px; padding-bottom: 24px; }
+  h1, h2, h3, h4 { line-height: 1.2; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); letter-spacing: -.06em; margin: 0 0 12px; }
+  h2 { font-size: 1.85rem; letter-spacing: -.035em; margin: 0 0 18px; }
+  h3 { font-size: 1.3rem; margin-top: 30px; }
+  h4 { margin: 24px 0 10px; }
+  a { color: #075c55; text-decoration-thickness: .09em; text-underline-offset: .15em; overflow-wrap: anywhere; }
+  nav { display: flex; gap: 6px 20px; flex-wrap: wrap; }
+  nav a { font-weight: 650; }
+  .note, figcaption, .question strong { color: #4d625e; }
+  .question { margin: 0 0 24px; padding: 13px 16px; background: #e9eeeb; border-left: 3px solid #3f7468; }
+  .question p { margin: 3px 0 0; }
+  section + section { border-top: 1px solid #c5cfca; margin-top: 38px; padding-top: 35px; }
+  figure { margin: 24px 0; }
+  figcaption { margin-top: 5px; font-size: .86rem; }
+  iframe { display: block; width: 100%; border: 0; border-radius: 10px; background: #0a0a0a; }
+  .flow-scroll, .table-scroll, pre { overflow: auto; }
+  .flow-scroll { padding: 12px; background: white; border: 1px solid #dce2dd; border-radius: 8px; }
+  .flow img { display: block; width: 100%; min-width: 720px; height: auto; }
+  details { margin: -10px 0 20px; }
+  summary { cursor: pointer; color: #4d625e; }
+  code { font-family: ui-monospace, monospace; font-size: .9em; background: #e9eeeb; border-radius: 3px; padding: .1em .24em; }
+  pre { background: #e9eeeb; padding: 12px; border-radius: 6px; }
+  pre code { padding: 0; }
+  table { border-collapse: collapse; border-spacing: 0; min-width: 760px; background: white; font-size: .9rem; }
+  th, td { padding: 10px; text-align: left; vertical-align: top; border: 1px solid #cfd8d3; }
+  th { background: #e9eeeb; }
+  hr { border: 0; border-top: 1px solid #dce2dd; margin: 24px 0; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Zed and Zircon architecture</h1>
+  <p class="note">Architecture discussion from November 15, 2026. The Zircon flowchart quotes two edge labels for Mermaid compatibility.</p>
+  <nav aria-label="Contents">
+    <a href="#zed">Zed architecture</a>
+    <a href="#zircon">Zircon architecture and comparison</a>
+  </nav>
+</header>
+<section id="zed">
+<h2>Zed architecture</h2>
+<blockquote class="question"><strong>Question</strong><p>I want you to check zed editor latest commit on main and tell me the architecutre and give me the diagram of how different things work together please</p>
+</blockquote>
+<figure class="original"><iframe title="Zed Editor Architecture Diagram" sandbox="allow-same-origin" height="1086" srcdoc="&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;&lt;style id=&quot;t3-theme&quot;&gt;:root{color-scheme:dark;--background:#0a0a0a;--foreground:#f5f5f5;--muted:#111111;--muted-foreground:#818181;--card:#111111;--card-foreground:#f5f5f5;--popover:#111111;--popover-foreground:#f5f5f5;--secondary:#111111;--secondary-foreground:#f5f5f5;--border:#191919;--input:#1e1e1e;--ring:#346bf1;--primary:#346bf1;--primary-foreground:#ffffff;--accent:#346bf1;--accent-foreground:#ffffff;--accent-surface:#141414;--accent-surface-foreground:#f5f5f5;--destructive:#fb414a;--destructive-foreground:#ff6467;--destructive-surface:#301214;--warning:#fe9a00;--warning-foreground:#ffb900;--warning-surface:#312108;--success:#10b981;--success-foreground:#34d399;--info:#3b82f6;--info-foreground:#60a5fa;--code-background:#111111;--code-foreground:#f5f5f5;--chart-1:#346bf1;--chart-2:#2dd4bf;--chart-3:#fbbf24;--chart-4:#c084fc;--chart-5:#fb7185;--chart-6:#a3e635;--radius:0.625rem;--font-sans:-apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;--font-mono:&quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace;}@media (prefers-color-scheme: light){:root{color-scheme:light;--background:#fcfcfc;--foreground:#27272a;--muted:#fafafa;--muted-foreground:#71717b;--card:#ffffff;--card-foreground:#27272a;--popover:#ffffff;--popover-foreground:#27272a;--secondary:#fafafa;--secondary-foreground:#27272a;--border:#e4e4e7;--input:#d4d4d8;--ring:#1b4ed8;--primary:#1b4ed8;--primary-foreground:#ffffff;--accent:#1b4ed8;--accent-foreground:#ffffff;--accent-surface:#f4f4f5;--accent-surface-foreground:#18181b;--destructive:#fb2c36;--destructive-foreground:#c10007;--destructive-surface:#fcebec;--warning:#fe9a00;--warning-foreground:#bb4d00;--warning-surface:#fcf4e8;--success:#10b981;--success-foreground:#047857;--info:#3b82f6;--info-foreground:#1d4ed8;--code-background:#ffffff;--code-foreground:#27272a;--chart-1:#1b4ed8;--chart-2:#0d9488;--chart-3:#d97706;--chart-4:#9333ea;--chart-5:#e11d48;--chart-6:#65a30d;--radius:0.625rem;--font-sans:-apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;--font-mono:&quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace;}}html{box-sizing:border-box;padding:8px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}:where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}:where(img:not(a[href] img,button img)){cursor:zoom-in}&lt;/style&gt;
+&lt;meta charset=&quot;utf-8&quot;/&gt;
+&lt;style&gt;
+  :root {
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --border-color: rgba(255, 255, 255, 0.1);
+    --accent-blue: #38bdf8;
+    --accent-purple: #c084fc;
+    --accent-emerald: #34d399;
+    --accent-amber: #fbbf24;
+    --accent-rose: #f43f5e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif);
+    color: var(--foreground, #e2e8f0);
+    line-height: 1.5;
+    padding: 0;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+  }
+  .header-card {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(192, 132, 252, 0.12));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 12px);
+    padding: 16px 20px;
+  }
+  .header-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-badge {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    background: rgba(56, 189, 248, 0.2);
+    color: var(--accent-blue);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+  }
+  .header-sub {
+    font-size: 13px;
+    color: var(--muted-foreground, #94a3b8);
+    margin-top: 4px;
+  }
+
+  /* Architecture Flow Diagram */
+  .diagram-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+  }
+
+  .layer {
+    grid-column: span 12;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .layer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .layer-tag {
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .layer-desc {
+    font-size: 12px;
+    color: var(--muted-foreground, #94a3b8);
+  }
+
+  .modules-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+  }
+
+  .mod-card {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: all 0.2s ease;
+  }
+  .mod-name {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mod-detail {
+    font-size: 11px;
+    color: var(--muted-foreground, #94a3b8);
+    margin-top: 3px;
+    line-height: 1.35;
+  }
+
+  /* Specific accents */
+  .tag-ui { color: var(--accent-purple); }
+  .tag-core { color: var(--accent-blue); }
+  .tag-lang { color: var(--accent-emerald); }
+  .tag-agent { color: var(--accent-amber); }
+  .tag-platform { color: var(--accent-rose); }
+
+  .connector-v {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 2px 0;
+    color: var(--muted-foreground, #64748b);
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+  }
+  .connector-v svg {
+    stroke: currentColor;
+    opacity: 0.6;
+  }
+
+  .split-cols {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    grid-column: span 12;
+  }
+  @media (max-width: 600px) {
+    .split-cols { grid-template-columns: 1fr; }
+  }
+
+  .col-layer {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .footer-summary {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--muted-foreground, #94a3b8);
+    line-height: 1.5;
+  }
+  .footer-summary strong {
+    color: var(--foreground, #f1f5f9);
+  }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div class=&quot;container&quot;&gt;
+  &lt;!-- Title / Commit Header --&gt;
+  &lt;div class=&quot;header-card&quot;&gt;
+    &lt;div class=&quot;header-title&quot;&gt;
+      Zed Editor Architecture
+      &lt;span class=&quot;header-badge&quot;&gt;commit 596dfdc&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;header-sub&quot;&gt;
+      GPU-accelerated, CRDT-synchronized, multi-threaded modular Rust architecture
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Layer 1: Presentation &amp; Workspace Shell --&gt;
+  &lt;div class=&quot;layer&quot;&gt;
+    &lt;div class=&quot;layer-header&quot;&gt;
+      &lt;span class=&quot;layer-tag tag-ui&quot;&gt;
+        ● Layer 1: Shell &amp;amp; Windowing
+      &lt;/span&gt;
+      &lt;span class=&quot;layer-desc&quot;&gt;GPUI Views · Taffy Layout · Panes &amp;amp; Docks&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;modules-row&quot;&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-purple)&quot;&gt;workspace&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Panes, tabs, splits, docks, status bar &amp;amp; command palette&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-purple)&quot;&gt;editor&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Multi-cursor, selections, folding, soft-wrap, minimap&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-purple)&quot;&gt;terminal_view&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Alacritty terminal emulator rendered directly via GPUI&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-purple)&quot;&gt;agent_ui&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;AI chat, inline diff review, tool approval workflows&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Inter-layer flow indicator --&gt;
+  &lt;div class=&quot;connector-v&quot;&gt;
+    &lt;svg width=&quot;14&quot; height=&quot;14&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke-width=&quot;2&quot;&gt;&lt;path d=&quot;M12 5v14M19 12l-7 7-7-7&quot;/&gt;&lt;/svg&gt;
+    &lt;span&gt;reactive model bindings (cx.observe / cx.notify)&lt;/span&gt;
+    &lt;svg width=&quot;14&quot; height=&quot;14&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke-width=&quot;2&quot;&gt;&lt;path d=&quot;M12 5v14M19 12l-7 7-7-7&quot;/&gt;&lt;/svg&gt;
+  &lt;/div&gt;
+
+  &lt;!-- 3 Columns: Text Core, Language &amp; DAP, AI Subsystem --&gt;
+  &lt;div class=&quot;split-cols&quot;&gt;
+    &lt;!-- Column 1: SumTree &amp; Text Engine --&gt;
+    &lt;div class=&quot;col-layer&quot;&gt;
+      &lt;div class=&quot;layer-tag tag-core&quot;&gt;
+        ● Text &amp;amp; CRDT Core
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;sum_tree&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;CoW B+ tree with monoid summaries (O(log n) indexing)&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;text::Buffer&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;CRDT edit history, immutable snapshots, multi-threaded undo&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;multi_buffer&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Composes excerpts across files for search &amp;amp; inline diffs&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Column 2: Code Intelligence --&gt;
+    &lt;div class=&quot;col-layer&quot;&gt;
+      &lt;div class=&quot;layer-tag tag-lang&quot;&gt;
+        ● Language &amp;amp; Debugging
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-emerald)&quot;&gt;language&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Incremental Tree-sitter, pooled cursors, syntax layers&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-emerald)&quot;&gt;lsp &amp;amp; dap&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Async LSP clients, diagnostics, hover, breakpoints &amp;amp; stepping&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-emerald)&quot;&gt;extension_host&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Wasm/WASI plugin engine for community languages &amp;amp; themes&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Column 3: AI &amp; Next-Edit Prediction --&gt;
+    &lt;div class=&quot;col-layer&quot;&gt;
+      &lt;div class=&quot;layer-tag tag-agent&quot;&gt;
+        ● Agent &amp;amp; Prediction
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-amber)&quot;&gt;agent &amp;amp; skills&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Autonomous agent loop, MCP servers &amp;amp; context injection&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-amber)&quot;&gt;edit_prediction&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Zeta inline autocomplete, multi-token speculative editing&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-amber)&quot;&gt;language_models&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Unified client: Claude, OpenAI, Gemini, Bedrock, Ollama&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Inter-layer flow indicator --&gt;
+  &lt;div class=&quot;connector-v&quot;&gt;
+    &lt;svg width=&quot;14&quot; height=&quot;14&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke-width=&quot;2&quot;&gt;&lt;path d=&quot;M12 5v14M19 12l-7 7-7-7&quot;/&gt;&lt;/svg&gt;
+    &lt;span&gt;background executor &amp;amp; snapshot sharing (Arc / CoW)&lt;/span&gt;
+    &lt;svg width=&quot;14&quot; height=&quot;14&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke-width=&quot;2&quot;&gt;&lt;path d=&quot;M12 5v14M19 12l-7 7-7-7&quot;/&gt;&lt;/svg&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Layer 3: Project, FS &amp; Collaboration --&gt;
+  &lt;div class=&quot;layer&quot;&gt;
+    &lt;div class=&quot;layer-header&quot;&gt;
+      &lt;span class=&quot;layer-tag tag-core&quot;&gt;
+        ● Layer 3: Project Coordination &amp;amp; Networking
+      &lt;/span&gt;
+      &lt;span class=&quot;layer-desc&quot;&gt;Async FS · Git · Remote SSH Server · Real-time Collab&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;modules-row&quot;&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;project &amp;amp; worktree&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Filesystem snapshot, gitignore filtering, file watchers, LSP coordinator&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;collab &amp;amp; rpc&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Protobuf messaging, Lamport clocks, peer-to-peer buffer replication&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;remote_server&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Headless server daemon running on remote machines over SSH / WSL&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-blue)&quot;&gt;livekit_client&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;In-editor voice channels and multi-user screen sharing&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Layer 4: GPUI Platform Engine --&gt;
+  &lt;div class=&quot;layer&quot;&gt;
+    &lt;div class=&quot;layer-header&quot;&gt;
+      &lt;span class=&quot;layer-tag tag-platform&quot;&gt;
+        ● Layer 4: GPUI Foundation &amp;amp; Hardware Acceleration
+      &lt;/span&gt;
+      &lt;span class=&quot;layer-desc&quot;&gt;gpui crate · Metal / Vulkan / DirectX · Tokio &amp;amp; Thread Pools&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;modules-row&quot;&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-rose)&quot;&gt;gpui (core engine)&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Entity-Component reactive model, Scene batching, Text rasterization&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-rose)&quot;&gt;gpui_platform&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Metal (macOS), Vulkan/X11/Wayland (Linux), Direct3D (Windows)&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;mod-card&quot;&gt;
+        &lt;div class=&quot;mod-name&quot; style=&quot;color: var(--accent-rose)&quot;&gt;gpui_tokio &amp;amp; util&lt;/div&gt;
+        &lt;div class=&quot;mod-detail&quot;&gt;Async executors: main UI thread loop + background compute threads&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;footer-summary&quot;&gt;
+    &lt;strong&gt;Key Architectural Trait:&lt;/strong&gt; Unlike Electron editors that bridge web technologies across process boundaries via IPC, Zed runs everything in native Rust compiled directly to machine code. Background threads hold immutable &lt;code&gt;SumTree&lt;/code&gt; snapshots of text, syntax trees, and worktrees to calculate syntax highlighting, git diffs, and LSP diagnostics concurrently without ever blocking the 120 FPS GPU render loop.
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe><figcaption>Zed Editor Architecture Diagram · Original thread visual</figcaption></figure>
+<article aria-label="Original answer"><h3>Latest Commit on <code>main</code></h3>
+<ul>
+<li><strong>Commit SHA</strong>: <a href="https://github.com/zed-industries/zed/commit/596dfdcf32d85d4d8d17a8887b4d0979ec7c5e14"><code>596dfdcf32d85d4d8d17a8887b4d0979ec7c5e14</code></a></li>
+<li><strong>Author</strong>: Parker Loflin (<code>2026-11-15</code>)</li>
+<li><strong>Message</strong>: <code>language: Reset max start depth on pooled query cursors (#66983)</code></li>
+<li><strong>Scope</strong>: Modifies <code>crates/language</code> to ensure pooled Tree-sitter <code>QueryCursorHandle</code> instances reset <code>max_start_depth</code> when dropped back to the pool, preventing depth-limited queries (like Vim motions <code>]m</code>, <code>]]</code>, <code>]/</code>) from accidentally truncating syntax highlighting queries.</li>
+</ul>
+<hr>
+<h3>Core Architectural Philosophy</h3>
+<p>Zed is built around a single unifying principle: <strong>zero-cost reactivity and thread safety via immutable data structures</strong>.</p>
+<p>Unlike Electron-based editors (which coordinate processes across an IPC bridge) or classical desktop IDEs (which rely on complex mutex locks around shared mutable buffers), Zed compiles into a single native Rust binary where:</p>
+<ol>
+<li>The <strong>UI Thread</strong> runs a GPU-accelerated immediate/retained hybrid rendering loop targeting 120+ FPS.</li>
+<li>Background worker pools perform syntax parsing, LSP queries, git operations, and AI generation against immutable, copy-on-write snapshots (<a href="https://github.com/zed-industries/zed/tree/main/crates/sum_tree"><code>SumTree</code></a>).</li>
+<li>Modifications use operation-based CRDTs, ensuring multi-user collaboration and local edits share the exact same state update mechanics.</li>
+</ol>
+<hr>
+<h3>Component Interaction Diagram</h3>
+<figure class="flow"><div class="flow-scroll" tabindex="0"><img src="data:image/svg+xml;base64,PHN2ZyBhcmlhLXJvbGVkZXNjcmlwdGlvbj0iZmxvd2NoYXJ0LXYyIiByb2xlPSJncmFwaGljcy1kb2N1bWVudCBkb2N1bWVudCIgdmlld0JveD0iLTggLTggMjk3Mi40NTcwMzEyNSA3ODAiIGhlaWdodD0iNzgwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyOTcyLjQ1NzAzMTI1IiBpZD0iemVkLWZsb3djaGFydCI+PHN0eWxlPiN6ZWQtZmxvd2NoYXJ0e2ZvbnQtZmFtaWx5OiJ0cmVidWNoZXQgbXMiLHZlcmRhbmEsYXJpYWwsc2Fucy1zZXJpZjtmb250LXNpemU6MTZweDtmaWxsOiMwMDAwMDA7fSN6ZWQtZmxvd2NoYXJ0IC5lcnJvci1pY29ue2ZpbGw6IzU1MjIyMjt9I3plZC1mbG93Y2hhcnQgLmVycm9yLXRleHR7ZmlsbDojNTUyMjIyO3N0cm9rZTojNTUyMjIyO30jemVkLWZsb3djaGFydCAuZWRnZS10aGlja25lc3Mtbm9ybWFse3N0cm9rZS13aWR0aDoycHg7fSN6ZWQtZmxvd2NoYXJ0IC5lZGdlLXRoaWNrbmVzcy10aGlja3tzdHJva2Utd2lkdGg6My41cHg7fSN6ZWQtZmxvd2NoYXJ0IC5lZGdlLXBhdHRlcm4tc29saWR7c3Ryb2tlLWRhc2hhcnJheTowO30jemVkLWZsb3djaGFydCAuZWRnZS1wYXR0ZXJuLWRhc2hlZHtzdHJva2UtZGFzaGFycmF5OjM7fSN6ZWQtZmxvd2NoYXJ0IC5lZGdlLXBhdHRlcm4tZG90dGVke3N0cm9rZS1kYXNoYXJyYXk6Mjt9I3plZC1mbG93Y2hhcnQgLm1hcmtlcntmaWxsOiM2NjY7c3Ryb2tlOiM2NjY7fSN6ZWQtZmxvd2NoYXJ0IC5tYXJrZXIuY3Jvc3N7c3Ryb2tlOiM2NjY7fSN6ZWQtZmxvd2NoYXJ0IHN2Z3tmb250LWZhbWlseToidHJlYnVjaGV0IG1zIix2ZXJkYW5hLGFyaWFsLHNhbnMtc2VyaWY7Zm9udC1zaXplOjE2cHg7fSN6ZWQtZmxvd2NoYXJ0IC5sYWJlbHtmb250LWZhbWlseToidHJlYnVjaGV0IG1zIix2ZXJkYW5hLGFyaWFsLHNhbnMtc2VyaWY7Y29sb3I6IzAwMDAwMDt9I3plZC1mbG93Y2hhcnQgLmNsdXN0ZXItbGFiZWwgdGV4dHtmaWxsOiMzMzM7fSN6ZWQtZmxvd2NoYXJ0IC5jbHVzdGVyLWxhYmVsIHNwYW4sI3plZC1mbG93Y2hhcnQgcHtjb2xvcjojMzMzO30jemVkLWZsb3djaGFydCAubGFiZWwgdGV4dCwjemVkLWZsb3djaGFydCBzcGFuLCN6ZWQtZmxvd2NoYXJ0IHB7ZmlsbDojMDAwMDAwO2NvbG9yOiMwMDAwMDA7fSN6ZWQtZmxvd2NoYXJ0IC5ub2RlIHJlY3QsI3plZC1mbG93Y2hhcnQgLm5vZGUgY2lyY2xlLCN6ZWQtZmxvd2NoYXJ0IC5ub2RlIGVsbGlwc2UsI3plZC1mbG93Y2hhcnQgLm5vZGUgcG9seWdvbiwjemVkLWZsb3djaGFydCAubm9kZSBwYXRoe2ZpbGw6I2VlZTtzdHJva2U6Izk5OTtzdHJva2Utd2lkdGg6MXB4O30jemVkLWZsb3djaGFydCAuZmxvd2NoYXJ0LWxhYmVsIHRleHR7dGV4dC1hbmNob3I6bWlkZGxlO30jemVkLWZsb3djaGFydCAubm9kZSAua2F0ZXggcGF0aHtmaWxsOiMwMDA7c3Ryb2tlOiMwMDA7c3Ryb2tlLXdpZHRoOjFweDt9I3plZC1mbG93Y2hhcnQgLm5vZGUgLmxhYmVse3RleHQtYWxpZ246Y2VudGVyO30jemVkLWZsb3djaGFydCAubm9kZS5jbGlja2FibGV7Y3Vyc29yOnBvaW50ZXI7fSN6ZWQtZmxvd2NoYXJ0IC5hcnJvd2hlYWRQYXRoe2ZpbGw6IzMzMzMzMzt9I3plZC1mbG93Y2hhcnQgLmVkZ2VQYXRoIC5wYXRoe3N0cm9rZTojNjY2O3N0cm9rZS13aWR0aDoyLjBweDt9I3plZC1mbG93Y2hhcnQgLmZsb3djaGFydC1saW5re3N0cm9rZTojNjY2O2ZpbGw6bm9uZTt9I3plZC1mbG93Y2hhcnQgLmVkZ2VMYWJlbHtiYWNrZ3JvdW5kLWNvbG9yOndoaXRlO3RleHQtYWxpZ246Y2VudGVyO30jemVkLWZsb3djaGFydCAuZWRnZUxhYmVsIHJlY3R7b3BhY2l0eTowLjU7YmFja2dyb3VuZC1jb2xvcjp3aGl0ZTtmaWxsOndoaXRlO30jemVkLWZsb3djaGFydCAubGFiZWxCa2d7YmFja2dyb3VuZC1jb2xvcjpyZ2JhKDI1NSwgMjU1LCAyNTUsIDAuNSk7fSN6ZWQtZmxvd2NoYXJ0IC5jbHVzdGVyIHJlY3R7ZmlsbDpoc2woMCwgMCUsIDk4LjkyMTU2ODYyNzUlKTtzdHJva2U6IzcwNzA3MDtzdHJva2Utd2lkdGg6MXB4O30jemVkLWZsb3djaGFydCAuY2x1c3RlciB0ZXh0e2ZpbGw6IzMzMzt9I3plZC1mbG93Y2hhcnQgLmNsdXN0ZXIgc3BhbiwjemVkLWZsb3djaGFydCBwe2NvbG9yOiMzMzM7fSN6ZWQtZmxvd2NoYXJ0IGRpdi5tZXJtYWlkVG9vbHRpcHtwb3NpdGlvbjphYnNvbHV0ZTt0ZXh0LWFsaWduOmNlbnRlcjttYXgtd2lkdGg6MjAwcHg7cGFkZGluZzoycHg7Zm9udC1mYW1pbHk6InRyZWJ1Y2hldCBtcyIsdmVyZGFuYSxhcmlhbCxzYW5zLXNlcmlmO2ZvbnQtc2l6ZToxMnB4O2JhY2tncm91bmQ6aHNsKC0xNjAsIDAlLCA5My4zMzMzMzMzMzMzJSk7Ym9yZGVyOjFweCBzb2xpZCAjNzA3MDcwO2JvcmRlci1yYWRpdXM6MnB4O3BvaW50ZXItZXZlbnRzOm5vbmU7ei1pbmRleDoxMDA7fSN6ZWQtZmxvd2NoYXJ0IC5mbG93Y2hhcnRUaXRsZVRleHR7dGV4dC1hbmNob3I6bWlkZGxlO2ZvbnQtc2l6ZToxOHB4O2ZpbGw6IzAwMDAwMDt9I3plZC1mbG93Y2hhcnQgOnJvb3R7LS1tZXJtYWlkLWZvbnQtZmFtaWx5OiJ0cmVidWNoZXQgbXMiLHZlcmRhbmEsYXJpYWwsc2Fucy1zZXJpZjt9PC9zdHlsZT48Zz48bWFya2VyIG9yaWVudD0iYXV0byIgbWFya2VySGVpZ2h0PSIxMiIgbWFya2VyV2lkdGg9IjEyIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIHJlZlk9IjUiIHJlZlg9IjYiIHZpZXdCb3g9IjAgMCAxMCAxMCIgY2xhc3M9Im1hcmtlciBmbG93Y2hhcnQiIGlkPSJ6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCI+PHBhdGggc3R5bGU9InN0cm9rZS13aWR0aDogMTsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIGQ9Ik0gMCAwIEwgMTAgNSBMIDAgMTAgeiI+PC9wYXRoPjwvbWFya2VyPjxtYXJrZXIgb3JpZW50PSJhdXRvIiBtYXJrZXJIZWlnaHQ9IjEyIiBtYXJrZXJXaWR0aD0iMTIiIG1hcmtlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgcmVmWT0iNSIgcmVmWD0iNC41IiB2aWV3Qm94PSIwIDAgMTAgMTAiIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0IiBpZD0iemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRTdGFydCI+PHBhdGggc3R5bGU9InN0cm9rZS13aWR0aDogMTsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIGQ9Ik0gMCA1IEwgMTAgMTAgTCAxMCAwIHoiPjwvcGF0aD48L21hcmtlcj48bWFya2VyIG9yaWVudD0iYXV0byIgbWFya2VySGVpZ2h0PSIxMSIgbWFya2VyV2lkdGg9IjExIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIHJlZlk9IjUiIHJlZlg9IjExIiB2aWV3Qm94PSIwIDAgMTAgMTAiIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0IiBpZD0iemVkLWZsb3djaGFydF9mbG93Y2hhcnQtY2lyY2xlRW5kIj48Y2lyY2xlIHN0eWxlPSJzdHJva2Utd2lkdGg6IDE7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7IiBjbGFzcz0iYXJyb3dNYXJrZXJQYXRoIiByPSI1IiBjeT0iNSIgY3g9IjUiPjwvY2lyY2xlPjwvbWFya2VyPjxtYXJrZXIgb3JpZW50PSJhdXRvIiBtYXJrZXJIZWlnaHQ9IjExIiBtYXJrZXJXaWR0aD0iMTEiIG1hcmtlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgcmVmWT0iNSIgcmVmWD0iLTEiIHZpZXdCb3g9IjAgMCAxMCAxMCIgY2xhc3M9Im1hcmtlciBmbG93Y2hhcnQiIGlkPSJ6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1jaXJjbGVTdGFydCI+PGNpcmNsZSBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyBzdHJva2UtZGFzaGFycmF5OiAxLCAwOyIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgcj0iNSIgY3k9IjUiIGN4PSI1Ij48L2NpcmNsZT48L21hcmtlcj48bWFya2VyIG9yaWVudD0iYXV0byIgbWFya2VySGVpZ2h0PSIxMSIgbWFya2VyV2lkdGg9IjExIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIHJlZlk9IjUuMiIgcmVmWD0iMTIiIHZpZXdCb3g9IjAgMCAxMSAxMSIgY2xhc3M9Im1hcmtlciBjcm9zcyBmbG93Y2hhcnQiIGlkPSJ6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1jcm9zc0VuZCI+PHBhdGggc3R5bGU9InN0cm9rZS13aWR0aDogMjsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIGQ9Ik0gMSwxIGwgOSw5IE0gMTAsMSBsIC05LDkiPjwvcGF0aD48L21hcmtlcj48bWFya2VyIG9yaWVudD0iYXV0byIgbWFya2VySGVpZ2h0PSIxMSIgbWFya2VyV2lkdGg9IjExIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIHJlZlk9IjUuMiIgcmVmWD0iLTEiIHZpZXdCb3g9IjAgMCAxMSAxMSIgY2xhc3M9Im1hcmtlciBjcm9zcyBmbG93Y2hhcnQiIGlkPSJ6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1jcm9zc1N0YXJ0Ij48cGF0aCBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAyOyBzdHJva2UtZGFzaGFycmF5OiAxLCAwOyIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgZD0iTSAxLDEgbCA5LDkgTSAxMCwxIGwgLTksOSI+PC9wYXRoPjwvbWFya2VyPjxnIGNsYXNzPSJyb290Ij48ZyBjbGFzcz0iY2x1c3RlcnMiPjxnIGlkPSJQcm9qZWN0TmV0IiBjbGFzcz0iY2x1c3RlciBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSI0MTgiIHdpZHRoPSI1OTIuMTk1MzEyNSIgeT0iMzQ2IiB4PSIwIiByeT0iMCIgcng9IjAiIHN0eWxlPSIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyOTYuMDk3NjU2MjUsIDM0NikiIGNsYXNzPSJjbHVzdGVyLWxhYmVsIj48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+TGF5ZXIgNDogUHJvamVjdCwgT1MgJmFtcDsgQ29sbGFib3JhdGlvbjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgaWQ9IkxhbmdBSSIgY2xhc3M9ImNsdXN0ZXIgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iNDQzIiB3aWR0aD0iMTEzOC40MDYyNSIgeT0iMTkzIiB4PSI2MTIuMTk1MzEyNSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTE4MS4zOTg0Mzc1LCAxOTMpIiBjbGFzcz0iY2x1c3Rlci1sYWJlbCI+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPkxheWVyIDM6IExhbmd1YWdlICZhbXA7IEFJIFN1YnN5c3RlbXM8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIGlkPSJEYXRhQ29yZSIgY2xhc3M9ImNsdXN0ZXIgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMjkwIiB3aWR0aD0iOTE5LjA2MjUiIHk9IjM0NiIgeD0iMTc3Ni41MzEyNSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjIzNi4wNjI1LCAzNDYpIiBjbGFzcz0iY2x1c3Rlci1sYWJlbCI+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPkxheWVyIDI6IFRleHQgJmFtcDsgU3RhdGUgRW5naW5lPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyBpZD0iVUkiIGNsYXNzPSJjbHVzdGVyIGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjI3NyIgd2lkdGg9IjEwNzQuMzMyMDMxMjUiIHk9IjAiIHg9IjE4ODIuMTI1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyNDE5LjI5MTAxNTYyNSwgMCkiIGNsYXNzPSJjbHVzdGVyLWxhYmVsIj48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+TGF5ZXIgMTogR1BVSSBQcmVzZW50YXRpb24gJmFtcDsgU2hlbGw8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0iZWRnZVBhdGhzIj48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3plZC1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLVdpbmRvdyBMRS1Xb3Jrc3BhY2UiIGlkPSJMLVdpbmRvdy1Xb3Jrc3BhY2UtMCIgZD0iTTI1MDAuNTU1LDU5TDI1MDAuNTU1LDYzLjE2N0MyNTAwLjU1NSw2Ny4zMzMsMjUwMC41NTUsNzUuNjY3LDI1MDAuNTU1LDgzLjExN0MyNTAwLjU1NSw5MC41NjcsMjUwMC41NTUsOTcuMTMzLDI1MDAuNTU1LDEwMC40MTdMMjUwMC41NTUsMTAzLjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3plZC1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLVdvcmtzcGFjZSBMRS1FZGl0b3JWaWV3IiBpZD0iTC1Xb3Jrc3BhY2UtRWRpdG9yVmlldy0wIiBkPSJNMjM1OS41MDgsMTQwLjI0N0wyMzEzLjcxNCwxNDQuODcyQzIyNjcuOTIxLDE0OS40OTgsMjE3Ni4zMzMsMTU4Ljc0OSwyMTMwLjU0LDE2Ny41NDFDMjA4NC43NDYsMTc2LjMzMywyMDg0Ljc0NiwxODQuNjY3LDIwODQuNzQ2LDE5Mi4xMTdDMjA4NC43NDYsMTk5LjU2NywyMDg0Ljc0NiwyMDYuMTMzLDIwODQuNzQ2LDIwOS40MTdMMjA4NC43NDYsMjEyLjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3plZC1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLVdvcmtzcGFjZSBMRS1UZXJtaW5hbFZpZXciIGlkPSJMLVdvcmtzcGFjZS1UZXJtaW5hbFZpZXctMCIgZD0iTTI0NjguNTgzLDE0M0wyNDYwLjc0NywxNDcuMTY3QzI0NTIuOTExLDE1MS4zMzMsMjQzNy4yMzksMTU5LjY2NywyNDI5LjQwMywxNjhDMjQyMS41NjYsMTc2LjMzMywyNDIxLjU2NiwxODQuNjY3LDI0MjEuNTY2LDE5Mi4xMTdDMjQyMS41NjYsMTk5LjU2NywyNDIxLjU2NiwyMDYuMTMzLDI0MjEuNTY2LDIwOS40MTdMMjQyMS41NjYsMjEyLjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3plZC1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLVdvcmtzcGFjZSBMRS1BZ2VudFVJIiBpZD0iTC1Xb3Jrc3BhY2UtQWdlbnRVSS0wIiBkPSJNMjYwOS40OTEsMTQzTDI2MzYuMTkxLDE0Ny4xNjdDMjY2Mi44OTEsMTUxLjMzMywyNzE2LjI5MSwxNTkuNjY3LDI3NDIuOTkxLDE2OEMyNzY5LjY5MSwxNzYuMzMzLDI3NjkuNjkxLDE4NC42NjcsMjc2OS42OTEsMTkyLjExN0MyNzY5LjY5MSwxOTkuNTY3LDI3NjkuNjkxLDIwNi4xMzMsMjc2OS42OTEsMjA5LjQxN0wyNzY5LjY5MSwyMTIuNyI+PC9wYXRoPjxwYXRoIG1hcmtlci1lbmQ9InVybCgjemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQpIiBzdHlsZT0iZmlsbDpub25lOyIgY2xhc3M9ImVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsgTFMtRWRpdG9yVmlldyBMRS1NdWx0aUJ1ZmZlciIgaWQ9IkwtRWRpdG9yVmlldy1NdWx0aUJ1ZmZlci0wIiBkPSJNMjA4NC43NDYsMjUyTDIwODQuNzQ2LDI1Ni4xNjdDMjA4NC43NDYsMjYwLjMzMywyMDg0Ljc0NiwyNjguNjY3LDIwODQuNzQ2LDI3OC41ODNDMjA4NC43NDYsMjg4LjUsMjA4NC43NDYsMzAwLDIwODQuNzQ2LDMxMS41QzIwODQuNzQ2LDMyMywyMDg0Ljc0NiwzMzQuNSwyMDg0Ljc0NiwzNDMuNTMzQzIwODQuNzQ2LDM1Mi41NjcsMjA4NC43NDYsMzU5LjEzMywyMDg0Ljc0NiwzNjIuNDE3TDIwODQuNzQ2LDM2NS43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1NdWx0aUJ1ZmZlciBMRS1CdWZmZXIiIGlkPSJMLU11bHRpQnVmZmVyLUJ1ZmZlci0wIiBkPSJNMjA4NC43NDYsNDA1TDIwODQuNzQ2LDQxMC43NUMyMDg0Ljc0Niw0MTYuNSwyMDg0Ljc0Niw0MjgsMjA4NC43NDYsNDM4LjYxN0MyMDg0Ljc0Niw0NDkuMjMzLDIwODQuNzQ2LDQ1OC45NjcsMjA4NC43NDYsNDYzLjgzM0wyMDg0Ljc0Niw0NjguNyI+PC9wYXRoPjxwYXRoIG1hcmtlci1lbmQ9InVybCgjemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQpIiBzdHlsZT0iZmlsbDpub25lOyIgY2xhc3M9ImVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsgTFMtQnVmZmVyIExFLVN1bVRyZWUiIGlkPSJMLUJ1ZmZlci1TdW1UcmVlLTAiIGQ9Ik0yMjE1LjAxNSw1MDhMMjI1OS4wNzYsNTEzLjc1QzIzMDMuMTM3LDUxOS41LDIzOTEuMjYsNTMxLDI0MzUuMzIxLDU0MS42MTdDMjQ3OS4zODMsNTUyLjIzMywyNDc5LjM4Myw1NjEuOTY3LDI0NzkuMzgzLDU2Ni44MzNMMjQ3OS4zODMsNTcxLjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3plZC1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTtzdHJva2Utd2lkdGg6MnB4O3N0cm9rZS1kYXNoYXJyYXk6MzsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLWRvdHRlZCBmbG93Y2hhcnQtbGluayBMUy1CdWZmZXIgTEUtVHJlZVNpdHRlciIgaWQ9IkwtQnVmZmVyLVRyZWVTaXR0ZXItMCIgZD0iTTIwNTIuMzUxLDUwOEwyMDQxLjM5NCw1MTMuNzVDMjAzMC40MzcsNTE5LjUsMjAwOC41MjMsNTMxLDE4MjMuNTEzLDU0NC4yNTRDMTYzOC41MDIsNTU3LjUwOCwxMjkwLjM5NSw1NzIuNTE2LDExMTYuMzQxLDU4MC4wMjFMOTQyLjI4Nyw1ODcuNTI1Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7c3Ryb2tlLXdpZHRoOjJweDtzdHJva2UtZGFzaGFycmF5OjM7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1kb3R0ZWQgZmxvd2NoYXJ0LWxpbmsgTFMtQnVmZmVyIExFLUxTUCIgaWQ9IkwtQnVmZmVyLUxTUC0wIiBkPSJNMjExMC44Miw1MDhMMjExOS42MzksNTEzLjc1QzIxMjguNDU4LDUxOS41LDIxNDYuMDk2LDUzMSwyMDE4Ljg5LDU0My43NjJDMTg5MS42ODQsNTU2LjUyMywxNjE5LjYzMyw1NzAuNTQ3LDE0ODMuNjA3LDU3Ny41NThMMTM0Ny41ODIsNTg0LjU3Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7c3Ryb2tlLXdpZHRoOjJweDtzdHJva2UtZGFzaGFycmF5OjM7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1kb3R0ZWQgZmxvd2NoYXJ0LWxpbmsgTFMtQnVmZmVyIExFLVByZWRpY3QiIGlkPSJMLUJ1ZmZlci1QcmVkaWN0LTAiIGQ9Ik0yMTY1LjY4Myw1MDhMMjE5My4wNTksNTEzLjc1QzIyMjAuNDM1LDUxOS41LDIyNzUuMTg2LDUzMSwyMjAxLjA1NCw1NDMuNDg3QzIxMjYuOTIyLDU1NS45NzMsMTkyMy45MDYsNTY5LjQ0NywxODIyLjM5OCw1NzYuMTg0TDE3MjAuODksNTgyLjkyIj48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Qcm9qZWN0IExFLVdvcmt0cmVlIiBpZD0iTC1Qcm9qZWN0LVdvcmt0cmVlLTAiIGQ9Ik0yODAuMjQ2LDQwNUwyNjYuMDA1LDQxMC43NUMyNTEuNzYzLDQxNi41LDIyMy4yOCw0MjgsMjA5LjAzOCw0MzguNjE3QzE5NC43OTcsNDQ5LjIzMywxOTQuNzk3LDQ1OC45NjcsMTk0Ljc5Nyw0NjMuODMzTDE5NC43OTcsNDY4LjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3plZC1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLVByb2plY3QgTEUtTFNQIiBpZD0iTC1Qcm9qZWN0LUxTUC0wIiBkPSJNMzY0LjQ1Nyw0MDVMMzc4LjY5OSw0MTAuNzVDMzkyLjk0LDQxNi41LDQyMS40MjMsNDI4LDQzNS42NjUsNDQyLjMzM0M0NDkuOTA2LDQ1Ni42NjcsNDQ5LjkwNiw0NzMuODMzLDQ0OS45MDYsNDkxQzQ0OS45MDYsNTA4LjE2Nyw0NDkuOTA2LDUyNS4zMzMsNTM4LjU0LDU0MC4zMDNDNjI3LjE3Myw1NTUuMjczLDgwNC40MzksNTY4LjA0Niw4OTMuMDczLDU3NC40MzJMOTgxLjcwNiw1ODAuODE5Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Qcm9qZWN0IExFLUJ1ZmZlciIgaWQ9IkwtUHJvamVjdC1CdWZmZXItMCIgZD0iTTM4Ni45NjMsNDA1TDQwOC44MTcsNDEwLjc1QzQzMC42NzEsNDE2LjUsNDc0LjM3OCw0MjgsNzI4LjkwMiw0NDEuMzk4Qzk4My40MjYsNDU0Ljc5NywxNDQ4Ljc2NSw0NzAuMDk0LDE2ODEuNDM1LDQ3Ny43NDJMMTkxNC4xMDUsNDg1LjM5MSI+PC9wYXRoPjxwYXRoIG1hcmtlci1lbmQ9InVybCgjemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQpIiBzdHlsZT0iZmlsbDpub25lOyIgY2xhc3M9ImVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsgTFMtQWdlbnQgTEUtUHJvamVjdCIgaWQ9IkwtQWdlbnQtUHJvamVjdC0wIiBkPSJNMTExMC40MTUsMjUyTDExMDQuMjkyLDI1Ni4xNjdDMTA5OC4xNjksMjYwLjMzMywxMDg1LjkyMiwyNjguNjY3LDEwNzkuNzk5LDI3OC41ODNDMTA3My42NzYsMjg4LjUsMTA3My42NzYsMzAwLDEwNzMuNjc2LDMxMS41QzEwNzMuNjc2LDMyMywxMDczLjY3NiwzMzQuNSw5NjguMjA3LDM0Ni4xNDZDODYyLjczOCwzNTcuNzkyLDY1MS44LDM2OS41ODMsNTQ2LjMzMSwzNzUuNDc5TDQ0MC44NjIsMzgxLjM3NSI+PC9wYXRoPjxwYXRoIG1hcmtlci1lbmQ9InVybCgjemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQpIiBzdHlsZT0iZmlsbDpub25lOyIgY2xhc3M9ImVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsgTFMtQWdlbnQgTEUtV2FzbUV4dCIgaWQ9IkwtQWdlbnQtV2FzbUV4dC0wIiBkPSJNMTE1OC4wODIsMjUyTDExNjMuNjQyLDI1Ni4xNjdDMTE2OS4yMDIsMjYwLjMzMywxMTgwLjMyMiwyNjguNjY3LDExODUuODgyLDI3OC41ODNDMTE5MS40NDEsMjg4LjUsMTE5MS40NDEsMzAwLDExOTEuNDQxLDMxMS41QzExOTEuNDQxLDMyMywxMTkxLjQ0MSwzMzQuNSwxMTkxLjQ0MSwzNDMuNTMzQzExOTEuNDQxLDM1Mi41NjcsMTE5MS40NDEsMzU5LjEzMywxMTkxLjQ0MSwzNjIuNDE3TDExOTEuNDQxLDM2NS43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6ZWQtZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1CdWZmZXIgTEUtQ29sbGFiIiBpZD0iTC1CdWZmZXItQ29sbGFiLTAiIGQ9Ik0yMDA1LjY2Myw1MDhMMTk3OC45MTUsNTEzLjc1QzE5NTIuMTY2LDUxOS41LDE4OTguNjY5LDUzMSwxNjQ1Ljc5NSw1NDQuMjUzQzEzOTIuOTIyLDU1Ny41MDcsOTQwLjY3Miw1NzIuNTEzLDcxNC41NDcsNTgwLjAxN0w0ODguNDIyLDU4Ny41MiI+PC9wYXRoPjxwYXRoIG1hcmtlci1lbmQ9InVybCgjemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQpIiBtYXJrZXItc3RhcnQ9InVybCgjemVkLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRTdGFydCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Db2xsYWIgTEUtUmVtb3RlIiBpZD0iTC1Db2xsYWItUmVtb3RlLTAiIGQ9Ik0yOTMuMTMzLDYxNi4zTDI5My4xMzMsNjE5LjU4M0MyOTMuMTMzLDYyMi44NjcsMjkzLjEzMyw2MjkuNDMzLDI5My4xMzMsNjM4LjQ2N0MyOTMuMTMzLDY0Ny41LDI5My4xMzMsNjU5LDI5My4xMzMsNjY5LjYxN0MyOTMuMTMzLDY4MC4yMzMsMjkzLjEzMyw2ODkuOTY3LDI5My4xMzMsNjk0LjgzM0wyOTMuMTMzLDY5OS43Ij48L3BhdGg+PC9nPjxnIGNsYXNzPSJlZGdlTGFiZWxzIj48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjAiIHdpZHRoPSIwIiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjAiIHdpZHRoPSIwIiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjAiIHdpZHRoPSIwIiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAwKSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjAiIHdpZHRoPSIwIiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+PC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyMDg0Ljc0NjA5Mzc1LCAzMTEuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC00OC4yOTY4NzUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDI0Nzk1NTMyMjI3IiB3aWR0aD0iOTYuNTMxMzc5Njk5NzA3MDMiIHJ5PSIwIiByeD0iMCI+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5WaWV3cyAmYW1wOyBFZGl0czwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjA4NC43NDYwOTM3NSwgNDM5LjUpIiBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtMzQuMTAxNTYyNSwgLTkuNSkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIxOS4wMDAwMjQ3OTU1MzIyMjciIHdpZHRoPSI2OC4xNzE5NjY1NTI3MzQzOCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPk1hcHMgaW50bzwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjQ3OS4zODI4MTI1LCA1NDIuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC02Ny41NzAzMTI1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDAyNDc5NTUzMjIyNyIgd2lkdGg9IjEzNS4wNjI2ODMxMDU0Njg3NSIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPlN0b3JhZ2UgJmFtcDsgSW5kZXhpbmc8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE5ODYuNjA5Mzc1LCA1NDIuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC03Mi43OTY4NzUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDI0Nzk1NTMyMjI3IiB3aWR0aD0iMTQ1LjUxNTgyMzM2NDI1NzgiIHJ5PSIwIiByeD0iMCI+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5JbW11dGFibGUgU25hcHNob3Q8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIxNjMuNzM0Mzc1LCA1NDIuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC04NC4zMjgxMjUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDI0Nzk1NTMyMjI3IiB3aWR0aD0iMTY4LjU0NzA4ODYyMzA0Njg4IiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+RGVib3VuY2VkIE5vdGlmaWNhdGlvbjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjMyOS45Mzc1LCA1NDIuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC02MS44NzUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDI0Nzk1NTMyMjI3IiB3aWR0aD0iMTIzLjY4NzY2MDIxNzI4NTE2IiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+Q29udGV4dCBXaW5kb3dzPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxOTQuNzk2ODc1LCA0MzkuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC03MS45OTIxODc1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDAyNDc5NTUzMjIyNyIgd2lkdGg9IjE0My44OTA4MDgxMDU0Njg3NSIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPk93bnMgJmFtcDsgQ29vcmRpbmF0ZXM8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDQ0OS45MDYyNSwgNDkxKSIgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTYwLjMxMjUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDI0Nzk1NTMyMjI3IiB3aWR0aD0iMTIwLjU0NzAzNTIxNzI4NTE2IiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U3Bhd25zICZhbXA7IFJvdXRlczwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNTE4LjA4NTkzNzUsIDQzOS41KSIgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTQ4LjE3OTY4NzUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDI0Nzk1NTMyMjI3IiB3aWR0aD0iOTYuMjk3MDA0Njk5NzA3MDMiIHJ5PSIwIiByeD0iMCI+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5Mb2FkcyBCdWZmZXJzPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMDczLjY3NTc4MTI1LCAzMTEuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC01NS4wMzkwNjI1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDAyNDc5NTUzMjIyNyIgd2lkdGg9IjExMC4wMTU3Njk5NTg0OTYxIiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+UXVlcmllcyAmYW1wOyBFZGl0czwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTE5MS40NDE0MDYyNSwgMzExLjUpIiBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtMzcuMDQ2ODc1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDAyNDc5NTUzMjIyNyIgd2lkdGg9Ijc0LjA0Njk3NDE4MjEyODkiIHJ5PSIwIiByeD0iMCI+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5DYWxscyBUb29sczwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTg0NS4xNzE4NzUsIDU0Mi41KSIgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTQ4LjY0MDYyNSwgLTkuNSkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIxOS4wMDAwMjQ3OTU1MzIyMjciIHdpZHRoPSI5Ny4yMTg4Nzk2OTk3MDcwMyIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPlB1Ymxpc2hlcyBPcHM8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDI5My4xMzI4MTI1LCA2NzAuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC00Ny4wNTQ2ODc1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDAyNDc5NTUzMjIyNyIgd2lkdGg9Ijk0LjA0Njk5NzA3MDMxMjUiIHJ5PSIwIiByeD0iMCI+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5Qcm90b2J1ZiBSUEM8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZXMiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE5NC43OTY4NzUsIDQ5MSkiIGRhdGEtaWQ9Ildvcmt0cmVlIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtV29ya3RyZWUtMTMiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzMTkuNTkzNzUiIHk9Ii0xNyIgeD0iLTE1OS43OTY4NzUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+d29ya3RyZWUgKEFzeW5jIEZpbGUgSW5kZXhpbmcgJmFtcDsgV2F0Y2hlcnMpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgzMjIuMzUxNTYyNSwgMzg4KSIgZGF0YS1pZD0iUHJvamVjdCIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVByb2plY3QtMTQiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIyMjYuNDM3NSIgeT0iLTE3IiB4PSItMTEzLjIxODc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPnByb2plY3QgKENlbnRyYWwgQ29vcmRpbmF0b3IpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyOTMuMTMyODEyNSwgNTk0KSIgZGF0YS1pZD0iQ29sbGFiIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtQ29sbGFiLTE1IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMzc5Ljk4NDM3NSIgeT0iLTE3IiB4PSItMTg5Ljk5MjE4NzUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+Y29sbGFiICZhbXA7IHJwYyAoQ1JEVCBTeW5jaHJvbml6YXRpb24gJmFtcDsgV2ViU29ja2V0cyk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDI5My4xMzI4MTI1LCA3MjIpIiBkYXRhLWlkPSJSZW1vdGUiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1SZW1vdGUtMTYiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzMzguODkwNjI1IiB5PSItMTciIHg9Ii0xNjkuNDQ1MzEyNSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5yZW1vdGVfc2VydmVyIChIZWFkbGVzcyBTU0ggLyBXU0wgRGFlbW9uKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNzkyLjA5Mzc1LCA1OTQpIiBkYXRhLWlkPSJUcmVlU2l0dGVyIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtVHJlZVNpdHRlci04IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMjg5Ljc5Njg3NSIgeT0iLTE3IiB4PSItMTQ0Ljg5ODQzNzUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+bGFuZ3VhZ2UgKFRyZWUtc2l0dGVyICZhbXA7IFN5bnRheCBMYXllcnMpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMTY0LjY0MDYyNSwgNTk0KSIgZGF0YS1pZD0iTFNQIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtTFNQLTkiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzNTUuMjk2ODc1IiB5PSItMTciIHg9Ii0xNzcuNjQ4NDM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5sc3AgJmFtcDsgZGFwIChMYW5ndWFnZSBTZXJ2ZXJzICZhbXA7IERlYnVnIEFkYXB0ZXJzKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTE5MS40NDE0MDYyNSwgMzg4KSIgZGF0YS1pZD0iV2FzbUV4dCIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVdhc21FeHQtMTAiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIyODYuNzk2ODc1IiB5PSItMTciIHg9Ii0xNDMuMzk4NDM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5leHRlbnNpb25faG9zdCAoV0FTSSAvIFdhc20gUGx1Z2lucyk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDExMzUuMzk4NDM3NSwgMjM1KSIgZGF0YS1pZD0iQWdlbnQiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1BZ2VudC0xMSIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjMyNi45Njg3NSIgeT0iLTE3IiB4PSItMTYzLjQ4NDM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5hZ2VudCAmYW1wOyBjb250ZXh0X3NlcnZlciAoTUNQIFRvb2xzICZhbXA7IFNraWxscyk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE1NTMuOTQ1MzEyNSwgNTk0KSIgZGF0YS1pZD0iUHJlZGljdCIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVByZWRpY3QtMTIiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzMjMuMzEyNSIgeT0iLTE3IiB4PSItMTYxLjY1NjI1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPmVkaXRfcHJlZGljdGlvbiAoWmV0YSBJbmxpbmUgQXV0b2NvbXBsZXRlKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjQ3OS4zODI4MTI1LCA1OTQpIiBkYXRhLWlkPSJTdW1UcmVlIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtU3VtVHJlZS01IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMzYyLjQyMTg3NSIgeT0iLTE3IiB4PSItMTgxLjIxMDkzNzUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+c3VtX3RyZWUgKENvVyBCKyBUcmVlIHdpdGggTW9ub2lkIFN1bW1hcmllcyk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIwODQuNzQ2MDkzNzUsIDQ5MSkiIGRhdGEtaWQ9IkJ1ZmZlciIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LUJ1ZmZlci02IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMzMwLjY4NzUiIHk9Ii0xNyIgeD0iLTE2NS4zNDM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj50ZXh0OjpCdWZmZXIgKENSRFQgRWRpdCBIaXN0b3J5ICZhbXA7IFVuZG8gTG9nKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjA4NC43NDYwOTM3NSwgMzg4KSIgZGF0YS1pZD0iTXVsdGlCdWZmZXIiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1NdWx0aUJ1ZmZlci03IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMjc2LjI2NTYyNSIgeT0iLTE3IiB4PSItMTM4LjEzMjgxMjUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+bXVsdGlfYnVmZmVyIChFeGNlcnB0IENvbXBvc2l0aW9ucyk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDI1MDAuNTU0Njg3NSwgNDIpIiBkYXRhLWlkPSJXaW5kb3ciIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1XaW5kb3ctMCIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjQxMi4xNzE4NzUiIHk9Ii0xNyIgeD0iLTIwNi4wODU5Mzc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPkdQVUkgV2luZG93ICZhbXA7IFJlbmRlciBMb29wIChNZXRhbCAvIFZ1bGthbiAvIERpcmVjdFgpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyNTAwLjU1NDY4NzUsIDEyNikiIGRhdGEtaWQ9IldvcmtzcGFjZSIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVdvcmtzcGFjZS0xIiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMjgyLjA5Mzc1IiB5PSItMTciIHg9Ii0xNDEuMDQ2ODc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPndvcmtzcGFjZSAoUGFuZXMsIERvY2tzLCBTdGF0dXMgQmFyKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjA4NC43NDYwOTM3NSwgMjM1KSIgZGF0YS1pZD0iRWRpdG9yVmlldyIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LUVkaXRvclZpZXctMiIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjI4MC45MjE4NzUiIHk9Ii0xNyIgeD0iLTE0MC40NjA5Mzc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPmVkaXRvciAoQ3Vyc29ycywgU2VsZWN0aW9ucywgTWluaW1hcCk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDI0MjEuNTY2NDA2MjUsIDIzNSkiIGRhdGEtaWQ9IlRlcm1pbmFsVmlldyIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVRlcm1pbmFsVmlldy0zIiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMjkyLjcxODc1IiB5PSItMTciIHg9Ii0xNDYuMzU5Mzc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPnRlcm1pbmFsX3ZpZXcgKEFsYWNyaXR0eSBQVFkgdmlhIEdQVUkpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyNzY5LjY5MTQwNjI1LCAyMzUpIiBkYXRhLWlkPSJBZ2VudFVJIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtQWdlbnRVSS00IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMzAzLjUzMTI1IiB5PSItMTciIHg9Ii0xNTEuNzY1NjI1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPmFnZW50X3VpIChBc3Npc3RhbnQgQ2hhdCAmYW1wOyBEaWZmIFJldmlld3MpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PC9nPjwvZz48L3N2Zz4=" alt="Zed component interaction diagram"></div><figcaption>Zed component interaction diagram</figcaption></figure><details><summary>Mermaid source</summary><pre><code>flowchart TD
+    subgraph UI [&quot;Layer 1: GPUI Presentation &amp; Shell&quot;]
+        Window[&quot;GPUI Window &amp; Render Loop (Metal / Vulkan / DirectX)&quot;]
+        Workspace[&quot;workspace (Panes, Docks, Status Bar)&quot;]
+        EditorView[&quot;editor (Cursors, Selections, Minimap)&quot;]
+        TerminalView[&quot;terminal_view (Alacritty PTY via GPUI)&quot;]
+        AgentUI[&quot;agent_ui (Assistant Chat &amp; Diff Reviews)&quot;]
+    end
+
+    subgraph DataCore [&quot;Layer 2: Text &amp; State Engine&quot;]
+        SumTree[&quot;sum_tree (CoW B+ Tree with Monoid Summaries)&quot;]
+        Buffer[&quot;text::Buffer (CRDT Edit History &amp; Undo Log)&quot;]
+        MultiBuffer[&quot;multi_buffer (Excerpt Compositions)&quot;]
+    end
+
+    subgraph LangAI [&quot;Layer 3: Language &amp; AI Subsystems&quot;]
+        TreeSitter[&quot;language (Tree-sitter &amp; Syntax Layers)&quot;]
+        LSP[&quot;lsp &amp; dap (Language Servers &amp; Debug Adapters)&quot;]
+        WasmExt[&quot;extension_host (WASI / Wasm Plugins)&quot;]
+        Agent[&quot;agent &amp; context_server (MCP Tools &amp; Skills)&quot;]
+        Predict[&quot;edit_prediction (Zeta Inline Autocomplete)&quot;]
+    end
+
+    subgraph ProjectNet [&quot;Layer 4: Project, OS &amp; Collaboration&quot;]
+        Worktree[&quot;worktree (Async File Indexing &amp; Watchers)&quot;]
+        Project[&quot;project (Central Coordinator)&quot;]
+        Collab[&quot;collab &amp; rpc (CRDT Synchronization &amp; WebSockets)&quot;]
+        Remote[&quot;remote_server (Headless SSH / WSL Daemon)&quot;]
+    end
+
+    %% Interactions
+    Window --&gt; Workspace
+    Workspace --&gt; EditorView &amp; TerminalView &amp; AgentUI
+
+    EditorView --&gt;|Views &amp; Edits| MultiBuffer
+    MultiBuffer --&gt;|Maps into| Buffer
+    Buffer --&gt;|Storage &amp; Indexing| SumTree
+
+    Buffer -.-&gt;|Immutable Snapshot| TreeSitter
+    Buffer -.-&gt;|Debounced Notification| LSP
+    Buffer -.-&gt;|Context Windows| Predict
+
+    Project --&gt;|Owns &amp; Coordinates| Worktree
+    Project --&gt;|Spawns &amp; Routes| LSP
+    Project --&gt;|Loads Buffers| Buffer
+
+    Agent --&gt;|Queries &amp; Edits| Project
+    Agent --&gt;|Calls Tools| WasmExt
+
+    Buffer --&gt;|Publishes Ops| Collab
+    Collab &lt;--&gt;|Protobuf RPC| Remote
+</code></pre></details>
+<hr>
+<h3>How Key Subsystems Work Together</h3>
+<h4>1. GPUI (The GPU Framework)</h4>
+<ul>
+<li><strong>Crates</strong>: <code>gpui</code>, <code>gpui_platform</code>, <code>gpui_macros</code>, <code>gpui_tokio</code></li>
+<li>GPUI bypasses web views entirely. It batches 2D rendering primitives (rectangles, shadows, glyphs from FreeType/DirectWrite/CoreText) directly into GPU command buffers (Metal on macOS, Vulkan on Linux, Direct3D on Windows).</li>
+<li>Uses an entity-based reactive model: <a href="https://github.com/zed-industries/zed"><code>Context&lt;T&gt;</code></a> coordinates state. When state changes, <code>cx.notify()</code> schedules a frame re-render without manual DOM diffing.</li>
+</ul>
+<h4>2. SumTree &amp; The Text Buffer Engine</h4>
+<ul>
+<li><strong>Crates</strong>: <code>sum_tree</code>, <code>rope</code>, <code>text</code>, <code>multi_buffer</code></li>
+<li>At the center of Zed’s speed is <code>SumTree</code>, an immutable, copy-on-write B+ tree where each internal node stores summaries (monoids) such as byte length, UTF-16 count, and newline count.</li>
+<li>Because transformations take O(log N), operations like jumping to line 50,000, calculating visual 2D coordinates, or converting byte offsets are near-instantaneous.</li>
+<li>When an edit occurs, the buffer produces an operation record and an immutable snapshot. The main UI thread never blocks waiting for syntax parsing or search indexing.</li>
+</ul>
+<h4>3. Language Intelligence &amp; Tree-Sitter</h4>
+<ul>
+<li><strong>Crates</strong>: <code>language</code>, <code>lsp</code>, <code>dap</code></li>
+<li>Zed parses syntax incrementally using Tree-sitter. As typing occurs, only modified AST branches are re-parsed.</li>
+<li>The <code>language</code> crate maintains layered grammar injections (e.g., SQL inside Rust string literals or JavaScript inside HTML) and handles cursor pooling to keep allocations at zero during fast navigation.</li>
+<li>The <code>lsp</code> crate runs language servers asynchronously over stdin/stdout, caching diagnostics and completion lists without stalling typing latency.</li>
+</ul>
+<h4>4. Project, Worktree &amp; File System</h4>
+<ul>
+<li><strong>Crates</strong>: <code>project</code>, <code>worktree</code>, <code>fs</code>, <code>git</code></li>
+<li><code>worktree</code> scans directory hierarchies asynchronously, filters ignores via <code>.gitignore</code>, and watches file events (<code>fsevents</code>, <code>inotify</code>).</li>
+<li><code>project</code> binds worktrees to buffers, manages active LSP server instances per language, and handles Git repository status and hunk-level staging.</li>
+</ul>
+<h4>5. Collaboration, Remote Development &amp; CRDTs</h4>
+<ul>
+<li><strong>Crates</strong>: <code>collab</code>, <code>rpc</code>, <code>proto</code>, <code>remote</code>, <code>remote_server</code></li>
+<li>Zed was architected from inception for collaborative editing. Buffer changes are expressed as CRDT operations with vector clocks (<code>clock</code>).</li>
+<li>Real-time sessions replicate operations over Protobuf-encoded RPC channels.</li>
+<li>Remote development uses <code>remote_server</code>—a lightweight headless daemon running on remote Linux or WSL instances that handles the filesystem, terminal, and language servers while streaming lightweight view data to the local GPUI client.</li>
+</ul>
+<h4>6. AI Agent &amp; Inline Next-Edit Prediction</h4>
+<ul>
+<li><strong>Crates</strong>: <code>agent</code>, <code>agent_servers</code>, <code>context_server</code>, <code>edit_prediction</code>, <code>language_models</code></li>
+<li>Zed includes an autonomous Agent supporting the Model Context Protocol (MCP), enabling dynamic tool execution, web search, and codebase indexing.</li>
+<li><code>edit_prediction</code> integrates models like Zeta for multi-token speculative code completions, evaluating context from recently active editor buffers and diff histories.</li>
+</ul>
+</article>
+</section>
+<section id="zircon">
+<h2>Zircon architecture and comparison</h2>
+<blockquote class="question"><strong>Question</strong><p>now show me our zircon editor architecutre and then compare the two properly please</p>
+</blockquote>
+<figure class="original"><iframe title="Zircon vs Zed Architecture Comparison" sandbox="allow-same-origin" height="1441" srcdoc="&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;&lt;style id=&quot;t3-theme&quot;&gt;:root{color-scheme:dark;--background:#0a0a0a;--foreground:#f5f5f5;--muted:#111111;--muted-foreground:#818181;--card:#111111;--card-foreground:#f5f5f5;--popover:#111111;--popover-foreground:#f5f5f5;--secondary:#111111;--secondary-foreground:#f5f5f5;--border:#191919;--input:#1e1e1e;--ring:#346bf1;--primary:#346bf1;--primary-foreground:#ffffff;--accent:#346bf1;--accent-foreground:#ffffff;--accent-surface:#141414;--accent-surface-foreground:#f5f5f5;--destructive:#fb414a;--destructive-foreground:#ff6467;--destructive-surface:#301214;--warning:#fe9a00;--warning-foreground:#ffb900;--warning-surface:#312108;--success:#10b981;--success-foreground:#34d399;--info:#3b82f6;--info-foreground:#60a5fa;--code-background:#111111;--code-foreground:#f5f5f5;--chart-1:#346bf1;--chart-2:#2dd4bf;--chart-3:#fbbf24;--chart-4:#c084fc;--chart-5:#fb7185;--chart-6:#a3e635;--radius:0.625rem;--font-sans:-apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;--font-mono:&quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace;}@media (prefers-color-scheme: light){:root{color-scheme:light;--background:#fcfcfc;--foreground:#27272a;--muted:#fafafa;--muted-foreground:#71717b;--card:#ffffff;--card-foreground:#27272a;--popover:#ffffff;--popover-foreground:#27272a;--secondary:#fafafa;--secondary-foreground:#27272a;--border:#e4e4e7;--input:#d4d4d8;--ring:#1b4ed8;--primary:#1b4ed8;--primary-foreground:#ffffff;--accent:#1b4ed8;--accent-foreground:#ffffff;--accent-surface:#f4f4f5;--accent-surface-foreground:#18181b;--destructive:#fb2c36;--destructive-foreground:#c10007;--destructive-surface:#fcebec;--warning:#fe9a00;--warning-foreground:#bb4d00;--warning-surface:#fcf4e8;--success:#10b981;--success-foreground:#047857;--info:#3b82f6;--info-foreground:#1d4ed8;--code-background:#ffffff;--code-foreground:#27272a;--chart-1:#1b4ed8;--chart-2:#0d9488;--chart-3:#d97706;--chart-4:#9333ea;--chart-5:#e11d48;--chart-6:#65a30d;--radius:0.625rem;--font-sans:-apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, system-ui, sans-serif;--font-mono:&quot;SF Mono&quot;, &quot;SFMono-Regular&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;, monospace;}}html{box-sizing:border-box;padding:8px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}:where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}:where(img:not(a[href] img,button img)){cursor:zoom-in}&lt;/style&gt;
+&lt;meta charset=&quot;utf-8&quot;/&gt;
+&lt;style&gt;
+  :root {
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --border-color: rgba(255, 255, 255, 0.1);
+    --accent-zig: #f59e0b; /* Amber / Zig */
+    --accent-zed: #38bdf8; /* Blue / Zed */
+    --accent-emerald: #10b981;
+    --accent-purple: #a855f7;
+    --accent-rose: #f43f5e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif);
+    color: var(--foreground, #e2e8f0);
+    line-height: 1.5;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+  }
+
+  .header-card {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(56, 189, 248, 0.12));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 12px);
+    padding: 16px 20px;
+  }
+  .header-title {
+    font-size: 18px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-badge {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--accent-zig);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+  .header-sub {
+    font-size: 13px;
+    color: var(--muted-foreground, #94a3b8);
+    margin-top: 4px;
+  }
+
+  /* Side by Side Architecture Columns */
+  .arch-dual-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 680px) {
+    .arch-dual-grid { grid-template-columns: 1fr; }
+  }
+
+  .system-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .system-title {
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .zed-pill {
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent-zed);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono, monospace);
+  }
+  .zig-pill {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--accent-zig);
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono, monospace);
+  }
+
+  .layer-node {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .layer-node-title {
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .layer-node-desc {
+    font-size: 11px;
+    color: var(--muted-foreground, #94a3b8);
+    margin-top: 2px;
+  }
+
+  /* Comparison Matrix Table */
+  .table-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    overflow: hidden;
+  }
+  .table-title {
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--muted-foreground, #94a3b8);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  .feat-name {
+    font-weight: 600;
+    color: var(--foreground, #f1f5f9);
+    width: 22%;
+  }
+  .zed-col {
+    color: #bae6fd;
+    width: 39%;
+  }
+  .zircon-col {
+    color: #fde68a;
+    width: 39%;
+  }
+
+  .tag-win {
+    display: inline-block;
+    font-size: 9px;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  .win-zig { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+  .win-zed { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+
+  .summary-banner {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--muted-foreground, #94a3b8);
+    line-height: 1.5;
+  }
+  .summary-banner strong {
+    color: var(--foreground, #f1f5f9);
+  }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div class=&quot;container&quot;&gt;
+  &lt;!-- Header --&gt;
+  &lt;div class=&quot;header-card&quot;&gt;
+    &lt;div class=&quot;header-title&quot;&gt;
+      Zircon vs. Zed Architecture Comparison
+      &lt;span class=&quot;header-badge&quot;&gt;Zig 0.17.1 vs. Rust&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;header-sub&quot;&gt;
+      A native, contract-first Zig UI framework &amp;amp; editor contrasted with Zed's GPU-native collaborative IDE
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Dual Architecture Visual Stack --&gt;
+  &lt;div class=&quot;arch-dual-grid&quot;&gt;
+    &lt;!-- Zed Stack --&gt;
+    &lt;div class=&quot;system-box&quot;&gt;
+      &lt;div class=&quot;system-title&quot;&gt;
+        &lt;span&gt;Zed (Rust Ecosystem)&lt;/span&gt;
+        &lt;span class=&quot;zed-pill&quot;&gt;1,000,000+ SLoC · 100+ Crates&lt;/span&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zed)&quot;&gt;1. Presentation Shell&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;&lt;code&gt;workspace&lt;/code&gt;, &lt;code&gt;editor&lt;/code&gt;, &lt;code&gt;terminal_view&lt;/code&gt;. Fluent method-chained DSL, Tailwind-like styling, AccessKit.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zed)&quot;&gt;2. UI Engine (GPUI)&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;Taffy layout (flex, grid, block), &lt;code&gt;Entity&amp;lt;T&amp;gt;&lt;/code&gt; Rc-style borrows, multi-primitive scene (SDF, shadows, paths).&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zed)&quot;&gt;3. State &amp;amp; Text Buffer&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;&lt;code&gt;sum_tree&lt;/code&gt; (CoW B+ tree with monoids), &lt;code&gt;text::Buffer&lt;/code&gt; (operation CRDTs), multi-buffer excerpt composition.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zed)&quot;&gt;4. Extensions &amp;amp; Background&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;In-process WASM/WASI host, &lt;code&gt;BackgroundExecutor&lt;/code&gt; async runtime, Tree-sitter incremental re-parsing.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zed)&quot;&gt;5. Hardware &amp;amp; OS Seam&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;Multi-platform: Metal (macOS), Direct3D (Win), Vulkan/X11/Wayland (Linux). PTY via alacritty.&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Zircon Stack --&gt;
+    &lt;div class=&quot;system-box&quot;&gt;
+      &lt;div class=&quot;system-title&quot;&gt;
+        &lt;span&gt;Zircon (Zig Ecosystem)&lt;/span&gt;
+        &lt;span class=&quot;zig-pill&quot;&gt;~30,000 SLoC · 13 Packages&lt;/span&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zig)&quot;&gt;1. Presentation Shell&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;&lt;code&gt;zircon_workspace&lt;/code&gt;, &lt;code&gt;zircon_editor&lt;/code&gt;, &lt;code&gt;zircon_widgets&lt;/code&gt;. Typed &lt;code&gt;Style&lt;/code&gt; structs, const-render law, custom leaf elements.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zig)&quot;&gt;2. UI Engine (zircon_ui)&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;Double-buffered staging arena with commit swap/rollback, generational handles, comptime borrow checks.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zig)&quot;&gt;3. State &amp;amp; Text Buffer&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;&lt;code&gt;zircon_text&lt;/code&gt; AVL rope (4 KiB leaves), revision-checked snapshots, separate content-state identity for clean undo-to-saved.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zig)&quot;&gt;4. Extensions &amp;amp; Background&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;Out-of-process Rust worker (&lt;code&gt;zircon-extension-host&lt;/code&gt;), thread-per-job queue with &lt;code&gt;App.wake()&lt;/code&gt;, stdio LSP framing.&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div class=&quot;layer-node&quot;&gt;
+        &lt;div class=&quot;layer-node-title&quot; style=&quot;color: var(--accent-zig)&quot;&gt;5. Hardware &amp;amp; OS Seam&lt;/div&gt;
+        &lt;div class=&quot;layer-node-desc&quot;&gt;macOS-focused Metal pipeline (1 shader, 4 modes: rect, text, image, line), 0 C/Obj-C via comptime &lt;code&gt;objc_msgSend&lt;/code&gt;.&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Architectural Feature Comparison --&gt;
+  &lt;div class=&quot;table-box&quot;&gt;
+    &lt;div class=&quot;table-title&quot;&gt;
+      Deep Architectural Comparison
+    &lt;/div&gt;
+    &lt;table&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;
+          &lt;th&gt;Subsystem&lt;/th&gt;
+          &lt;th&gt;Zed (GPUI + Rust)&lt;/th&gt;
+          &lt;th&gt;Zircon (Zircon UI + Zig)&lt;/th&gt;
+        &lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Ownership &amp;amp; State&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;&lt;code&gt;Entity&amp;lt;T&amp;gt;&lt;/code&gt; Rc-style handle. Dynamic stack leasing. Reentrant update is a runtime panic.&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;Generational non-owning handle with scoped borrows (&lt;code&gt;app.read/update&lt;/code&gt;). Snapshot-only return enforced at comptime. &lt;span class=&quot;tag-win win-zig&quot;&gt;Zircon Win&lt;/span&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Render Contract&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;&lt;code&gt;render(&amp;amp;mut self, cx)&lt;/code&gt; allows mutating internal view state during render pass.&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;&lt;code&gt;render(self: *const Self)&lt;/code&gt; is strictly const. Mutating during render triggers a compile-time error. &lt;span class=&quot;tag-win win-zig&quot;&gt;Zircon Win&lt;/span&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Frame Rollback&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;Partial fallback; dirty windows perform full tree re-eval unless cached by &lt;code&gt;uniform_list&lt;/code&gt; or view cache.&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;Transactional double-buffered staging arena. Any allocation or layout failure aborts staging and preserves previous frame. &lt;span class=&quot;tag-win win-zig&quot;&gt;Zircon Win&lt;/span&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Text Indexing&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;&lt;code&gt;SumTree&lt;/code&gt; B+ tree with monoid summaries for $O(\log N)$ byte/point/line/visual coordinate projection. &lt;span class=&quot;tag-win win-zed&quot;&gt;Zed Win&lt;/span&gt;&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;AVL rope with 4 KiB leaves. Fast for core editing; soft-wrap currently rescans visual rows on 1 MiB files.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Extension Model&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;In-process WASM/WASI engine running Tree-sitter parsers and LSP hooks.&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;Out-of-process isolated Rust worker (&lt;code&gt;zircon-extension-host&lt;/code&gt;). A grammar crash never brings down the editor. &lt;span class=&quot;tag-win win-zig&quot;&gt;Zircon Win&lt;/span&gt;&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Layout Engine&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;Full Taffy engine: flexbox, grid, block layout, text-wrapping, nested child measurement. &lt;span class=&quot;tag-win win-zed&quot;&gt;Zed Win&lt;/span&gt;&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;Minimal Zig flex subset (row, column, stack, grow/shrink). Custom elements are leaf nodes only.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Native OS Seam&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;Mature cross-platform backends: AppKit, Win32, Wayland, X11, AccessKit accessibility. &lt;span class=&quot;tag-win win-zed&quot;&gt;Zed Win&lt;/span&gt;&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;Direct comptime &lt;code&gt;objc_msgSend&lt;/code&gt; bindings (no C/Obj-C bridge). Native to macOS; Linux is portable compile only.&lt;/td&gt;
+        &lt;/tr&gt;
+        &lt;tr&gt;
+          &lt;td class=&quot;feat-name&quot;&gt;Collaboration &amp;amp; CRDT&lt;/td&gt;
+          &lt;td class=&quot;zed-col&quot;&gt;Native multi-user CRDTs with vector clocks, WebSockets, Protobuf RPC, and headless remote server. &lt;span class=&quot;tag-win win-zed&quot;&gt;Zed Win&lt;/span&gt;&lt;/td&gt;
+          &lt;td class=&quot;zircon-col&quot;&gt;Single-user local editor. No CRDT networking, no headless remote server.&lt;/td&gt;
+        &lt;/tr&gt;
+      &lt;/tbody&gt;
+    &lt;/table&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;summary-banner&quot;&gt;
+    &lt;strong&gt;Architectural Assessment:&lt;/strong&gt; Zircon is not just a copy of Zed in Zig—it is a radically simplified, contract-driven rethink of the GPUI model. Zircon enforces strict correctness laws that Rust cannot easily express without macro overhead: &lt;strong&gt;const-only rendering&lt;/strong&gt;, &lt;strong&gt;generational handle safety with zero pointer leakage&lt;/strong&gt;, and &lt;strong&gt;transactional frame rollback&lt;/strong&gt;. However, Zed remains an industrial, multi-platform shipping IDE with mature layout (Taffy), $O(\log N)$ text-to-screen coordinate maps (&lt;code&gt;SumTree&lt;/code&gt;), and cross-platform accessibility (AccessKit).
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe><figcaption>Zircon vs Zed Architecture Comparison · Original thread visual</figcaption></figure>
+<article aria-label="Original answer"><h3>Zircon Editor Architecture</h3>
+<p><a href="file:///Users/syedmuzamilm/work/expirements/zigpui/README.md">Zircon</a> is an independent native desktop text editor and UI toolkit written in <strong>Zig 0.17.1</strong>. While GPUI and NanoUI served as architectural references, Zircon is built with zero C headers, zero Objective-C source files, and an entirely separate, contract-driven design.</p>
+<figure class="flow"><div class="flow-scroll" tabindex="0"><img src="data:image/svg+xml;base64,PHN2ZyBhcmlhLXJvbGVkZXNjcmlwdGlvbj0iZmxvd2NoYXJ0LXYyIiByb2xlPSJncmFwaGljcy1kb2N1bWVudCBkb2N1bWVudCIgdmlld0JveD0iLTggLTggMjI5Ny42Nzk2ODc1IDc0MiIgaGVpZ2h0PSI3NDIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjIyOTcuNjc5Njg3NSIgaWQ9InppcmNvbi1mbG93Y2hhcnQiPjxzdHlsZT4jemlyY29uLWZsb3djaGFydHtmb250LWZhbWlseToidHJlYnVjaGV0IG1zIix2ZXJkYW5hLGFyaWFsLHNhbnMtc2VyaWY7Zm9udC1zaXplOjE2cHg7ZmlsbDojMDAwMDAwO30jemlyY29uLWZsb3djaGFydCAuZXJyb3ItaWNvbntmaWxsOiM1NTIyMjI7fSN6aXJjb24tZmxvd2NoYXJ0IC5lcnJvci10ZXh0e2ZpbGw6IzU1MjIyMjtzdHJva2U6IzU1MjIyMjt9I3ppcmNvbi1mbG93Y2hhcnQgLmVkZ2UtdGhpY2tuZXNzLW5vcm1hbHtzdHJva2Utd2lkdGg6MnB4O30jemlyY29uLWZsb3djaGFydCAuZWRnZS10aGlja25lc3MtdGhpY2t7c3Ryb2tlLXdpZHRoOjMuNXB4O30jemlyY29uLWZsb3djaGFydCAuZWRnZS1wYXR0ZXJuLXNvbGlke3N0cm9rZS1kYXNoYXJyYXk6MDt9I3ppcmNvbi1mbG93Y2hhcnQgLmVkZ2UtcGF0dGVybi1kYXNoZWR7c3Ryb2tlLWRhc2hhcnJheTozO30jemlyY29uLWZsb3djaGFydCAuZWRnZS1wYXR0ZXJuLWRvdHRlZHtzdHJva2UtZGFzaGFycmF5OjI7fSN6aXJjb24tZmxvd2NoYXJ0IC5tYXJrZXJ7ZmlsbDojNjY2O3N0cm9rZTojNjY2O30jemlyY29uLWZsb3djaGFydCAubWFya2VyLmNyb3Nze3N0cm9rZTojNjY2O30jemlyY29uLWZsb3djaGFydCBzdmd7Zm9udC1mYW1pbHk6InRyZWJ1Y2hldCBtcyIsdmVyZGFuYSxhcmlhbCxzYW5zLXNlcmlmO2ZvbnQtc2l6ZToxNnB4O30jemlyY29uLWZsb3djaGFydCAubGFiZWx7Zm9udC1mYW1pbHk6InRyZWJ1Y2hldCBtcyIsdmVyZGFuYSxhcmlhbCxzYW5zLXNlcmlmO2NvbG9yOiMwMDAwMDA7fSN6aXJjb24tZmxvd2NoYXJ0IC5jbHVzdGVyLWxhYmVsIHRleHR7ZmlsbDojMzMzO30jemlyY29uLWZsb3djaGFydCAuY2x1c3Rlci1sYWJlbCBzcGFuLCN6aXJjb24tZmxvd2NoYXJ0IHB7Y29sb3I6IzMzMzt9I3ppcmNvbi1mbG93Y2hhcnQgLmxhYmVsIHRleHQsI3ppcmNvbi1mbG93Y2hhcnQgc3BhbiwjemlyY29uLWZsb3djaGFydCBwe2ZpbGw6IzAwMDAwMDtjb2xvcjojMDAwMDAwO30jemlyY29uLWZsb3djaGFydCAubm9kZSByZWN0LCN6aXJjb24tZmxvd2NoYXJ0IC5ub2RlIGNpcmNsZSwjemlyY29uLWZsb3djaGFydCAubm9kZSBlbGxpcHNlLCN6aXJjb24tZmxvd2NoYXJ0IC5ub2RlIHBvbHlnb24sI3ppcmNvbi1mbG93Y2hhcnQgLm5vZGUgcGF0aHtmaWxsOiNlZWU7c3Ryb2tlOiM5OTk7c3Ryb2tlLXdpZHRoOjFweDt9I3ppcmNvbi1mbG93Y2hhcnQgLmZsb3djaGFydC1sYWJlbCB0ZXh0e3RleHQtYW5jaG9yOm1pZGRsZTt9I3ppcmNvbi1mbG93Y2hhcnQgLm5vZGUgLmthdGV4IHBhdGh7ZmlsbDojMDAwO3N0cm9rZTojMDAwO3N0cm9rZS13aWR0aDoxcHg7fSN6aXJjb24tZmxvd2NoYXJ0IC5ub2RlIC5sYWJlbHt0ZXh0LWFsaWduOmNlbnRlcjt9I3ppcmNvbi1mbG93Y2hhcnQgLm5vZGUuY2xpY2thYmxle2N1cnNvcjpwb2ludGVyO30jemlyY29uLWZsb3djaGFydCAuYXJyb3doZWFkUGF0aHtmaWxsOiMzMzMzMzM7fSN6aXJjb24tZmxvd2NoYXJ0IC5lZGdlUGF0aCAucGF0aHtzdHJva2U6IzY2NjtzdHJva2Utd2lkdGg6Mi4wcHg7fSN6aXJjb24tZmxvd2NoYXJ0IC5mbG93Y2hhcnQtbGlua3tzdHJva2U6IzY2NjtmaWxsOm5vbmU7fSN6aXJjb24tZmxvd2NoYXJ0IC5lZGdlTGFiZWx7YmFja2dyb3VuZC1jb2xvcjp3aGl0ZTt0ZXh0LWFsaWduOmNlbnRlcjt9I3ppcmNvbi1mbG93Y2hhcnQgLmVkZ2VMYWJlbCByZWN0e29wYWNpdHk6MC41O2JhY2tncm91bmQtY29sb3I6d2hpdGU7ZmlsbDp3aGl0ZTt9I3ppcmNvbi1mbG93Y2hhcnQgLmxhYmVsQmtne2JhY2tncm91bmQtY29sb3I6cmdiYSgyNTUsIDI1NSwgMjU1LCAwLjUpO30jemlyY29uLWZsb3djaGFydCAuY2x1c3RlciByZWN0e2ZpbGw6aHNsKDAsIDAlLCA5OC45MjE1Njg2Mjc1JSk7c3Ryb2tlOiM3MDcwNzA7c3Ryb2tlLXdpZHRoOjFweDt9I3ppcmNvbi1mbG93Y2hhcnQgLmNsdXN0ZXIgdGV4dHtmaWxsOiMzMzM7fSN6aXJjb24tZmxvd2NoYXJ0IC5jbHVzdGVyIHNwYW4sI3ppcmNvbi1mbG93Y2hhcnQgcHtjb2xvcjojMzMzO30jemlyY29uLWZsb3djaGFydCBkaXYubWVybWFpZFRvb2x0aXB7cG9zaXRpb246YWJzb2x1dGU7dGV4dC1hbGlnbjpjZW50ZXI7bWF4LXdpZHRoOjIwMHB4O3BhZGRpbmc6MnB4O2ZvbnQtZmFtaWx5OiJ0cmVidWNoZXQgbXMiLHZlcmRhbmEsYXJpYWwsc2Fucy1zZXJpZjtmb250LXNpemU6MTJweDtiYWNrZ3JvdW5kOmhzbCgtMTYwLCAwJSwgOTMuMzMzMzMzMzMzMyUpO2JvcmRlcjoxcHggc29saWQgIzcwNzA3MDtib3JkZXItcmFkaXVzOjJweDtwb2ludGVyLWV2ZW50czpub25lO3otaW5kZXg6MTAwO30jemlyY29uLWZsb3djaGFydCAuZmxvd2NoYXJ0VGl0bGVUZXh0e3RleHQtYW5jaG9yOm1pZGRsZTtmb250LXNpemU6MThweDtmaWxsOiMwMDAwMDA7fSN6aXJjb24tZmxvd2NoYXJ0IDpyb290ey0tbWVybWFpZC1mb250LWZhbWlseToidHJlYnVjaGV0IG1zIix2ZXJkYW5hLGFyaWFsLHNhbnMtc2VyaWY7fTwvc3R5bGU+PGc+PG1hcmtlciBvcmllbnQ9ImF1dG8iIG1hcmtlckhlaWdodD0iMTIiIG1hcmtlcldpZHRoPSIxMiIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiByZWZZPSI1IiByZWZYPSI2IiB2aWV3Qm94PSIwIDAgMTAgMTAiIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0IiBpZD0iemlyY29uLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQiPjxwYXRoIHN0eWxlPSJzdHJva2Utd2lkdGg6IDE7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7IiBjbGFzcz0iYXJyb3dNYXJrZXJQYXRoIiBkPSJNIDAgMCBMIDEwIDUgTCAwIDEwIHoiPjwvcGF0aD48L21hcmtlcj48bWFya2VyIG9yaWVudD0iYXV0byIgbWFya2VySGVpZ2h0PSIxMiIgbWFya2VyV2lkdGg9IjEyIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIHJlZlk9IjUiIHJlZlg9IjQuNSIgdmlld0JveD0iMCAwIDEwIDEwIiBjbGFzcz0ibWFya2VyIGZsb3djaGFydCIgaWQ9InppcmNvbi1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50U3RhcnQiPjxwYXRoIHN0eWxlPSJzdHJva2Utd2lkdGg6IDE7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7IiBjbGFzcz0iYXJyb3dNYXJrZXJQYXRoIiBkPSJNIDAgNSBMIDEwIDEwIEwgMTAgMCB6Ij48L3BhdGg+PC9tYXJrZXI+PG1hcmtlciBvcmllbnQ9ImF1dG8iIG1hcmtlckhlaWdodD0iMTEiIG1hcmtlcldpZHRoPSIxMSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiByZWZZPSI1IiByZWZYPSIxMSIgdmlld0JveD0iMCAwIDEwIDEwIiBjbGFzcz0ibWFya2VyIGZsb3djaGFydCIgaWQ9InppcmNvbi1mbG93Y2hhcnRfZmxvd2NoYXJ0LWNpcmNsZUVuZCI+PGNpcmNsZSBzdHlsZT0ic3Ryb2tlLXdpZHRoOiAxOyBzdHJva2UtZGFzaGFycmF5OiAxLCAwOyIgY2xhc3M9ImFycm93TWFya2VyUGF0aCIgcj0iNSIgY3k9IjUiIGN4PSI1Ij48L2NpcmNsZT48L21hcmtlcj48bWFya2VyIG9yaWVudD0iYXV0byIgbWFya2VySGVpZ2h0PSIxMSIgbWFya2VyV2lkdGg9IjExIiBtYXJrZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIHJlZlk9IjUiIHJlZlg9Ii0xIiB2aWV3Qm94PSIwIDAgMTAgMTAiIGNsYXNzPSJtYXJrZXIgZmxvd2NoYXJ0IiBpZD0iemlyY29uLWZsb3djaGFydF9mbG93Y2hhcnQtY2lyY2xlU3RhcnQiPjxjaXJjbGUgc3R5bGU9InN0cm9rZS13aWR0aDogMTsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIHI9IjUiIGN5PSI1IiBjeD0iNSI+PC9jaXJjbGU+PC9tYXJrZXI+PG1hcmtlciBvcmllbnQ9ImF1dG8iIG1hcmtlckhlaWdodD0iMTEiIG1hcmtlcldpZHRoPSIxMSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiByZWZZPSI1LjIiIHJlZlg9IjEyIiB2aWV3Qm94PSIwIDAgMTEgMTEiIGNsYXNzPSJtYXJrZXIgY3Jvc3MgZmxvd2NoYXJ0IiBpZD0iemlyY29uLWZsb3djaGFydF9mbG93Y2hhcnQtY3Jvc3NFbmQiPjxwYXRoIHN0eWxlPSJzdHJva2Utd2lkdGg6IDI7IHN0cm9rZS1kYXNoYXJyYXk6IDEsIDA7IiBjbGFzcz0iYXJyb3dNYXJrZXJQYXRoIiBkPSJNIDEsMSBsIDksOSBNIDEwLDEgbCAtOSw5Ij48L3BhdGg+PC9tYXJrZXI+PG1hcmtlciBvcmllbnQ9ImF1dG8iIG1hcmtlckhlaWdodD0iMTEiIG1hcmtlcldpZHRoPSIxMSIgbWFya2VyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiByZWZZPSI1LjIiIHJlZlg9Ii0xIiB2aWV3Qm94PSIwIDAgMTEgMTEiIGNsYXNzPSJtYXJrZXIgY3Jvc3MgZmxvd2NoYXJ0IiBpZD0iemlyY29uLWZsb3djaGFydF9mbG93Y2hhcnQtY3Jvc3NTdGFydCI+PHBhdGggc3R5bGU9InN0cm9rZS13aWR0aDogMjsgc3Ryb2tlLWRhc2hhcnJheTogMSwgMDsiIGNsYXNzPSJhcnJvd01hcmtlclBhdGgiIGQ9Ik0gMSwxIGwgOSw5IE0gMTAsMSBsIC05LDkiPjwvcGF0aD48L21hcmtlcj48ZyBjbGFzcz0icm9vdCI+PGcgY2xhc3M9ImNsdXN0ZXJzIj48ZyBpZD0iQmFja2dyb3VuZFNlcnZpY2VzIiBjbGFzcz0iY2x1c3RlciBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzOTkiIHdpZHRoPSI4NDYuNzk2ODc1IiB5PSIwIiB4PSIwIiByeT0iMCIgcng9IjAiIHN0eWxlPSIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0MjMuMzk4NDM3NSwgMCkiIGNsYXNzPSJjbHVzdGVyLWxhYmVsIj48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+V29ya2VyIFByb2Nlc3NlcyAmYW1wOyBTZXJ2aWNlczwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgaWQ9IlRleHRFbmdpbmUiIGNsYXNzPSJjbHVzdGVyIGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjI3NyIgd2lkdGg9IjQwNy40MDYyNSIgeT0iNDQ5IiB4PSI5NjkuODU5Mzc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMTczLjU2MjUsIDQ0OSkiIGNsYXNzPSJjbHVzdGVyLWxhYmVsIj48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+VGV4dCAmYW1wOyBCdWZmZXIgTGF5ZXI8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIGlkPSJTaGVsbCIgY2xhc3M9ImNsdXN0ZXIgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMjcxIiB3aWR0aD0iNzkzLjE1NjI1IiB5PSIxMjgiIHg9Ijg2Ni43OTY4NzUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEyNjMuMzc1LCAxMjgpIiBjbGFzcz0iY2x1c3Rlci1sYWJlbCI+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPlByZXNlbnRhdGlvbiAmYW1wOyBDYW52YXMgKFppZyBQYWNrYWdlcyk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIGlkPSJVSSIgY2xhc3M9ImNsdXN0ZXIgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iNDA1IiB3aWR0aD0iNjAxLjcyNjU2MjUiIHk9IjEyOCIgeD0iMTY3OS45NTMxMjUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE5ODAuODE2NDA2MjUsIDEyOCkiIGNsYXNzPSJjbHVzdGVyLWxhYmVsIj48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+emlyY29uX3VpIChOYXRpdmUgWmlnIFVJIEZyYW1ld29yayk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0iZWRnZVBhdGhzIj48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3ppcmNvbi1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLUFwcEtpdCBMRS1TdGFnaW5nIiBpZD0iTC1BcHBLaXQtU3RhZ2luZy0wIiBkPSJNMTkwMC4wNTUsMTg3TDE5MDAuMDU1LDE5MS4xNjdDMTkwMC4wNTUsMTk1LjMzMywxOTAwLjA1NSwyMDMuNjY3LDE5MDAuMDU1LDIxMS4xMTdDMTkwMC4wNTUsMjE4LjU2NywxOTAwLjA1NSwyMjUuMTMzLDE5MDAuMDU1LDIyOC40MTdMMTkwMC4wNTUsMjMxLjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3ppcmNvbi1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLVN0YWdpbmcgTEUtU3dhcENvbW1pdCIgaWQ9IkwtU3RhZ2luZy1Td2FwQ29tbWl0LTAiIGQ9Ik0xOTAwLjA1NSwyNzFMMTkwMC4wNTUsMjc2Ljc1QzE5MDAuMDU1LDI4Mi41LDE5MDAuMDU1LDI5NCwxOTAwLjA1NSwzMDQuNjE3QzE5MDAuMDU1LDMxNS4yMzMsMTkwMC4wNTUsMzI0Ljk2NywxOTAwLjA1NSwzMjkuODMzTDE5MDAuMDU1LDMzNC43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Td2FwQ29tbWl0IExFLU1ldGFsUGlwZWxpbmUiIGlkPSJMLVN3YXBDb21taXQtTWV0YWxQaXBlbGluZS0wIiBkPSJNMTkwMC4wNTUsMzc0TDE5MDAuMDU1LDM3OC4xNjdDMTkwMC4wNTUsMzgyLjMzMywxOTAwLjA1NSwzOTAuNjY3LDE5MDAuMDU1LDM5OUMxOTAwLjA1NSw0MDcuMzMzLDE5MDAuMDU1LDQxNS42NjcsMTkwMC4wNTUsNDI0QzE5MDAuMDU1LDQzMi4zMzMsMTkwMC4wNTUsNDQwLjY2NywxOTAwLjA1NSw0NDguMTE3QzE5MDAuMDU1LDQ1NS41NjcsMTkwMC4wNTUsNDYyLjEzMywxOTAwLjA1NSw0NjUuNDE3TDE5MDAuMDU1LDQ2OC43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7c3Ryb2tlLXdpZHRoOjJweDtzdHJva2UtZGFzaGFycmF5OjM7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1kb3R0ZWQgZmxvd2NoYXJ0LWxpbmsgTFMtU3RhZ2luZyBMRS1TdGFnaW5nIiBpZD0iTC1TdGFnaW5nLVN0YWdpbmctMCIgZD0iTTIwNjguNDkyLDI0Mi4yODlMMjA4MS4xNjksMjQxLjQwN0MyMDkzLjg0NiwyNDAuNTI2LDIxMTkuMjAxLDIzOC43NjMsMjEzNS4wNDcsMjM3Ljg4MUMyMTUwLjg5MywyMzcsMjE1Ny4yMzIsMjM3LDIxNjMuNTcsMjM5LjgzM0MyMTY5LjkwOSwyNDIuNjY3LDIxNzYuMjQ3LDI0OC4zMzMsMjE3Ni4yNDcsMjU0QzIxNzYuMjQ3LDI1OS42NjcsMjE2OS45MDksMjY1LjMzMywyMTYzLjU3LDI2OC4xNjdDMjE1Ny4yMzIsMjcxLDIxNTAuODkzLDI3MSwyMTM1LjkyOCwyNzAuMThDMjEyMC45NjMsMjY5LjM2LDIwOTcuMzcxLDI2Ny43MTksMjA4NS41NzUsMjY2Ljg5OUwyMDczLjc3OSwyNjYuMDc5Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Xb3Jrc3BhY2UgTEUtRWRpdG9yIiBpZD0iTC1Xb3Jrc3BhY2UtRWRpdG9yLTAiIGQ9Ik0xMTg4LjIyNSwxODdMMTE2OS4wNDksMTkxLjE2N0MxMTQ5Ljg3NCwxOTUuMzMzLDExMTEuNTIzLDIwMy42NjcsMTA5Mi4zNDcsMjExLjExN0MxMDczLjE3MiwyMTguNTY3LDEwNzMuMTcyLDIyNS4xMzMsMTA3My4xNzIsMjI4LjQxN0wxMDczLjE3MiwyMzEuNyI+PC9wYXRoPjxwYXRoIG1hcmtlci1lbmQ9InVybCgjemlyY29uLWZsb3djaGFydF9mbG93Y2hhcnQtcG9pbnRFbmQpIiBzdHlsZT0iZmlsbDpub25lOyIgY2xhc3M9ImVkZ2UtdGhpY2tuZXNzLW5vcm1hbCBlZGdlLXBhdHRlcm4tc29saWQgZmxvd2NoYXJ0LWxpbmsgTFMtV29ya3NwYWNlIExFLVdpZGdldHMiIGlkPSJMLVdvcmtzcGFjZS1XaWRnZXRzLTAiIGQ9Ik0xMzQ0LjY5NywxODdMMTM2My44NzIsMTkxLjE2N0MxMzgzLjA0OCwxOTUuMzMzLDE0MjEuMzk5LDIwMy42NjcsMTQ0MC41NzQsMjExLjExN0MxNDU5Ljc1LDIxOC41NjcsMTQ1OS43NSwyMjUuMTMzLDE0NTkuNzUsMjI4LjQxN0wxNDU5Ljc1LDIzMS43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1FZGl0b3IgTEUtQ2FudmFzIiBpZD0iTC1FZGl0b3ItQ2FudmFzLTAiIGQ9Ik0xMTA2LjMxMSwyNzFMMTExNy41MTksMjc2Ljc1QzExMjguNzI4LDI4Mi41LDExNTEuMTQ1LDI5NCwxMTYyLjM1NCwzMDQuNjE3QzExNzMuNTYzLDMxNS4yMzMsMTE3My41NjMsMzI0Ljk2NywxMTczLjU2MywzMjkuODMzTDExNzMuNTYzLDMzNC43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1DYW52YXMgTEUtTXVsdGlCdWYiIGlkPSJMLUNhbnZhcy1NdWx0aUJ1Zi0wIiBkPSJNMTE3My41NjMsMzc0TDExNzMuNTYzLDM3OC4xNjdDMTE3My41NjMsMzgyLjMzMywxMTczLjU2MywzOTAuNjY3LDExNzMuNTYzLDM5OUMxMTczLjU2Myw0MDcuMzMzLDExNzMuNTYzLDQxNS42NjcsMTE3My41NjMsNDI0QzExNzMuNTYzLDQzMi4zMzMsMTE3My41NjMsNDQwLjY2NywxMTczLjU2Myw0NDguMTE3QzExNzMuNTYzLDQ1NS41NjcsMTE3My41NjMsNDYyLjEzMywxMTczLjU2Myw0NjUuNDE3TDExNzMuNTYzLDQ2OC43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1NdWx0aUJ1ZiBMRS1Sb3BlIiBpZD0iTC1NdWx0aUJ1Zi1Sb3BlLTAiIGQ9Ik0xMTczLjU2Myw1MDhMMTE3My41NjMsNTEyLjE2N0MxMTczLjU2Myw1MTYuMzMzLDExNzMuNTYzLDUyNC42NjcsMTE3My41NjMsNTMzQzExNzMuNTYzLDU0MS4zMzMsMTE3My41NjMsNTQ5LjY2NywxMTczLjU2Myw1NTcuMTE3QzExNzMuNTYzLDU2NC41NjcsMTE3My41NjMsNTcxLjEzMywxMTczLjU2Myw1NzQuNDE3TDExNzMuNTYzLDU3Ny43Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Sb3BlIExFLUhpc3RvcnkiIGlkPSJMLVJvcGUtSGlzdG9yeS0wIiBkPSJNMTE3My41NjMsNjE3TDExNzMuNTYzLDYyMS4xNjdDMTE3My41NjMsNjI1LjMzMywxMTczLjU2Myw2MzMuNjY3LDExNzMuNTYzLDY0MS4xMTdDMTE3My41NjMsNjQ4LjU2NywxMTczLjU2Myw2NTUuMTMzLDExNzMuNTYzLDY1OC40MTdMMTE3My41NjMsNjYxLjciPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3ppcmNvbi1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTtzdHJva2Utd2lkdGg6MnB4O3N0cm9rZS1kYXNoYXJyYXk6MzsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLWRvdHRlZCBmbG93Y2hhcnQtbGluayBMUy1FZGl0b3IgTEUtTFNQIiBpZD0iTC1FZGl0b3ItTFNQLTAiIGQ9Ik0xMDMzLjMwMSwyNzFMMTAxOS44MTUsMjc2Ljc1QzEwMDYuMzMsMjgyLjUsOTc5LjM1OCwyOTQsODY4LjI5MSwzMDYuNTA4Qzc1Ny4yMjMsMzE5LjAxNSw1NjIuMDYsMzMyLjUzLDQ2NC40NzgsMzM5LjI4OEwzNjYuODk3LDM0Ni4wNDYiPjwvcGF0aD48cGF0aCBtYXJrZXItZW5kPSJ1cmwoI3ppcmNvbi1mbG93Y2hhcnRfZmxvd2NoYXJ0LXBvaW50RW5kKSIgc3R5bGU9ImZpbGw6bm9uZTtzdHJva2Utd2lkdGg6MnB4O3N0cm9rZS1kYXNoYXJyYXk6MzsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLWRvdHRlZCBmbG93Y2hhcnQtbGluayBMUy1FZGl0b3IgTEUtR2l0IiBpZD0iTC1FZGl0b3ItR2l0LTAiIGQ9Ik0xMDczLjE3MiwyNzFMMTA3My4xNzIsMjc2Ljc1QzEwNzMuMTcyLDI4Mi41LDEwNzMuMTcyLDI5NCwxMDIxLjM2NSwzMDUuNDA0Qzk2OS41NTgsMzE2LjgwOCw4NjUuOTQ0LDMyOC4xMTcsODE0LjEzNywzMzMuNzcxTDc2Mi4zMywzMzkuNDI1Ij48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIG1hcmtlci1zdGFydD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludFN0YXJ0KSIgc3R5bGU9ImZpbGw6bm9uZTsiIGNsYXNzPSJlZGdlLXRoaWNrbmVzcy1ub3JtYWwgZWRnZS1wYXR0ZXJuLXNvbGlkIGZsb3djaGFydC1saW5rIExTLUV4dEhvc3QgTEUtV29ya3NwYWNlIiBpZD0iTC1FeHRIb3N0LVdvcmtzcGFjZS0wIiBkPSJNMjI1Ljc0Miw2NC4zTDIyNS43NDIsNjkuMTY3QzIyNS43NDIsNzQuMDMzLDIyNS43NDIsODMuNzY3LDIyNS43NDIsOTQuMzgzQzIyNS43NDIsMTA1LDIyNS43NDIsMTE2LjUsMzc0LjEyNSwxMjguMjM4QzUyMi41MDgsMTM5Ljk3Nyw4MTkuMjc0LDE1MS45NTMsOTY3LjY1NywxNTcuOTQxTDExMTYuMDQsMTYzLjkzIj48L3BhdGg+PHBhdGggbWFya2VyLWVuZD0idXJsKCN6aXJjb24tZmxvd2NoYXJ0X2Zsb3djaGFydC1wb2ludEVuZCkiIHN0eWxlPSJmaWxsOm5vbmU7IiBjbGFzcz0iZWRnZS10aGlja25lc3Mtbm9ybWFsIGVkZ2UtcGF0dGVybi1zb2xpZCBmbG93Y2hhcnQtbGluayBMUy1Kb2JRdWV1ZSBMRS1BcHBLaXQiIGlkPSJMLUpvYlF1ZXVlLUFwcEtpdC0wIiBkPSJNNjM5LjE0MSw1OUw2MzkuMTQxLDY0Ljc1QzYzOS4xNDEsNzAuNSw2MzkuMTQxLDgyLDYzOS4xNDEsOTMuNUM2MzkuMTQxLDEwNSw2MzkuMTQxLDExNi41LDgxNy41NiwxMjguMTkzQzk5NS45NzksMTM5Ljg4NiwxMzUyLjgxOCwxNTEuNzcyLDE1MzEuMjM3LDE1Ny43MTVMMTcwOS42NTYsMTYzLjY1OCI+PC9wYXRoPjwvZz48ZyBjbGFzcz0iZWRnZUxhYmVscyI+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTkwMC4wNTQ2ODc1LCAzMDUuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0yNi45ODQzNzUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDY0ODQ5ODUzNTE2IiB3aWR0aD0iNTMuOTM3Njg2OTIwMTY2MDE2IiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U3VjY2VzczwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjE4Mi41ODU5Mzc1LCAyNTQpIiBjbGFzcz0iZWRnZUxhYmVsIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtNzkuMDkzNzUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDY0ODQ5ODUzNTE2IiB3aWR0aD0iMTU4LjA5NDI5OTMxNjQwNjI1IiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+RmFpbHVyZSAoQWxsb2MvTGF5b3V0KTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgMCkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIwIiB3aWR0aD0iMCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPjwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoOTUyLjM4NjcxODc1LCAzMDUuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0zNS4xOTUzMTI1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDA2NDg0OTg1MzUxNiIgd2lkdGg9IjcwLjM0Mzk5NDE0MDYyNSIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPlNuYXBzaG90czwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTA3My4xNzE4NzUsIDMwNS41KSIgY2xhc3M9ImVkZ2VMYWJlbCI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoLTM1LjE5NTMxMjUsIC05LjUpIiBjbGFzcz0ibGFiZWwiPjxyZWN0IGhlaWdodD0iMTkuMDAwMDY0ODQ5ODUzNTE2IiB3aWR0aD0iNzAuMzQzOTk0MTQwNjI1IiByeT0iMCIgcng9IjAiPjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U25hcHNob3RzPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyMjUuNzQyMTg3NSwgOTMuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC0xMS40NzY1NjI1LCAtOS41KSIgY2xhc3M9ImxhYmVsIj48cmVjdCBoZWlnaHQ9IjE5LjAwMDA2NDg0OTg1MzUxNiIgd2lkdGg9IjIyLjkzNzU4MDEwODY0MjU3OCIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPklQQzwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNjM5LjE0MDYyNSwgOTMuNSkiIGNsYXNzPSJlZGdlTGFiZWwiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKC00MSwgLTkuNSkiIGNsYXNzPSJsYWJlbCI+PHJlY3QgaGVpZ2h0PSIxOS4wMDAwNjQ4NDk4NTM1MTYiIHdpZHRoPSI4MS45NTM0MDcyODc1OTc2NiIgcnk9IjAiIHJ4PSIwIj48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPkFwcC53YWtlKCk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjwvZz48ZyBjbGFzcz0ibm9kZXMiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDYzOS4xNDA2MjUsIDQyKSIgZGF0YS1pZD0iSm9iUXVldWUiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1Kb2JRdWV1ZS02NCIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjM0NS4zMTI1IiB5PSItMTciIHg9Ii0xNzIuNjU2MjUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+Sm9iIFF1ZXVlIChFbnRpdHktdGllZCBXb3JrZXJzICsgQXBwLndha2UoKSk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIyNS43NDIxODc1LCA0MikiIGRhdGEtaWQ9IkV4dEhvc3QiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1FeHRIb3N0LTY1IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMzgxLjQ4NDM3NSIgeT0iLTE3IiB4PSItMTkwLjc0MjE4NzUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+emlyY29uLWV4dGVuc2lvbi1ob3N0IChPdXQtb2YtUHJvY2VzcyBSdXN0IFdvcmtlcik8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIwOC43MTA5Mzc1LCAzNTcpIiBkYXRhLWlkPSJMU1AiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1MU1AtNjYiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzMDUuNzk2ODc1IiB5PSItMTciIHg9Ii0xNTIuODk4NDM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj56aXJjb25fbGFuZ3VhZ2UgKFN0ZGlvIEpTT04tUlBDIENsaWVudCk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDYwMS4yOTY4NzUsIDM1NykiIGRhdGEtaWQ9IkdpdCIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LUdpdC02NyIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjM3OS4zNzUiIHk9Ii0xNyIgeD0iLTE4OS42ODc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPnppcmNvbl9naXQgJmFtcDsgemlyY29uX2dpdF91aSAoU3RhdHVzLCBHdXR0ZXJzLCBCbGFtZSk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDExNzMuNTYyNSwgNjAwKSIgZGF0YS1pZD0iUm9wZSIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVJvcGUtNjEiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIyNzciIHk9Ii0xNyIgeD0iLTEzOC41IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPnppcmNvbl90ZXh0IChBVkwgUm9wZSwgNCBLaUIgTGVhdmVzKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTE3My41NjI1LCA2ODQpIiBkYXRhLWlkPSJIaXN0b3J5IiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtSGlzdG9yeS02MiIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjMzNy40MDYyNSIgeT0iLTE3IiB4PSItMTY4LjcwMzEyNSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5Hcm91cGVkIFVuZG8vUmVkbyAoQ29udGVudCBTdGF0ZSBJZGVudGl0eSk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDExNzMuNTYyNSwgNDkxKSIgZGF0YS1pZD0iTXVsdGlCdWYiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1NdWx0aUJ1Zi02MyIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjMxOS44OTA2MjUiIHk9Ii0xNyIgeD0iLTE1OS45NDUzMTI1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPnppcmNvbl9tdWx0aWJ1ZmZlciAoRXhjZXJwdCBDb21wb3NpdGlvbnMpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMjY2LjQ2MDkzNzUsIDE3MCkiIGRhdGEtaWQ9IldvcmtzcGFjZSIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVdvcmtzcGFjZS01NyIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjI5MC4yNSIgeT0iLTE3IiB4PSItMTQ1LjEyNSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj56aXJjb25fd29ya3NwYWNlIChQYW5lcywgVGFicywgU3BsaXRzKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTA3My4xNzE4NzUsIDI1NCkiIGRhdGEtaWQ9IkVkaXRvciIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LUVkaXRvci01OCIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjM0Mi43NSIgeT0iLTE3IiB4PSItMTcxLjM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj56aXJjb25fZWRpdG9yIChNdWx0aS1jdXJzb3IsIEd1dHRlciwgU2VsZWN0aW9uKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTQ1OS43NSwgMjU0KSIgZGF0YS1pZD0iV2lkZ2V0cyIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVdpZGdldHMtNTkiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzMzAuNDA2MjUiIHk9Ii0xNyIgeD0iLTE2NS4yMDMxMjUiIHJ5PSIwIiByeD0iMCIgc3R5bGU9IiIgY2xhc3M9ImJhc2ljIGxhYmVsLWNvbnRhaW5lciI+PC9yZWN0PjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsIC05LjUpIiBzdHlsZT0iIiBjbGFzcz0ibGFiZWwiPjxyZWN0PjwvcmVjdD48dGV4dCBzdHlsZT0iIj48dHNwYW4gY2xhc3M9InJvdyIgeD0iMCIgZHk9IjFlbSIgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+emlyY29uX3dpZGdldHMgKEJ1dHRvbnMsIElucHV0cywgU3RhdHVzIEJhcik8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDExNzMuNTYyNSwgMzU3KSIgZGF0YS1pZD0iQ2FudmFzIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtQ2FudmFzLTYwIiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMjk2LjQwNjI1IiB5PSItMTciIHg9Ii0xNDguMjAzMTI1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPkNhbnZhcyBMZWFmIEVsZW1lbnQgKEN1c3RvbSBEcmF3aW5nKTwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTkwMC4wNTQ2ODc1LCAxNzApIiBkYXRhLWlkPSJBcHBLaXQiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1BcHBLaXQtNTMiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzNzAuMjAzMTI1IiB5PSItMTciIHg9Ii0xODUuMTAxNTYyNSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5BcHBLaXQgJmFtcDsgV2luZG93IEhvc3QgKGNvbXB0aW1lIG9iamNfbXNnU2VuZCk8L3RzcGFuPjwvdGV4dD48L2c+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE5MDAuMDU0Njg3NSwgMjU0KSIgZGF0YS1pZD0iU3RhZ2luZyIgZGF0YS1ub2RlPSJ0cnVlIiBpZD0iZmxvd2NoYXJ0LVN0YWdpbmctNTQiIGNsYXNzPSJub2RlIGRlZmF1bHQgZGVmYXVsdCBmbG93Y2hhcnQtbGFiZWwiPjxyZWN0IGhlaWdodD0iMzQiIHdpZHRoPSIzMzYuODc1IiB5PSItMTciIHg9Ii0xNjguNDM3NSIgcnk9IjAiIHJ4PSIwIiBzdHlsZT0iIiBjbGFzcz0iYmFzaWMgbGFiZWwtY29udGFpbmVyIj48L3JlY3Q+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwgLTkuNSkiIHN0eWxlPSIiIGNsYXNzPSJsYWJlbCI+PHJlY3Q+PC9yZWN0Pjx0ZXh0IHN0eWxlPSIiPjx0c3BhbiBjbGFzcz0icm93IiB4PSIwIiBkeT0iMWVtIiB4bWw6c3BhY2U9InByZXNlcnZlIj5TdGFnaW5nIEZyYW1lIEFyZW5hIChMYXlvdXQsIEhpdGJveCwgU2NlbmUpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxOTAwLjA1NDY4NzUsIDM1NykiIGRhdGEtaWQ9IlN3YXBDb21taXQiIGRhdGEtbm9kZT0idHJ1ZSIgaWQ9ImZsb3djaGFydC1Td2FwQ29tbWl0LTU1IiBjbGFzcz0ibm9kZSBkZWZhdWx0IGRlZmF1bHQgZmxvd2NoYXJ0LWxhYmVsIj48cmVjdCBoZWlnaHQ9IjM0IiB3aWR0aD0iMjMyLjc1IiB5PSItMTciIHg9Ii0xMTYuMzc1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPlRyYW5zYWN0aW9uYWwgU3dhcCAmYW1wOyBSb2xsYmFjazwvdHNwYW4+PC90ZXh0PjwvZz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTkwMC4wNTQ2ODc1LCA0OTEpIiBkYXRhLWlkPSJNZXRhbFBpcGVsaW5lIiBkYXRhLW5vZGU9InRydWUiIGlkPSJmbG93Y2hhcnQtTWV0YWxQaXBlbGluZS01NiIgY2xhc3M9Im5vZGUgZGVmYXVsdCBkZWZhdWx0IGZsb3djaGFydC1sYWJlbCI+PHJlY3QgaGVpZ2h0PSIzNCIgd2lkdGg9IjM1MS43NjU2MjUiIHk9Ii0xNyIgeD0iLTE3NS44ODI4MTI1IiByeT0iMCIgcng9IjAiIHN0eWxlPSIiIGNsYXNzPSJiYXNpYyBsYWJlbC1jb250YWluZXIiPjwvcmVjdD48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLCAtOS41KSIgc3R5bGU9IiIgY2xhc3M9ImxhYmVsIj48cmVjdD48L3JlY3Q+PHRleHQgc3R5bGU9IiI+PHRzcGFuIGNsYXNzPSJyb3ciIHg9IjAiIGR5PSIxZW0iIHhtbDpzcGFjZT0icHJlc2VydmUiPk1ldGFsIFBpcGVsaW5lICgxIFNoYWRlciwgNCBNb2RlcywgR2x5cGggQXRsYXMpPC90c3Bhbj48L3RleHQ+PC9nPjwvZz48L2c+PC9nPjwvZz48L3N2Zz4=" alt="Zircon component interaction diagram"></div><figcaption>Zircon component interaction diagram</figcaption></figure><details><summary>Mermaid source</summary><pre><code>flowchart TD
+    subgraph UI [&quot;zircon_ui (Native Zig UI Framework)&quot;]
+        AppKit[&quot;AppKit &amp; Window Host (comptime objc_msgSend)&quot;]
+        Staging[&quot;Staging Frame Arena (Layout, Hitbox, Scene)&quot;]
+        SwapCommit[&quot;Transactional Swap &amp; Rollback&quot;]
+        MetalPipeline[&quot;Metal Pipeline (1 Shader, 4 Modes, Glyph Atlas)&quot;]
+    end
+
+    subgraph Shell [&quot;Presentation &amp; Canvas (Zig Packages)&quot;]
+        Workspace[&quot;zircon_workspace (Panes, Tabs, Splits)&quot;]
+        Editor[&quot;zircon_editor (Multi-cursor, Gutter, Selection)&quot;]
+        Widgets[&quot;zircon_widgets (Buttons, Inputs, Status Bar)&quot;]
+        Canvas[&quot;Canvas Leaf Element (Custom Drawing)&quot;]
+    end
+
+    subgraph TextEngine [&quot;Text &amp; Buffer Layer&quot;]
+        Rope[&quot;zircon_text (AVL Rope, 4 KiB Leaves)&quot;]
+        History[&quot;Grouped Undo/Redo (Content State Identity)&quot;]
+        MultiBuf[&quot;zircon_multibuffer (Excerpt Compositions)&quot;]
+    end
+
+    subgraph BackgroundServices [&quot;Worker Processes &amp; Services&quot;]
+        JobQueue[&quot;Job Queue (Entity-tied Workers + App.wake())&quot;]
+        ExtHost[&quot;zircon-extension-host (Out-of-Process Rust Worker)&quot;]
+        LSP[&quot;zircon_language (Stdio JSON-RPC Client)&quot;]
+        Git[&quot;zircon_git &amp; zircon_git_ui (Status, Gutters, Blame)&quot;]
+    end
+
+    %% Wiring
+    AppKit --&gt; Staging
+    Staging --&gt;|Success| SwapCommit --&gt; MetalPipeline
+    Staging -.-&gt;|&quot;Failure (Alloc/Layout)&quot;| Staging
+
+    Workspace --&gt; Editor &amp; Widgets
+    Editor --&gt; Canvas
+    Canvas --&gt; MultiBuf --&gt; Rope
+    Rope --&gt; History
+
+    Editor -.-&gt;|Snapshots| LSP
+    Editor -.-&gt;|Snapshots| Git
+    ExtHost &lt;--&gt;|IPC| Workspace
+    JobQueue --&gt;|&quot;App.wake()&quot;| AppKit
+</code></pre></details>
+<hr>
+<h3>Key Zircon Subsystems</h3>
+<ol>
+<li>
+<p><strong><a href="file:///Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_ui"><code>zircon_ui</code></a></strong>:</p>
+<ul>
+<li><strong>Generational Entity Handles</strong>: Application state is held in non-owning <code>Entity(T)</code> handles. Child entities are destroyed before parent entities, preventing dangling references.</li>
+<li><strong>Const Render Law</strong>: Views implement <code>pub fn render(self: *const Self, b: *ui.Ui) !ui.Element</code>. Attempting to mutate view state during a render pass is a compile-time failure.</li>
+<li><strong>Double-Buffered Transactional Arenas</strong>: A frame is built entirely within a staging arena (tree, flex layout, hitboxes, scene commands, IME snapshot). If any step fails (e.g., an allocation error), staging is dropped, and the last good frame remains committed.</li>
+<li><strong>Direct Comptime macOS Seam</strong>: System APIs (<code>AppKit</code>, <code>CoreText</code>, <code>Metal</code>, <code>ImageIO</code>, <code>NSTextInputClient</code>) are invoked via compile-time generated <code>objc_msgSend</code> bindings without <code>.m</code> or <code>.h</code> bridge files.</li>
+<li><strong>Unified Metal Shader</strong>: Renders four primitive types (analytic rounded rectangles, text glyphs, images, and round-capped lines) using 80-byte GPU instances and a 2048×2048 R8 grayscale glyph atlas.</li>
+</ul>
+</li>
+<li>
+<p><strong><a href="file:///Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_text"><code>zircon_text</code></a> &amp; <a href="file:///Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_multibuffer"><code>zircon_multibuffer</code></a></strong>:</p>
+<ul>
+<li>Uses an AVL rope backed by 4 KiB leaves.</li>
+<li>Distinct separation between <strong>revision counter</strong> and <strong>content-state identity</strong>, guaranteeing that undoing back to the disk-saved state correctly resets the dirty flag.</li>
+<li>Immutable, shared-node snapshots: background workers (Git, search, language servers) operate on retained immutable snapshots without locking the UI thread.</li>
+</ul>
+</li>
+<li>
+<p><strong><a href="file:///Users/syedmuzamilm/work/expirements/zigpui/packages/zircon_extensions"><code>zircon_extensions</code></a> &amp; Out-of-Process Worker</strong>:</p>
+<ul>
+<li>Rather than embedding WASM inside the editor process, Zircon runs a dedicated out-of-process worker: <a href="file:///Users/syedmuzamilm/work/expirements/zigpui/tools"><code>zircon-extension-host</code></a> (in Rust).</li>
+<li>The worker searches the official Zed extension catalog, downloads themes, icons, and grammars, and executes Tree-sitter parsers. If a grammar panics or corrupts memory, the editor stays alive.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h3>Detailed Side-by-Side Comparison: Zed vs. Zircon</h3>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th style="text-align:left">Dimension</th>
+<th style="text-align:left"><strong>Zed</strong> (<code>crates/*</code>)</th>
+<th style="text-align:left"><strong>Zircon</strong> (<code>packages/*</code>)</th>
+<th style="text-align:left">Architectural Takeaway</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>Language &amp; Ecosystem</strong></td>
+<td style="text-align:left">Rust (100+ crates, ~1,000,000+ SLoC). Heavy macro usage (<code>gpui_macros</code>, async traits).</td>
+<td style="text-align:left">Zig 0.17.1 (~30,000 SLoC across 13 packages). Minimal dependencies, comptime metaprogramming.</td>
+<td style="text-align:left">Zircon compiles in seconds and can be fully understood by a single engineer; Zed requires substantial build infrastructure.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>View Mutation Contract</strong></td>
+<td style="text-align:left"><code>render(&amp;mut self, cx)</code> allows mutating internal view properties during render.</td>
+<td style="text-align:left"><code>render(self: *const Self, b)</code> strictly forbids mutation at compile-time.</td>
+<td style="text-align:left"><strong>Zircon advantage</strong>: Eliminates hidden side-effects and re-render loops during the display pass.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>State &amp; Handle Ownership</strong></td>
+<td style="text-align:left"><code>Entity&lt;T&gt;</code> behaves like <code>Rc&lt;RefCell&lt;T&gt;&gt;</code>. Calling <code>entity.update()</code> leases <code>T</code> onto the stack; reentrant updates panic.</td>
+<td style="text-align:left"><code>Entity(T)</code> is a generational ID. Reads and updates are scoped (<code>app.read</code> / <code>app.update</code>). Returning pointers or slices is forbidden at comptime.</td>
+<td style="text-align:left"><strong>Zircon advantage</strong>: True memory safety without garbage collection or Rust borrow checker contortions around GUI graphs.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Frame Rollback &amp; Fault Tolerance</strong></td>
+<td style="text-align:left">Invalidation triggers tree rebuilds. Platform failures can leave the visual state inconsistent.</td>
+<td style="text-align:left">Two memory arenas: fallible staging arena + committed frame arena. If layout/alloc fails, staging is discarded without touching the screen.</td>
+<td style="text-align:left"><strong>Zircon advantage</strong>: Atomic UI transactions prevent partial or corrupted frames from reaching the display.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Text Indexing &amp; Rope Data Structure</strong></td>
+<td style="text-align:left"><code>SumTree</code> (Copy-on-Write B+ tree with monoid summaries) calculating line, byte, UTF-16, and 2D points in O(log N).</td>
+<td style="text-align:left">AVL rope with 4 KiB leaves. Line count and byte offsets are tracked, but soft-wrapping currently rescans visual rows.</td>
+<td style="text-align:left"><strong>Zed advantage</strong>: Zed scales cleanly to multi-gigabyte files and continuous 120 FPS soft-wrapping; Zircon experiences a wrap rebuild cliff on files ≥ 1 MiB.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Layout System</strong></td>
+<td style="text-align:left">Full Taffy integration (Flexbox, CSS Grid, block layout, text-wrapping, child measurement).</td>
+<td style="text-align:left">Custom Zig flex subset (row, column, stack, grow/shrink with freezing). Custom elements are leaf nodes only (<code>no layoutChild</code>).</td>
+<td style="text-align:left"><strong>Zed advantage</strong>: Zed can easily build complex chrome, popovers, and nested dynamic lists.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Platform Target</strong></td>
+<td style="text-align:left">Mature cross-platform abstractions: macOS (Metal/AppKit), Linux (Vulkan/X11/Wayland), Windows (Direct3D 11), iOS.</td>
+<td style="text-align:left">macOS-native first (<code>AppKit</code>, <code>CoreText</code>, <code>Metal</code>). Linux target exists solely for portable compilation of headless test suites.</td>
+<td style="text-align:left"><strong>Zed advantage</strong>: Broad multi-platform shipping coverage; Zircon focuses on macOS AppKit fidelity.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Extension Isolation</strong></td>
+<td style="text-align:left">In-process WebAssembly / WASI engine executing language plugins, Tree-sitter parsers, and themes.</td>
+<td style="text-align:left">Out-of-process worker daemon (<code>zircon-extension-host</code>) written in Rust communicating over IPC pipes.</td>
+<td style="text-align:left"><strong>Zircon advantage</strong>: Fault isolation ensures third-party WASM code or Tree-sitter bugs cannot crash the editor.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Multiplayer / Collaboration</strong></td>
+<td style="text-align:left">Built from the ground up for real-time multiplayer CRDTs, vector clocks (<code>clock</code>), and Protobuf RPC (<code>collab</code>).</td>
+<td style="text-align:left">Single-user local editor. No CRDT synchronization engine or peer-to-peer networking.</td>
+<td style="text-align:left"><strong>Zed advantage</strong>: Zed is designed as a collaborative IDE with integrated voice and remote SSH server capabilities.</td>
+</tr>
+<tr>
+<td style="text-align:left"><strong>Accessibility (a11y)</strong></td>
+<td style="text-align:left">Integrated <code>AccessKit</code> tree, synthetic accessibility nodes for editor buffers, platform accessibility adapters.</td>
+<td style="text-align:left">Keyboard focus and Tab navigation. No OS accessibility tree exposure.</td>
+<td style="text-align:left"><strong>Zed advantage</strong>: Foundational infrastructure in place for screen readers and assistive tech.</td>
+</tr>
+</tbody>
+</table></div>
+<hr>
+<h3>Summary</h3>
+<ul>
+<li>
+<p><strong>Where Zircon excels</strong>:</p>
+<ol>
+<li><strong>Strict correctness laws</strong>: Compile-time const rendering, generational entity handles with compile-time snapshot validation, and double-buffered frame rollback guarantees that no corrupted frame ever displays.</li>
+<li><strong>Direct, clean OS integration</strong>: System calls are generated directly via <code>objc_msgSend</code> without bridging layers or Objective-C stubs.</li>
+<li><strong>Fault isolation</strong>: Parsing untrusted third-party code and grammars happens out-of-process via <code>zircon-extension-host</code>.</li>
+</ol>
+</li>
+<li>
+<p><strong>Where Zed leads</strong>:</p>
+<ol>
+<li><strong>Algorithmic data structures</strong>: <code>SumTree</code> provides O(log N) projections across byte offsets, visual wrapped rows, fold markers, and multi-buffer excerpts.</li>
+<li><strong>Industrial feature completeness</strong>: Full cross-platform support (macOS, Windows, Linux), Tree-sitter query cursor pooling, real-time multiplayer CRDTs, integrated DAP debugging, and autonomous AI agents.</li>
+</ol>
+</li>
+</ul>
+</article>
+</section>
+</main>
+<script>
+  for (const frame of document.querySelectorAll('iframe')) {
+    let observer;
+    function fit() {
+      observer?.disconnect();
+      const body = frame.contentDocument?.body;
+      if (!body || !body.firstElementChild) return;
+      const resize = () => {
+        const bottom = body.lastElementChild.getBoundingClientRect().bottom;
+        const padding = parseFloat(frame.contentWindow.getComputedStyle(body).paddingBottom) || 0;
+        frame.style.height = Math.ceil(bottom + padding) + 'px';
+      };
+      observer = new ResizeObserver(resize);
+      observer.observe(body);
+      resize();
+    }
+    frame.addEventListener('load', fit);
+    fit();
+  }
+</script>
+</body>
+</html>

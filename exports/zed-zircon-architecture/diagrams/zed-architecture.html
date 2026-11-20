@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1"><style id="t3-theme">:root{color-scheme:dark;--background:#0a0a0a;--foreground:#f5f5f5;--muted:#111111;--muted-foreground:#818181;--card:#111111;--card-foreground:#f5f5f5;--popover:#111111;--popover-foreground:#f5f5f5;--secondary:#111111;--secondary-foreground:#f5f5f5;--border:#191919;--input:#1e1e1e;--ring:#346bf1;--primary:#346bf1;--primary-foreground:#ffffff;--accent:#346bf1;--accent-foreground:#ffffff;--accent-surface:#141414;--accent-surface-foreground:#f5f5f5;--destructive:#fb414a;--destructive-foreground:#ff6467;--destructive-surface:#301214;--warning:#fe9a00;--warning-foreground:#ffb900;--warning-surface:#312108;--success:#10b981;--success-foreground:#34d399;--info:#3b82f6;--info-foreground:#60a5fa;--code-background:#111111;--code-foreground:#f5f5f5;--chart-1:#346bf1;--chart-2:#2dd4bf;--chart-3:#fbbf24;--chart-4:#c084fc;--chart-5:#fb7185;--chart-6:#a3e635;--radius:0.625rem;--font-sans:-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;--font-mono:"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;}@media (prefers-color-scheme: light){:root{color-scheme:light;--background:#fcfcfc;--foreground:#27272a;--muted:#fafafa;--muted-foreground:#71717b;--card:#ffffff;--card-foreground:#27272a;--popover:#ffffff;--popover-foreground:#27272a;--secondary:#fafafa;--secondary-foreground:#27272a;--border:#e4e4e7;--input:#d4d4d8;--ring:#1b4ed8;--primary:#1b4ed8;--primary-foreground:#ffffff;--accent:#1b4ed8;--accent-foreground:#ffffff;--accent-surface:#f4f4f5;--accent-surface-foreground:#18181b;--destructive:#fb2c36;--destructive-foreground:#c10007;--destructive-surface:#fcebec;--warning:#fe9a00;--warning-foreground:#bb4d00;--warning-surface:#fcf4e8;--success:#10b981;--success-foreground:#047857;--info:#3b82f6;--info-foreground:#1d4ed8;--code-background:#ffffff;--code-foreground:#27272a;--chart-1:#1b4ed8;--chart-2:#0d9488;--chart-3:#d97706;--chart-4:#9333ea;--chart-5:#e11d48;--chart-6:#65a30d;--radius:0.625rem;--font-sans:-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;--font-mono:"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;}}html{box-sizing:border-box;padding:8px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}:where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}:where(img:not(a[href] img,button img)){cursor:zoom-in}</style><script>(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b="html{box-sizing:border-box;padding:8px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}:where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}:where(img:not(a[href] img,button img)){cursor:zoom-in}";function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]t3-theme=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method==="ui/notifications/host-context-changed"&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:"ui/open-link",params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/size-changed",params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:"t3/notifications/open-image",params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C={"Backquote":"`","Backslash":"\\","BracketLeft":"[","BracketRight":"]","Comma":",","Digit0":"0","Digit1":"1","Digit2":"2","Digit3":"3","Digit4":"4","Digit5":"5","Digit6":"6","Digit7":"7","Digit8":"8","Digit9":"9","Equal":"=","Minus":"-","Period":".","Quote":"'","Semicolon":";","Slash":"/"};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method==="t3/notifications/shortcuts"&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:"t3/notifications/keydown",params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();</script>
+<meta charset="utf-8"/>
+<style>
+  :root {
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --border-color: rgba(255, 255, 255, 0.1);
+    --accent-blue: #38bdf8;
+    --accent-purple: #c084fc;
+    --accent-emerald: #34d399;
+    --accent-amber: #fbbf24;
+    --accent-rose: #f43f5e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+    color: var(--foreground, #e2e8f0);
+    line-height: 1.5;
+    padding: 0;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+  }
+  .header-card {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(192, 132, 252, 0.12));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 12px);
+    padding: 16px 20px;
+  }
+  .header-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-badge {
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+    background: rgba(56, 189, 248, 0.2);
+    color: var(--accent-blue);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+  }
+  .header-sub {
+    font-size: 13px;
+    color: var(--muted-foreground, #94a3b8);
+    margin-top: 4px;
+  }
+
+  /* Architecture Flow Diagram */
+  .diagram-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+  }
+
+  .layer {
+    grid-column: span 12;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .layer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .layer-tag {
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .layer-desc {
+    font-size: 12px;
+    color: var(--muted-foreground, #94a3b8);
+  }
+
+  .modules-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+  }
+
+  .mod-card {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: all 0.2s ease;
+  }
+  .mod-name {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mod-detail {
+    font-size: 11px;
+    color: var(--muted-foreground, #94a3b8);
+    margin-top: 3px;
+    line-height: 1.35;
+  }
+
+  /* Specific accents */
+  .tag-ui { color: var(--accent-purple); }
+  .tag-core { color: var(--accent-blue); }
+  .tag-lang { color: var(--accent-emerald); }
+  .tag-agent { color: var(--accent-amber); }
+  .tag-platform { color: var(--accent-rose); }
+
+  .connector-v {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    padding: 2px 0;
+    color: var(--muted-foreground, #64748b);
+    font-size: 11px;
+    font-family: var(--font-mono, monospace);
+  }
+  .connector-v svg {
+    stroke: currentColor;
+    opacity: 0.6;
+  }
+
+  .split-cols {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    grid-column: span 12;
+  }
+  @media (max-width: 600px) {
+    .split-cols { grid-template-columns: 1fr; }
+  }
+
+  .col-layer {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .footer-summary {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 10px);
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--muted-foreground, #94a3b8);
+    line-height: 1.5;
+  }
+  .footer-summary strong {
+    color: var(--foreground, #f1f5f9);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- Title / Commit Header -->
+  <div class="header-card">
+    <div class="header-title">
+      Zed Editor Architecture
+      <span class="header-badge">commit 596dfdc</span>
+    </div>
+    <div class="header-sub">
+      GPU-accelerated, CRDT-synchronized, multi-threaded modular Rust architecture
+    </div>
+  </div>
+
+  <!-- Layer 1: Presentation & Workspace Shell -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-tag tag-ui">
+        ● Layer 1: Shell &amp; Windowing
+      </span>
+      <span class="layer-desc">GPUI Views · Taffy Layout · Panes &amp; Docks</span>
+    </div>
+    <div class="modules-row">
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-purple)">workspace</div>
+        <div class="mod-detail">Panes, tabs, splits, docks, status bar &amp; command palette</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-purple)">editor</div>
+        <div class="mod-detail">Multi-cursor, selections, folding, soft-wrap, minimap</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-purple)">terminal_view</div>
+        <div class="mod-detail">Alacritty terminal emulator rendered directly via GPUI</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-purple)">agent_ui</div>
+        <div class="mod-detail">AI chat, inline diff review, tool approval workflows</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inter-layer flow indicator -->
+  <div class="connector-v">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+    <span>reactive model bindings (cx.observe / cx.notify)</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+  </div>
+
+  <!-- 3 Columns: Text Core, Language & DAP, AI Subsystem -->
+  <div class="split-cols">
+    <!-- Column 1: SumTree & Text Engine -->
+    <div class="col-layer">
+      <div class="layer-tag tag-core">
+        ● Text &amp; CRDT Core
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">sum_tree</div>
+        <div class="mod-detail">CoW B+ tree with monoid summaries (O(log n) indexing)</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">text::Buffer</div>
+        <div class="mod-detail">CRDT edit history, immutable snapshots, multi-threaded undo</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">multi_buffer</div>
+        <div class="mod-detail">Composes excerpts across files for search &amp; inline diffs</div>
+      </div>
+    </div>
+
+    <!-- Column 2: Code Intelligence -->
+    <div class="col-layer">
+      <div class="layer-tag tag-lang">
+        ● Language &amp; Debugging
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-emerald)">language</div>
+        <div class="mod-detail">Incremental Tree-sitter, pooled cursors, syntax layers</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-emerald)">lsp &amp; dap</div>
+        <div class="mod-detail">Async LSP clients, diagnostics, hover, breakpoints &amp; stepping</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-emerald)">extension_host</div>
+        <div class="mod-detail">Wasm/WASI plugin engine for community languages &amp; themes</div>
+      </div>
+    </div>
+
+    <!-- Column 3: AI & Next-Edit Prediction -->
+    <div class="col-layer">
+      <div class="layer-tag tag-agent">
+        ● Agent &amp; Prediction
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-amber)">agent &amp; skills</div>
+        <div class="mod-detail">Autonomous agent loop, MCP servers &amp; context injection</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-amber)">edit_prediction</div>
+        <div class="mod-detail">Zeta inline autocomplete, multi-token speculative editing</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-amber)">language_models</div>
+        <div class="mod-detail">Unified client: Claude, OpenAI, Gemini, Bedrock, Ollama</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inter-layer flow indicator -->
+  <div class="connector-v">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+    <span>background executor &amp; snapshot sharing (Arc / CoW)</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+  </div>
+
+  <!-- Layer 3: Project, FS & Collaboration -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-tag tag-core">
+        ● Layer 3: Project Coordination &amp; Networking
+      </span>
+      <span class="layer-desc">Async FS · Git · Remote SSH Server · Real-time Collab</span>
+    </div>
+    <div class="modules-row">
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">project &amp; worktree</div>
+        <div class="mod-detail">Filesystem snapshot, gitignore filtering, file watchers, LSP coordinator</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">collab &amp; rpc</div>
+        <div class="mod-detail">Protobuf messaging, Lamport clocks, peer-to-peer buffer replication</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">remote_server</div>
+        <div class="mod-detail">Headless server daemon running on remote machines over SSH / WSL</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-blue)">livekit_client</div>
+        <div class="mod-detail">In-editor voice channels and multi-user screen sharing</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Layer 4: GPUI Platform Engine -->
+  <div class="layer">
+    <div class="layer-header">
+      <span class="layer-tag tag-platform">
+        ● Layer 4: GPUI Foundation &amp; Hardware Acceleration
+      </span>
+      <span class="layer-desc">gpui crate · Metal / Vulkan / DirectX · Tokio &amp; Thread Pools</span>
+    </div>
+    <div class="modules-row">
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-rose)">gpui (core engine)</div>
+        <div class="mod-detail">Entity-Component reactive model, Scene batching, Text rasterization</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-rose)">gpui_platform</div>
+        <div class="mod-detail">Metal (macOS), Vulkan/X11/Wayland (Linux), Direct3D (Windows)</div>
+      </div>
+      <div class="mod-card">
+        <div class="mod-name" style="color: var(--accent-rose)">gpui_tokio &amp; util</div>
+        <div class="mod-detail">Async executors: main UI thread loop + background compute threads</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-summary">
+    <strong>Key Architectural Trait:</strong> Unlike Electron editors that bridge web technologies across process boundaries via IPC, Zed runs everything in native Rust compiled directly to machine code. Background threads hold immutable <code>SumTree</code> snapshots of text, syntax trees, and worktrees to calculate syntax highlighting, git diffs, and LSP diagnostics concurrently without ever blocking the 120 FPS GPU render loop.
+  </div>
+</div>
+</body>
+</html>
