@@ -148,6 +148,10 @@ while True:
             continue
         send({"jsonrpc": "2.0", "id": message["id"], "result": [{"title": "Fix answer", "edit": {"changes": {params["textDocument"]["uri"]: [{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}, "newText": "fixed"}]}}}]})
     elif method == "textDocument/completion":
+        if mode == "benchmark":
+            assert params["textDocument"]["uri"] in opened
+            send({"jsonrpc": "2.0", "id": message["id"], "result": []})
+            continue
         character = params["position"]["character"]
         assert character in ((3, 4) if mode in ("host", "host-completion-exit") else (3,))
         if mode == "host-completion-exit" and character == 4:

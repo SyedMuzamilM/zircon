@@ -41,7 +41,7 @@ def make_project(root, size, services, wrap):
                 "languages": [{"id": "python", "name": "Python", "extensions": ["py"],
                                "grammar": {"builtin": True, "name": "python", "wasm": "", "highlights": ""}}],
                 "language_servers": [{"id": "baseline.fixture", "languages": ["python"], "command": sys.executable,
-                                      "args": [str(REPO / "packages/zircon_language/tests/fixture.py"), "host"]}]
+                                      "args": [str(REPO / "packages/zircon_language/tests/fixture.py"), "benchmark"]}]
             }
         }
         (extension / "extension.json").write_text(json.dumps(manifest))

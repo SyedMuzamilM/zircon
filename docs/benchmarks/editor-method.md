@@ -15,7 +15,7 @@ The driver reads only generated fixtures and isolated settings/extensions. Each 
 
 ## Workload
 
-The repeated matrix has 32 KiB and 1 MiB UTF-8 Python sources, each with wrap off/on and core/services configurations. Every source has repeated indented long lines and Unicode comments. Services means a real local Git repository, the packaged built-in Python Tree-sitter worker and a deterministic stdio language-server fixture. Core disables those services to diagnose their contribution. It is a different feature configuration, not a competing editor or proof that services are unnecessary.
+The repeated matrix has 32 KiB and 1 MiB UTF-8 Python sources, each with wrap off/on and core/services configurations. Every source has repeated indented long lines and Unicode comments. Services means a real local Git repository, the packaged built-in Python Tree-sitter worker and a deterministic stdio language-server fixture that answers completion requests with an empty list. Core disables those services to diagnose their contribution. It is a different feature configuration, not a competing editor or proof that services are unnecessary.
 
 The driver warms the initial workspace/services, positions the caret at a middle source line, then alternates insertion of `x` and Backspace twenty times with a 50 ms idle gap between inputs. The gap is outside the timed region. CPU work adds to that interval, so this is not an exact 20 Hz arrival schedule. The initial generated text and final in-memory text must match, revision must increase twenty times, and every input must cause a frame submission. The final content is deliberately still dirty: insert/delete is editing, not undo to the saved content identity.
 

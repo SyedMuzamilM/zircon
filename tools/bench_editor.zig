@@ -23,6 +23,9 @@ const Ops = struct {
         std.debug.print("Wait state: status={s}; error={}; git_busy={}; syntax_waiting={}\n", .{ self.status, self.status_is_error, self.git.busy, self.language.syntax_waiting });
         for (self.language.syntax_documents.items) |doc| std.debug.print("syntax pending={} revision={?}\n", .{ doc.pending, doc.revision });
         for (self.language.documents.items) |doc| std.debug.print("LSP version={?} diagnostics={}\n", .{ doc.version, doc.diagnostics != null });
+        for (self.language.sessions.items) |session| if (session.client) |client| {
+            std.debug.print("LSP state={s} stats={any}\n", .{ @tagName(client.status()), client.stats() });
+        };
         for (self.tabs.items) |tab| std.debug.print("editor grammar revision={?}\n", .{tab.editor.grammar_revision});
     }
     fn configure(self: *Shell, cx: *ui.Context(Shell), root: []const u8, services: bool) !void {
@@ -71,7 +74,7 @@ const Ops = struct {
         var source = record.doc.snapshot();
         defer source.deinit();
         if ((tab.editor.soft_wrap != .none) != wrap) return error.WrongWrapConfiguration;
-        if (wrap and (tab.editor.wrap_cache.builds == 0 or tab.editor.wrap_cache.rows.items.len <= source.lineCount())) return error.WrapWorkDidNotHappen;
+        if (wrap and (tab.editor.wrap_cache.builds == 0 or tab.editor.wrap_cache.rowCount() <= source.lineCount())) return error.WrapWorkDidNotHappen;
     }
     fn counts(self: *const Shell) Counts {
         const g = git.processStats();
@@ -99,6 +102,11 @@ const Ops = struct {
         if (!std.mem.eql(u8, expected, bytes)) return error.SourceBytesChanged;
         if (!(try self.workspace.dirty(self.tabs.items[self.active].document))) return error.EditsDidNotReachDocument;
         return source.revision();
+    }
+    fn checkServices(self: *const Shell) !void {
+        if (!self.status_is_error) return;
+        explainWait(self);
+        return error.BackgroundServiceFailed;
     }
 };
 fn settle(app: *ui.App, owner: ui.Entity(Shell), io: std.Io, services: bool) !void {
@@ -153,6 +161,7 @@ pub fn main(init: std.process.Init) !void {
         dispatch_sample.* = (dispatched - start) * 1000;
         pump_sample.* = (submitted - dispatched) * 1000;
         sample.* = (submitted - start) * 1000;
+        if (services) try app.read(owner, Ops.checkServices, .{});
         // Leave a 50 ms idle gap between inputs for actual owned workers.
         try std.Io.sleep(init.io, .fromMilliseconds(50), .awake);
     }
