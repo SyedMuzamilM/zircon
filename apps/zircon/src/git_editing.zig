@@ -13,6 +13,7 @@ const commands = @import("commands.zig");
 const git_selection = @import("git_selection.zig");
 const multibuffer_editing = @import("multibuffer_editing.zig");
 const services_git = @import("services/git.zig");
+const services_save = @import("services/save.zig");
 const shell = @import("shell.zig");
 const Shell = shell.Shell;
 const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
@@ -134,7 +135,6 @@ fn renderBlockAt(self: *const Shell, b: *ui.Ui, original: git.Line, path: []cons
     };
     state.horizontal = self.git.editing.horizontal;
     state.show_scrollbars = false;
-    state.soft_wrap = self.editor_options.soft_wrap;
     const gutter = if (state.show_line_numbers) editing.gutterWidth(snapshot.lineCount(), state.font_size) else 20;
     if (state.soft_wrap != .none) {
         const metrics = (try b.frame.app.?.window(self.window.?)).surface.?.measurer();
@@ -306,11 +306,9 @@ pub fn getView(self: *Shell, id: ws.DocumentId) !*View {
     var editor = try editing.Editor.init(a);
     errdefer editor.deinit();
     const record = try self.workspace.getConst(id);
-    self.configureEditor(&editor, record.path orelse "");
-    editor.soft_wrap = self.editor_options.soft_wrap;
+    self.configureDocumentEditor(&editor, id, record.path orelse "");
     editor.show_fold_controls = false;
     editor.show_git_gutters = false;
-    editor.show_indent_guides = self.editor_options.indent_guides;
     var snapshot = record.doc.snapshot();
     defer snapshot.deinit();
     editor.synchronize(snapshot);
@@ -427,9 +425,10 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !b
     if (which == .save) {
         if (self.git.selected_commit.len == 0 and !self.git.staged_diff and !self.git.stash_view) {
             for (self.git.editing.views.items) |view| {
-                if (try self.workspace.dirty(view.document)) try self.workspace.save(view.document, null);
+                if (try self.workspace.dirty(view.document)) {
+                    try services_save.saveDocument(self, cx, view.document, .{ .quiet = true, .refresh_git = true });
+                }
             }
-            try services_git.start(self, cx, .refresh);
             cx.notify();
         }
         return true;
@@ -438,7 +437,7 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !b
         self.editor_options.font_size = std.math.clamp(self.editor_options.font_size + @as(f32, if (which == .zoom_in) 1 else -1), 10, 26);
         for (self.git.editing.views.items) |*view| {
             view.editor.font_size = self.editor_options.font_size;
-            view.editor.line_height = self.editor_options.font_size * self.editor_options.line_height;
+            view.editor.line_height = self.editor_options.font_size * self.bufferSettings(self.documentLanguage(view.document)).line_height;
         }
         cx.notify();
         return true;

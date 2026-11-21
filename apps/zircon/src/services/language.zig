@@ -11,6 +11,7 @@ const actions = @import("../actions.zig");
 const model = @import("../settings/model.zig");
 const shell = @import("../shell.zig");
 const host = @import("extension_host.zig");
+const save = @import("save.zig");
 const symbol_hover = @import("symbol_hover.zig");
 const workspace_edits = @import("workspace_edits.zig");
 const Shell = shell.Shell;
@@ -40,7 +41,15 @@ pub const Pending = struct { document: ws.DocumentId, session: usize, request: u
 const PendingDefinition = struct { document: ws.DocumentId, session: usize, request: u64, revision: u64 };
 const PendingReferences = PendingDefinition;
 const PendingRename = workspace_edits.Pending;
-const PendingFormatting = PendingDefinition;
+const PendingFormatting = struct {
+    document: ws.DocumentId,
+    session: usize,
+    epoch: u64,
+    request: u64,
+    revision: u64,
+    save_options: ?save.Options = null,
+    due: f64,
+};
 const PendingSignature = PendingDefinition;
 const PendingCodeActions = workspace_edits.Pending;
 pub const Model = struct {
@@ -59,7 +68,7 @@ pub const Model = struct {
     references: ?lsp.Message = null,
     references_pending: ?PendingReferences = null,
     rename_pending: ?PendingRename = null,
-    formatting_pending: ?PendingFormatting = null,
+    formatting: std.ArrayList(PendingFormatting) = .empty,
     signature: ?lsp.Message = null,
     signature_pending: ?PendingSignature = null,
     code_actions: ?lsp.Message = null,
@@ -102,9 +111,6 @@ pub const Model = struct {
         if (self.rename_pending) |*pending| pending.deinit();
         self.rename_pending = null;
     }
-    pub fn clearFormatting(self: *Model) void {
-        self.formatting_pending = null;
-    }
     pub fn clearSignature(self: *Model) void {
         if (self.signature) |*value| value.deinit();
         self.signature = null;
@@ -121,7 +127,7 @@ pub const Model = struct {
         self.clearDefinition();
         self.clearReferences();
         self.clearRename();
-        self.clearFormatting();
+        self.formatting.deinit(a);
         self.clearSignature();
         self.clearCodeActions();
         for (self.documents.items) |*doc| {
@@ -256,11 +262,13 @@ fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const zircon_extens
 /// Full text is serialized only for didOpen or a newer document revision.
 pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
     const snapshot = self.extension_snapshot orelse {
+        try expireFormatting(self, cx);
         if (try syncDiagnostics(self)) cx.notify();
         return;
     };
     try pollSyntax(self, cx);
     if (self.language_stopped) {
+        try expireFormatting(self, cx);
         if (try syncDiagnostics(self)) cx.notify();
         return;
     }
@@ -307,18 +315,8 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         const doc = &self.language.documents.items[index];
         const client = self.language.sessions.items[doc.session].client orelse continue;
         if (!client.ready()) continue;
-        var source = record.doc.snapshot();
-        defer source.deinit();
-        if (source.byteLen() > 8 * 1024 * 1024) continue;
-        if (doc.version) |version| {
-            if (version == source.revision()) continue;
-            if (self.documentChangeSince(doc.id, version, source.revision())) |change| {
-                try client.didChangeEdits(doc.uri, change.before, source, change.mappings);
-            } else try client.didChange(doc.uri, source);
-            if (doc.diagnostics) |*value| value.deinit();
-            doc.diagnostics = null;
-        } else try client.didOpen(doc.uri, if (snapshot.languageForPath(self.languagePath(tab.document, path))) |language| language.lsp_id orelse language.id else language_id, source);
-        doc.version = source.revision();
+        const lsp_id = if (snapshot.languageForPath(self.languagePath(tab.document, path))) |language| language.lsp_id orelse language.id else language_id;
+        try syncDocument(self, doc, client, record, lsp_id);
     }
     for (self.language.sessions.items, 0..) |session, session_index| if (!session.retired) if (session.client) |client| {
         const messages = try client.drain(self.allocator);
@@ -333,6 +331,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                 .initialized => changed = true,
                 .exited => {
                     if (self.language.pending) |pending| if (pending.session == session_index) self.language.clearCompletion();
+                    try flushFormatting(self, cx, session_index);
                     try self.setStatus(try std.fmt.allocPrint(self.allocator, "Language server {s} stopped. Run Language: restart servers to retry.", .{session.id}));
                     self.status_is_error = true;
                     changed = true;
@@ -344,7 +343,13 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     };
                     if (self.language.pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearCompletion();
                     if (self.language.rename_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearRename();
-                    if (self.language.formatting_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearFormatting();
+                    if (failure.request_id) |request_id| if (takeFormatting(self, session_index, request_id)) |pending| {
+                        if (pending.save_options != null) {
+                            try finishFormattingSave(self, cx, pending);
+                            changed = true;
+                            continue;
+                        }
+                    };
                     if (self.language.code_actions_pending) |pending| if (pending.session == session_index and failure.request_id == pending.request) self.language.clearCodeActions();
                     try self.setStatus(try self.allocator.dupe(u8, failure.message));
                     self.status_is_error = true;
@@ -417,10 +422,20 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     workspace_edits.apply(self, cx, pending, value.files, .project_edit) catch |err| try self.reportError(err);
                     changed = true;
                 },
-                .edits => |value| if (self.language.formatting_pending) |pending| {
-                    if (pending.session != session_index or pending.request != value.id or pending.revision != value.version) continue;
-                    defer self.language.clearFormatting();
-                    acceptFormatting(self, cx, value.items) catch |err| try self.reportError(err);
+                .edits => |value| if (takeFormatting(self, session_index, value.id)) |pending| {
+                    const record = self.workspace.getConst(pending.document) catch continue;
+                    const current = record.doc.revision() == pending.revision;
+                    const matching = current and value.version == pending.revision and matchingFormattingUri(self, pending, value.uri);
+                    if (matching and value.items.len != 0) {
+                        acceptFormatting(self, cx, pending, value.items) catch |err| {
+                            if (pending.save_options == null) try self.reportError(err);
+                        };
+                    }
+                    if (pending.save_options) |options| {
+                        if (current or !options.automatic) {
+                            save.saveNow(self, cx, pending.document, null, options) catch |err| try self.reportError(err);
+                        }
+                    } else if (!matching) try self.reportError(error.StaleFormatting);
                     changed = true;
                 },
                 .signature_help => |value| if (self.language.signature_pending) |pending| {
@@ -446,8 +461,25 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             }
         }
     };
+    try expireFormatting(self, cx);
     if (try syncDiagnostics(self)) changed = true;
     if (changed) cx.notify();
+}
+
+fn syncDocument(self: *Shell, doc: *Document, client: *lsp.Client, record: *const ws.Record, language_id: ?[]const u8) !void {
+    const revision = record.doc.revision();
+    if (doc.version == revision) return;
+    var source = record.doc.snapshot();
+    defer source.deinit();
+    if (source.byteLen() > 8 * 1024 * 1024) return;
+    if (doc.version) |version| {
+        if (self.documentChangeSince(doc.id, version, revision)) |change| {
+            try client.didChangeEdits(doc.uri, change.before, source, change.mappings);
+        } else try client.didChange(doc.uri, source);
+        if (doc.diagnostics) |*value| value.deinit();
+        doc.diagnostics = null;
+    } else try client.didOpen(doc.uri, language_id orelse return error.DocumentNotOpen, source);
+    doc.version = revision;
 }
 
 pub fn severityOf(value: @FieldType(lsp.Diagnostic, "severity")) zircon_editor.element.Severity {
@@ -743,19 +775,136 @@ pub fn requestRename(self: *Shell, cx: *ui.Context(Shell), new_name: []const u8)
 }
 
 pub fn requestFormatting(self: *Shell, cx: *ui.Context(Shell)) !void {
-    try poll(self, cx);
     const current = try actions.active(self);
-    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, current.id)) {
-        const client = self.language.sessions.items[doc.session].client orelse return error.ServerNotReady;
-        var snapshot = try self.workspace.snapshot(current.id);
-        defer snapshot.deinit();
-        const request_id = try client.formatting(doc.uri, snapshot.revision());
-        self.language.clearFormatting();
-        self.language.formatting_pending = .{ .document = current.id, .session = doc.session, .request = request_id, .revision = snapshot.revision() };
+    try poll(self, cx);
+    try startFormatting(self, cx, current.id, null);
+}
+
+pub fn requestFormattingForSave(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, options: save.Options) !bool {
+    if (self.language_stopped or self.extension_snapshot == null) return false;
+    startFormatting(self, cx, id, options) catch |err| switch (err) {
+        error.NoLanguageServer, error.ServerNotReady, error.FormattingNotSupported, error.StaleDocumentVersion, error.DocumentNotOpen => return false,
+        else => return err,
+    };
+    return true;
+}
+
+fn startFormatting(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, options: ?save.Options) !void {
+    const record = try self.workspace.getConst(id);
+    const revision = record.doc.revision();
+    for (self.language.documents.items) |*doc| if (std.meta.eql(doc.id, id)) {
+        const session = self.language.sessions.items[doc.session];
+        const client = session.client orelse return error.ServerNotReady;
+        if (!client.ready()) return error.ServerNotReady;
+        for (self.language.formatting.items) |*pending| {
+            if (!std.meta.eql(pending.document, id) or pending.revision != revision or
+                pending.session != doc.session or pending.epoch != session.epoch) continue;
+            pending.save_options = save.Options.merge(pending.save_options, options);
+            return;
+        }
+        const due = try cx.app.currentTime() + 2;
+        try self.language.formatting.ensureUnusedCapacity(self.allocator, 1);
+        const tab_width = self.bufferSettings(self.documentLanguage(id)).tab_width;
+        // Advance this document without draining unrelated language actions
+        // while a caller may be iterating a group of files to save.
+        try syncDocument(self, doc, client, record, null);
+        const request_id = try client.formattingWithTabSize(doc.uri, revision, tab_width);
+        const previous = cancelFormatting(self, id);
+        const next_options = save.Options.merge(if (previous) |pending| pending.save_options else null, options);
+        self.language.formatting.appendAssumeCapacity(.{
+            .document = id,
+            .session = doc.session,
+            .epoch = session.epoch,
+            .request = request_id,
+            .revision = revision,
+            .save_options = next_options,
+            .due = due,
+        });
         cx.notify();
         return;
     };
     return error.NoLanguageServer;
+}
+
+pub fn cancelFormatting(self: *Shell, id: ws.DocumentId) ?PendingFormatting {
+    for (self.language.formatting.items, 0..) |pending, i| if (std.meta.eql(pending.document, id)) {
+        const removed = self.language.formatting.swapRemove(i);
+        cancelFormattingRequest(self, removed);
+        return removed;
+    };
+    return null;
+}
+
+fn takeFormatting(self: *Shell, session: usize, request_id: u64) ?PendingFormatting {
+    const epoch = self.language.sessions.items[session].epoch;
+    for (self.language.formatting.items, 0..) |pending, i| {
+        if (pending.session == session and pending.epoch == epoch and pending.request == request_id) {
+            return self.language.formatting.swapRemove(i);
+        }
+    }
+    return null;
+}
+
+fn cancelFormattingRequest(self: *Shell, pending: PendingFormatting) void {
+    const session = self.language.sessions.items[pending.session];
+    if (session.epoch != pending.epoch) return;
+    if (session.client) |client| client.cancel(pending.request) catch {};
+}
+
+fn matchingFormattingUri(self: *const Shell, pending: PendingFormatting, uri: []const u8) bool {
+    for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, pending.document)) {
+        return doc.session == pending.session and std.mem.eql(u8, doc.uri, uri);
+    };
+    return false;
+}
+
+pub fn nextFormattingDeadline(self: *const Shell) ?f64 {
+    var next: ?f64 = null;
+    for (self.language.formatting.items) |pending| next = @min(next orelse pending.due, pending.due);
+    return next;
+}
+
+fn expireFormatting(self: *Shell, cx: *ui.Context(Shell)) !void {
+    if (self.language.formatting.items.len == 0) return;
+    const now = try cx.app.currentTime();
+    var i: usize = 0;
+    while (i < self.language.formatting.items.len) {
+        if (self.language.formatting.items[i].due > now) {
+            i += 1;
+            continue;
+        }
+        const pending = self.language.formatting.swapRemove(i);
+        cancelFormattingRequest(self, pending);
+        try finishFormattingSave(self, cx, pending);
+    }
+}
+
+fn flushFormatting(self: *Shell, cx: *ui.Context(Shell), session: ?usize) !void {
+    var i: usize = 0;
+    while (i < self.language.formatting.items.len) {
+        if (session != null and self.language.formatting.items[i].session != session.?) {
+            i += 1;
+            continue;
+        }
+        const pending = self.language.formatting.swapRemove(i);
+        cancelFormattingRequest(self, pending);
+        try finishFormattingSave(self, cx, pending);
+    }
+}
+
+fn finishFormattingSave(self: *Shell, cx: *ui.Context(Shell), pending: PendingFormatting) !void {
+    const options = pending.save_options orelse return;
+    const record = self.workspace.getConst(pending.document) catch return;
+    if (options.automatic and record.doc.revision() != pending.revision) return;
+    save.saveNow(self, cx, pending.document, null, options) catch |err| {
+        try self.reportError(err);
+        cx.notify();
+    };
+}
+
+pub fn reset(self: *Shell, cx: *ui.Context(Shell)) !void {
+    try flushFormatting(self, cx, null);
+    self.language.deinit(self.allocator);
 }
 
 pub fn requestSignature(self: *Shell, cx: *ui.Context(Shell)) !void {
@@ -808,8 +957,7 @@ pub fn applyCodeAction(self: *Shell, cx: *ui.Context(Shell), index: usize) !void
     try workspace_edits.apply(self, cx, pending, message.data.code_actions.items[index].files, .project_edit);
 }
 
-fn acceptFormatting(self: *Shell, cx: *ui.Context(Shell), items: []const lsp.TextEdit) !void {
-    const pending = self.language.formatting_pending orelse return;
+fn acceptFormatting(self: *Shell, cx: *ui.Context(Shell), pending: PendingFormatting, items: []const lsp.TextEdit) !void {
     const record = try self.workspace.getConst(pending.document);
     if (record.doc.revision() != pending.revision) return error.StaleFormatting;
     const uri = try lsp.fileUri(self.allocator, record.path orelse return error.NoDocument);

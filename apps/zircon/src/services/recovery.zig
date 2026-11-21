@@ -159,7 +159,7 @@ fn restore(self: *Shell, model: *Model, loaded: *storage.Loaded) !void {
         }
         var editor = try editing.Editor.init(self.allocator);
         errdefer editor.deinit();
-        self.configureEditor(&editor, metadata.language_path orelse metadata.path orelse "");
+        self.configureEditorForLanguage(&editor, metadata.language_path orelse metadata.path orelse "", metadata.language_name);
         restoreView(&editor, (try restored.workspace.getConst(id)).doc.snapshot(), metadata.view);
         const language_path = if (metadata.language_path) |path| try self.allocator.dupe(u8, path) else null;
         errdefer if (language_path) |path| self.allocator.free(path);
@@ -169,7 +169,7 @@ fn restore(self: *Shell, model: *Model, loaded: *storage.Loaded) !void {
         errdefer if (secondary) |*value| value.deinit();
         if (metadata.secondary_view) |secondary_view| {
             secondary = try editing.Editor.init(self.allocator);
-            self.configureEditor(&secondary.?, metadata.language_path orelse metadata.path orelse "");
+            self.configureEditorForLanguage(&secondary.?, metadata.language_path orelse metadata.path orelse "", metadata.language_name);
             restoreView(&secondary.?, (try restored.workspace.getConst(id)).doc.snapshot(), secondary_view);
         }
         restored.tabs.appendAssumeCapacity(.{ .document = id, .editor = editor, .primary = metadata.primary, .secondary = metadata.secondary, .secondary_state = secondary, .language_path = language_path, .language_name = language_name });

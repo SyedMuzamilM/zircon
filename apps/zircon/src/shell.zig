@@ -15,6 +15,7 @@ const key_bindings_module = @import("key_bindings.zig");
 const panes = @import("panes.zig");
 const projects = @import("projects.zig");
 const recent_module = @import("recent.zig");
+const search_editing = @import("search_editing.zig");
 const search_selection = @import("search_selection.zig");
 const services_agents = @import("services/agents.zig");
 const buffer_find = @import("services/buffer_find.zig");
@@ -26,6 +27,7 @@ const services_icons = @import("services/icons.zig");
 const services_language = @import("services/language.zig");
 const services_project = @import("services/project.zig");
 const services_recovery = @import("services/recovery.zig");
+const services_save = @import("services/save.zig");
 const services_search = @import("services/search.zig");
 const symbol_hover = @import("services/symbol_hover.zig");
 const model = @import("settings/model.zig");
@@ -125,6 +127,9 @@ pub const Shell = struct {
     active_icon_theme: []u8 = &.{},
     icons: services_icons.Cache = .{},
     settings: ?ui.Entity(model.Settings) = null,
+    settings_app: ?ui.App = null,
+    saving_document: ?workspace.DocumentId = null,
+    autosave_deadlines: std.ArrayList(services_save.Deadline) = .empty,
     settings_window: ?ui.WindowHandle = null,
     colors: theme_module.Palette = .{},
     editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, cursor: editor.cursor.Config = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
@@ -195,6 +200,7 @@ pub const Shell = struct {
         self.catalog.deinit();
         self.agents.deinit(self.allocator);
         self.language.deinit(self.allocator);
+        self.autosave_deadlines.deinit(self.allocator);
         if (self.highlight_session) |session| session.release();
         if (self.extension_host_cached) |path| self.allocator.free(path);
         if (self.image) |*asset| asset.deinit(self.allocator);
@@ -240,6 +246,7 @@ pub const Shell = struct {
     }
     pub fn loadSettings(self: *Shell, cx: *ui.Context(Shell), path: ?[]const u8) !void {
         const Settings = model.Settings;
+        self.settings_app = cx.app;
         var value = try Settings.init(self.allocator, self.workspace.io, path);
         self.settings = cx.app.createEntity(Settings, value) catch |err| {
             value.deinit(self.allocator);
@@ -269,7 +276,7 @@ pub const Shell = struct {
             registry.deinit();
             return err;
         };
-        self.language.deinit(self.allocator);
+        try services_language.reset(self, cx);
         if (old_snapshot) |*old| old.deinit();
         if (old_registry) |*old| old.deinit();
         cx.notify();
@@ -279,10 +286,11 @@ pub const Shell = struct {
     }
     pub fn onSettings(self: *Shell, cx: *ui.Context(Shell), settings: ui.Entity(model.Settings)) !void {
         const preferences = model;
+        self.settings_app = cx.app;
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         var values: preferences.Values = undefined;
-        try cx.read(settings, preferences.Settings.copy, .{ arena.allocator(), &values });
+        try cx.read(settings, preferences.Settings.copyResolved, .{ self.workspace.root_path, arena.allocator(), &values });
         self.key_bindings = values.key_bindings;
         self.terminal.dock = values.terminal_dock;
         self.agent_mode = false;
@@ -325,43 +333,11 @@ pub const Shell = struct {
         const light = theme_module.isLight(values.theme, self.system_dark);
         const cursor: editor.cursor.Config = .{ .shape = values.cursor_shape, .blink = values.cursor_blink, .smooth = values.smooth_cursor and !values.reduced_motion };
         self.colors = if (light) theme_module.Palette.light else .{};
-        for (self.tabs.items) |*tab| {
-            tab.editor.soft_wrap = values.soft_wrap;
-            tab.editor.wrap_cache.revision = null;
-            tab.editor.setVim(values.vim_mode);
-            tab.editor.vim.bindings = values.vim_bindings;
-            tab.editor.cursor_config = cursor;
-            tab.editor.font_size = values.font_size;
-            tab.editor.line_height = values.font_size * values.line_height;
-            tab.editor.tab_width = values.tab_width;
-            tab.editor.show_line_numbers = values.line_numbers;
-            tab.editor.theme = if (light) editor.Theme.light else .{};
-            tab.editor.show_git_gutters = values.git_gutters;
-            tab.editor.show_indent_guides = values.indent_guides;
-            tab.editor.highlight_active_line = values.active_line;
-            tab.editor.show_fold_controls = values.fold_controls;
-        }
-        if (self.secondary) |*pane| {
-            pane.editor.soft_wrap = values.soft_wrap;
-            pane.editor.wrap_cache.revision = null;
-            pane.editor.setVim(values.vim_mode);
-            pane.editor.vim.bindings = values.vim_bindings;
-            pane.editor.cursor_config = cursor;
-            pane.editor.font_size = values.font_size;
-            pane.editor.line_height = values.font_size * values.line_height;
-            pane.editor.tab_width = values.tab_width;
-            pane.editor.show_line_numbers = values.line_numbers;
-            pane.editor.theme = if (light) editor.Theme.light else .{};
-            pane.editor.show_git_gutters = values.git_gutters;
-            pane.editor.show_indent_guides = values.indent_guides;
-            pane.editor.highlight_active_line = values.active_line;
-            pane.editor.show_fold_controls = values.fold_controls;
-        }
         self.allocator.free(self.active_icon_theme);
         self.active_icon_theme = icon_theme;
         self.icons.deinit(self.allocator);
         self.icons = icons;
-        self.editor_options.theme = if (light) editor.Theme.light else .{};
+        self.editor_options = .{ .indent_guides = values.indent_guides, .active_line = values.active_line, .fold_controls = values.fold_controls, .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .cursor = cursor, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = if (light) editor.Theme.light else .{} };
         services_extensions.applyTheme(self, values.theme);
         if (self.window) |handle| if ((try cx.app.window(handle)).surface) |surface| {
             const background = self.colors.document;
@@ -371,7 +347,9 @@ pub const Shell = struct {
         if (self.preview) |*preview| preview.view.colors = self.previewColors();
         for (self.tabs.items) |*tab| {
             const record = self.workspace.getConst(tab.document) catch unreachable;
-            services_extensions.applyLanguage(self, &tab.editor, self.languagePath(tab.document, record.path orelse ""));
+            const path = tab.language_path orelse record.path orelse "";
+            self.configureEditorForLanguage(&tab.editor, path, tab.language_name);
+            if (tab.secondary_state) |*state| self.configureEditorForLanguage(state, path, tab.language_name);
             tab.editor.syntax_cache.clear();
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
@@ -380,33 +358,28 @@ pub const Shell = struct {
         }
         if (self.secondary) |*pane| {
             const record = self.workspace.getConst(pane.document) catch unreachable;
-            services_extensions.applyLanguage(self, &pane.editor, self.languagePath(pane.document, record.path orelse ""));
+            self.configureDocumentEditor(&pane.editor, pane.document, record.path orelse "");
             pane.editor.syntax_cache.clear();
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
             pane.editor.synchronize(snapshot);
             try actions.prepareEditor(self, cx, &pane.editor, snapshot, "secondary-editor");
         }
-        self.editor_options = .{ .indent_guides = values.indent_guides, .active_line = values.active_line, .fold_controls = values.fold_controls, .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .cursor = cursor, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
         for (self.git.editing.views.items) |*view| {
             const record = self.workspace.getConst(view.document) catch continue;
-            self.configureEditor(&view.editor, record.path orelse "");
-            view.editor.soft_wrap = values.soft_wrap;
+            self.configureDocumentEditor(&view.editor, view.document, record.path orelse "");
             view.editor.show_fold_controls = false;
             view.editor.show_git_gutters = false;
-            view.editor.show_indent_guides = values.indent_guides;
         }
         for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| {
             const record = self.workspace.getConst(view.document) catch continue;
-            self.configureEditor(&view.editor, self.languagePath(view.document, record.path orelse ""));
-            view.editor.soft_wrap = .none;
-            view.editor.show_fold_controls = false;
-            view.editor.show_git_gutters = false;
-            view.editor.show_scrollbars = false;
+            self.configureDocumentEditor(&view.editor, view.document, record.path orelse "");
+            search_editing.configureProjection(&view.editor);
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
             view.editor.synchronize(snapshot);
         };
+        search_editing.refreshMetrics(self);
         try self.styleInputs(cx);
         cx.notify();
     }
@@ -424,19 +397,58 @@ pub const Shell = struct {
         for (self.tabs.items) |tab| if (std.meta.eql(tab.document, id)) return tab.language_name;
         return null;
     }
+    const LanguageIdentity = struct { id: []const u8, name: []const u8 };
+
+    pub fn documentLanguage(self: *const Shell, id: workspace.DocumentId) LanguageIdentity {
+        const record = self.workspace.getConst(id) catch return .{ .id = "plain", .name = "Plain text" };
+        return self.languageFor(self.languagePath(id, record.path orelse ""), self.languageName(id));
+    }
+
+    pub fn languageFor(self: *const Shell, path: []const u8, name: ?[]const u8) LanguageIdentity {
+        if (self.extension_snapshot) |snapshot| if (snapshot.languageForPath(path)) |language| {
+            return .{ .id = language.id, .name = name orelse language.name };
+        };
+        const language = editor.syntax.languageForPath(path);
+        const display = switch (language) {
+            .zig => "Zig",
+            .rust => "Rust",
+            .json => "JSON",
+            .markdown => "Markdown",
+            .custom => "Extension",
+            .plain => "Plain text",
+        };
+        return .{ .id = @tagName(language), .name = name orelse display };
+    }
+
+    pub fn bufferSettings(self: *const Shell, language: LanguageIdentity) model.BufferSettings {
+        var app = self.settings_app orelse return .{};
+        const settings = self.settings orelse return .{};
+        return app.read(settings, model.Settings.bufferSettings, .{ self.workspace.root_path, language.id, language.name }) catch .{};
+    }
+
+    pub fn configureDocumentEditor(self: *Shell, state: *editor.Editor, id: workspace.DocumentId, fallback: []const u8) void {
+        self.configureEditorForLanguage(state, self.languagePath(id, fallback), self.languageName(id));
+    }
+
     pub fn configureEditor(self: *Shell, state: *editor.Editor, path: []const u8) void {
+        self.configureEditorForLanguage(state, path, null);
+    }
+
+    pub fn configureEditorForLanguage(self: *Shell, state: *editor.Editor, path: []const u8, name: ?[]const u8) void {
         const options = self.editor_options;
-        state.show_indent_guides = options.indent_guides;
+        const resolved = self.bufferSettings(self.languageFor(path, name));
+        state.show_indent_guides = resolved.indent_guides;
         state.highlight_active_line = options.active_line;
-        state.show_fold_controls = options.fold_controls;
-        state.soft_wrap = options.soft_wrap;
+        state.show_fold_controls = resolved.fold_controls;
+        state.soft_wrap = resolved.soft_wrap;
+        state.wrap_cache.revision = null;
         state.setVim(options.vim_mode);
         state.vim.bindings = options.vim_bindings;
         state.cursor_config = options.cursor;
         state.font_size = options.font_size;
-        state.line_height = options.font_size * options.line_height;
-        state.tab_width = options.tab_width;
-        state.show_line_numbers = options.line_numbers;
+        state.line_height = options.font_size * resolved.line_height;
+        state.tab_width = resolved.tab_width;
+        state.show_line_numbers = resolved.line_numbers;
         state.show_git_gutters = options.git_gutters;
         state.theme = options.theme;
         services_extensions.applyLanguage(self, state, path);
@@ -585,9 +597,11 @@ pub const Shell = struct {
     pub fn onGlobal(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
         try actions.globalInput(self, e, cx);
     }
-    pub fn onPaneInput(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) void {
+    pub fn onPaneInput(self: *Shell, event: *ui.Event(ui.Input), cx: *ui.Context(Shell), pane: u8) !void {
         if (event.data == .pointer_down) {
+            const previous = actions.activeDocument(self);
             self.active_pane = if (pane == 1) .secondary else .primary;
+            try services_save.focusChanged(self, cx, previous);
             cx.notify();
         }
     }
@@ -601,9 +615,11 @@ pub const Shell = struct {
     pub fn onTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), target: u32) !void {
         self.language.clearCompletion();
         self.symbol_hover.deinit(self.allocator);
+        const previous = actions.activeDocument(self);
         const index = target & 0x7fffffff;
         if (target & 0x80000000 != 0) {
             if (index < self.tabs.items.len) try panes.selectSecondary(self, index);
+            try services_save.focusChanged(self, cx, previous);
             cx.notify();
             return;
         }
@@ -612,6 +628,7 @@ pub const Shell = struct {
             self.active = index;
             self.active_pane = .primary;
             if (self.panel != .markdown) self.panel = .editor;
+            try services_save.focusChanged(self, cx, previous);
             self.editor_focus_request +%= 1;
             services_git.start(self, cx, .refresh) catch |err| try self.reportError(err);
         }
@@ -635,12 +652,16 @@ pub const Shell = struct {
         cx.notify();
     }
     pub fn onTree(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
+        const previous = actions.activeDocument(self);
         actions.activateTree(self, index) catch |err| try self.reportError(err);
+        try services_save.focusChanged(self, cx, previous);
         cx.notify();
     }
     pub fn onFile(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
         if (index < self.file_index.items.len) {
+            const previous = actions.activeDocument(self);
             self.openPath(self.file_index.items[index].path) catch |err| try self.reportError(err);
+            try services_save.focusChanged(self, cx, previous);
             self.overlay = .none;
         }
         cx.notify();
@@ -723,10 +744,12 @@ pub const Shell = struct {
     }
     pub fn onSearchResult(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), payload: views_search.Target) !void {
         if (self.search.results == null or self.search.results.?.generation != payload.generation) return;
+        const previous = actions.activeDocument(self);
         services_search.activate(self, cx, payload.group, payload.match) catch |err| {
             try self.reportError(err);
             cx.notify();
         };
+        try services_save.focusChanged(self, cx, previous);
     }
     pub fn onReference(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
         services_language.acceptReference(self, cx, index) catch |err| try self.reportError(err);
@@ -752,6 +775,7 @@ pub const Shell = struct {
         try buffer_find.poll(self, cx);
         try services_project.poll(self, cx);
         try services_language.poll(self, cx);
+        try services_save.poll(self, cx);
         try symbol_hover.poll(self, cx);
         try services_git.pollBlame(self, cx);
         if (!self.git.busy) {

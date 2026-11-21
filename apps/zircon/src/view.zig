@@ -5,7 +5,9 @@ const zircon_editor = @import("zircon_editor");
 const ui = @import("zircon_ui");
 const workspace = @import("zircon_workspace");
 const catalogue = @import("commands.zig");
+const language = @import("services/language.zig");
 const recovery = @import("services/recovery.zig");
+const saves = @import("services/save.zig");
 const shell = @import("shell.zig");
 const terminal_module = @import("terminal.zig");
 const theme = @import("theme.zig");
@@ -34,6 +36,8 @@ const status_height = components.metrics.status;
 
 pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     try recovery.schedule(self, b);
+    if (saves.nextDeadline(self)) |due| try b.requestFrameAfter(@max(0.001, due - b.frame.time));
+    if (language.nextFormattingDeadline(self)) |due| try b.requestFrameAfter(@max(0.001, due - b.frame.time));
     if (self.find.waiting and !self.find.busy) try b.requestFrameAfter(0.08);
     if (self.language.syntax_due) |due| try b.requestFrameAfter(@max(0.001, due - b.frame.time));
     if (self.git.edit_refresh_at) |due| try b.requestFrameAfter(@max(0.001, due - b.frame.time));

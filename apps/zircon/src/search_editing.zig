@@ -15,6 +15,7 @@ const panes = @import("panes.zig");
 const search_selection = @import("search_selection.zig");
 const git = @import("services/git.zig");
 const language = @import("services/language.zig");
+const save = @import("services/save.zig");
 const search_service = @import("services/search.zig");
 const symbol_hover = @import("services/symbol_hover.zig");
 const shell = @import("shell.zig");
@@ -24,12 +25,20 @@ const Shell = shell.Shell;
 const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 const Sources = editing.SourceEditors(ws.DocumentId);
 pub const header_height = 36;
+
+// Excerpts use source rows for virtualization and selection mapping.
+pub fn configureProjection(editor: *editing.Editor) void {
+    editor.soft_wrap = .none;
+    editor.show_fold_controls = false;
+    editor.show_git_gutters = false;
+    editor.show_scrollbars = false;
+}
 const Position = struct {
-    rows: usize = 0,
+    row_units: f32 = 0,
     padding: usize = 0,
 
-    fn pixels(self: Position, line_height: f32) f32 {
-        return @as(f32, @floatFromInt(self.rows)) * line_height + @as(f32, @floatFromInt(self.padding));
+    fn pixels(self: Position, font_size: f32) f32 {
+        return self.row_units * font_size + @as(f32, @floatFromInt(self.padding));
     }
 };
 const File = struct {
@@ -38,6 +47,7 @@ const File = struct {
     matches: []text.Range = &.{},
     revision: u64 = 0,
     rows: usize = 0,
+    line_height: f32 = 1.6,
     fallback_excerpts: usize = 0,
     stale: bool = false,
     top: Position = .{},
@@ -85,7 +95,7 @@ pub const Model = struct {
             file.top = self.extent;
             self.extent.padding += header_height;
             if (file.document != null and !file.stale) {
-                self.extent.rows += file.rows;
+                self.extent.row_units += @as(f32, @floatFromInt(file.rows)) * file.line_height;
                 self.extent.padding += file.excerpts.len * 12;
             } else {
                 self.extent.padding += file.fallback_excerpts * 40;
@@ -100,20 +110,20 @@ pub const Model = struct {
         self.updateLayout();
     }
 
-    pub fn contentHeight(self: *const Model, line_height: f32) f32 {
-        return self.extent.pixels(line_height);
+    pub fn contentHeight(self: *const Model, font_size: f32) f32 {
+        return self.extent.pixels(font_size);
     }
 
-    pub fn firstVisible(self: *const Model, top: f32, line_height: f32) struct { group: usize, y: f32 } {
+    pub fn firstVisible(self: *const Model, top: f32, font_size: f32) struct { group: usize, y: f32 } {
         if (self.files.items.len == 0) return .{ .group = 0, .y = 0 };
         var lo: usize = 0;
         var hi = self.files.items.len;
         while (lo < hi) {
             const mid = lo + (hi - lo) / 2;
-            if (self.files.items[mid].top.pixels(line_height) <= top) lo = mid + 1 else hi = mid;
+            if (self.files.items[mid].top.pixels(font_size) <= top) lo = mid + 1 else hi = mid;
         }
         const group = lo -| 1;
-        return .{ .group = group, .y = self.files.items[group].top.pixels(line_height) };
+        return .{ .group = group, .y = self.files.items[group].top.pixels(font_size) };
     }
 };
 pub const Target = struct { group: u32, excerpt: u32, generation: u64, revision: u64, first_row: usize, pane: u8 };
@@ -138,6 +148,7 @@ pub fn install(self: *Shell, results: search.Results) !void {
         for (group.excerpts, ranges) |item, *range| range.* = item.source_range;
         try next.projection.setExcerpts(id, ranges);
         file.document = id;
+        file.line_height = self.bufferSettings(self.documentLanguage(id)).line_height;
         file.excerpts = try a.alloc(Excerpt, group.excerpts.len);
         file.revision = snapshot.revision();
         var index: usize = 0;
@@ -152,11 +163,8 @@ pub fn install(self: *Shell, results: search.Results) !void {
             var editor = try editing.Editor.init(a);
             errdefer editor.deinit();
             const record = try self.workspace.getConst(id);
-            self.configureEditor(&editor, record.path orelse group.title);
-            editor.show_scrollbars = false;
-            editor.show_fold_controls = false;
-            editor.show_git_gutters = false;
-            editor.soft_wrap = .none;
+            self.configureDocumentEditor(&editor, id, record.path orelse group.title);
+            configureProjection(&editor);
             editor.search_visible = true;
             editor.search_query = try a.dupe(u8, self.search.query);
             editor.synchronize(snapshot);
@@ -207,10 +215,23 @@ pub fn currentFile(self: *const Shell, group: usize) bool {
     return file.revision == record.doc.revision();
 }
 
-pub fn groupHeight(self: *const Shell, group: usize, line_height: f32, count: usize) f32 {
+pub fn refreshMetrics(self: *Shell) void {
+    for (self.search.editing.files.items) |*file| if (file.document) |id| {
+        file.line_height = self.bufferSettings(self.documentLanguage(id)).line_height;
+    };
+    self.search.editing.updateLayout();
+}
+
+pub fn groupLineHeight(self: *const Shell, group: usize) f32 {
+    const files = self.search.editing.files.items;
+    const factor = if (group < files.len) files[group].line_height else self.editor_options.line_height;
+    return self.editor_options.font_size * factor;
+}
+
+pub fn groupHeight(self: *const Shell, group: usize, count: usize) f32 {
     if (!currentFile(self, group)) return @as(f32, @floatFromInt(count)) * 40;
     const file = self.search.editing.files.items[group];
-    return @as(f32, @floatFromInt(file.rows)) * line_height + @as(f32, @floatFromInt(file.excerpts.len)) * 12;
+    return @as(f32, @floatFromInt(file.rows)) * groupLineHeight(self, group) + @as(f32, @floatFromInt(file.excerpts.len)) * 12;
 }
 
 pub fn excerpt(self: *const Shell, group: usize, index: usize) !?Excerpt {
@@ -405,9 +426,8 @@ pub fn command(self: *Shell, cx: *ui.Context(Shell), which: commands.Command) !b
                 try overlays.show(self, cx, .save_as);
                 return true;
             }
-            try self.workspace.save(source.id, null);
+            try save.saveDocument(self, cx, source.id, .{ .quiet = true, .refresh_git = true });
         }
-        if (self.git.repository) try git.edited(self, cx);
         cx.notify();
         return true;
     }
@@ -466,10 +486,10 @@ pub fn activate(self: *Shell, cx: *ui.Context(Shell), group: usize, match_index:
 
 pub fn reveal(self: *Shell, cx: *ui.Context(Shell), target: Target, cursor: usize) !void {
     const results = self.search.results orelse return;
-    const lh = self.editor_options.font_size * self.editor_options.line_height;
     var y: f32 = 0;
     for (results.groups, 0..) |group, group_index| {
         y += header_height;
+        const lh = groupLineHeight(self, group_index);
         for (group.excerpts, 0..) |_, index| {
             const source = try excerpt(self, group_index, index) orelse {
                 y += 40;
