@@ -278,6 +278,118 @@ const View = struct {
         self.document.deinit();
     }
 };
+fn paintedCaret(scene: ui.graphics.Scene) ?ui.Rect {
+    for (scene.items) |item| {
+        if (item.kind == .rect and std.meta.eql(item.color, caret_test_color)) return item.rect;
+    }
+    return null;
+}
+const caret_test_color = ui.Color.rgb(0x39f491);
+
+test "caret blink restarts on editing and focus and stops when disabled" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    var doc = text.Document.init(t.allocator, "abc") catch |err| {
+        state.deinit();
+        return err;
+    };
+    state.cursor_config.color = caret_test_color;
+    const h = app.openWindow(View, .{ .visible = false, .width = 400, .height = 160 }, .{ .document = doc, .state = state }) catch |err| {
+        state.deinit();
+        doc.deinit();
+        return err;
+    };
+    _ = try app.step(0.75);
+    const window = try app.window(h);
+    const frame = &window.frames.committed;
+    try t.expectEqual(@as(f32, 2), paintedCaret(frame.scene).?.width);
+    try t.expectEqual(@as(?f64, 1.75), window.deadline);
+    try t.expectEqual(@as(usize, 0), try app.step(1.5));
+    _ = try app.step(1.75);
+    try t.expect(paintedCaret(frame.scene) == null);
+    try app.dispatch(h, .{ .key_down = .{ .key = .left } });
+    _ = try app.step(1.8);
+    try t.expect(paintedCaret(frame.scene) != null);
+    try app.dispatch(h, .{ .text = "x" });
+    _ = try app.step(2.75);
+    try t.expect(paintedCaret(frame.scene) != null);
+    _ = try app.step(3.75);
+    try t.expect(paintedCaret(frame.scene) == null);
+    try app.dispatch(h, .{ .focus = false });
+    _ = try app.step(3.8);
+    try t.expectEqual(@as(?f64, null), window.deadline);
+    try app.dispatch(h, .{ .focus = true });
+    _ = try app.step(4.0);
+    try t.expect(paintedCaret(frame.scene) != null);
+    try t.expectEqual(@as(?f64, 5.0), window.deadline);
+
+    const Settings = struct {
+        fn apply(self: *View, cx: *ui.Context(View)) void {
+            self.state.cursor_config.blink = false;
+            self.state.cursor_config.shape = .underline;
+            cx.notify();
+        }
+    };
+    try app.update(try app.windowEntity(View, h), Settings.apply, .{});
+    _ = try app.step(4.1);
+    try t.expectEqual(@as(f32, 2), paintedCaret(frame.scene).?.height);
+    try t.expectEqual(@as(?f64, null), window.deadline);
+    try t.expectEqual(@as(usize, 0), try app.step(6));
+}
+
+test "smooth block caret glides while native text input follows the selection immediately" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    var doc = text.Document.init(t.allocator, "ab界") catch |err| {
+        state.deinit();
+        return err;
+    };
+    state.cursor_config = .{ .shape = .block, .blink = false, .smooth = true, .color = caret_test_color };
+    const h = app.openWindow(View, .{ .visible = false, .width = 400, .height = 160 }, .{ .document = doc, .state = state }) catch |err| {
+        state.deinit();
+        doc.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    const window = try app.window(h);
+    const frame = &window.frames.committed;
+    const initial = paintedCaret(frame.scene).?;
+    try t.expectEqual(@as(?f64, null), window.deadline);
+    try app.dispatch(h, .{ .key_down = .{ .key = .right } });
+    _ = try app.step(0.1);
+    const input = frame.text_input.?;
+    try t.expectEqual(@as(usize, 1), input.selection.start);
+    const moving = paintedCaret(frame.scene).?;
+    try t.expect(moving.x > initial.x and moving.x < input.caret.x);
+    try t.expect(window.deadline != null);
+    _ = try app.step(0.15);
+    _ = try app.step(0.20);
+    try t.expectApproxEqAbs(input.caret.x, paintedCaret(frame.scene).?.x, 0.01);
+    try t.expectEqual(@as(?f64, null), window.deadline);
+
+    const Inverted = struct {
+        fn hasGlyph(scene: ui.graphics.Scene, glyph: []const u8) bool {
+            for (scene.items) |item| {
+                if (item.kind == .text and std.mem.eql(u8, item.text, glyph) and std.meta.eql(item.color, (editor.Theme{}).background)) return true;
+            }
+            return false;
+        }
+    };
+    try t.expect(Inverted.hasGlyph(frame.scene, "b"));
+    try app.dispatch(h, .{ .focus = false });
+    _ = try app.step(0.21);
+    var edges: usize = 0;
+    for (frame.scene.items) |item| {
+        if (item.kind == .rect and std.meta.eql(item.color, caret_test_color)) edges += 1;
+    }
+    try t.expectEqual(@as(usize, 4), edges);
+    try t.expect(!Inverted.hasGlyph(frame.scene, "b"));
+    try t.expect(frame.text_input == null);
+    try t.expectEqual(@as(?f64, null), window.deadline);
+}
+
 test "code painting joins punctuation, skips spaces, and keeps committed text alive" {
     const Painted = struct {
         document: text.Document,

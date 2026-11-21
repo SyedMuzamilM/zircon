@@ -174,6 +174,24 @@ test "settings search scroll hit geometry and JSON editing persist real user cha
     try app.update(owner, Ops.open, .{});
     const child = try app.read(owner, Ops.child, .{});
     _ = try app.step(1);
+    try app.dispatch(child, .{ .text = "cursor" });
+    _ = try app.step(1);
+    try clickLabel(&app, child, "Underline");
+    try clickLabel(&app, child, "Cursor blinking");
+    try clickLabel(&app, child, "Smooth cursor");
+    _ = try app.step(1);
+    const Cursor = struct {
+        fn matches(self: *const zircon.Shell, smooth: bool) bool {
+            const config = self.tabs.items[self.active].editor.cursor_config;
+            return config.shape == .underline and !config.blink and config.smooth == smooth;
+        }
+    };
+    try t.expect(try app.read(owner, Cursor.matches, .{true}));
+    const search = try keyBounds(&app, child, "settings-search");
+    const point: ui.Point = .{ .x = search.x + 10, .y = search.y + 10 };
+    try app.dispatch(child, .{ .pointer_down = .{ .position = point } });
+    try app.dispatch(child, .{ .pointer_up = .{ .position = point } });
+    try app.dispatch(child, .{ .key_down = .{ .key = .a, .modifiers = .{ .command = true } } });
     // Search receives text through its focused input, not a model setter.
     try app.dispatch(child, .{ .text = "font" });
     _ = try app.step(2);
@@ -181,8 +199,6 @@ test "settings search scroll hit geometry and JSON editing persist real user cha
     try t.expect(!try hasText(&app, child, "Line numbers"));
     try clickLabel(&app, child, "+");
     _ = try app.step(3);
-    const search = try keyBounds(&app, child, "settings-search");
-    const point: ui.Point = .{ .x = search.x + 10, .y = search.y + 10 };
     try app.dispatch(child, .{ .pointer_down = .{ .position = point } });
     try app.dispatch(child, .{ .pointer_up = .{ .position = point } });
     try app.dispatch(child, .{ .key_down = .{ .key = .a, .modifiers = .{ .command = true } } });
@@ -197,12 +213,16 @@ test "settings search scroll hit geometry and JSON editing persist real user cha
     try t.expect(after.y < 400 and after.y > 60);
     try clickLabel(&app, child, "Reduced motion");
     _ = try app.step(6);
+    try t.expect(try app.read(owner, Cursor.matches, .{false}));
     try app.closeWindow(child);
     _ = try app.step(7);
     var reopened = try zircon.SettingsStore.init(t.allocator, t.io, path);
     defer reopened.deinit();
     try t.expectEqual(@as(f32, 15), reopened.values().font_size);
     try t.expect(reopened.values().reduced_motion);
+    try t.expect(reopened.values().cursor_shape == .underline);
+    try t.expect(!reopened.values().cursor_blink);
+    try t.expect(reopened.values().smooth_cursor);
     try app.update(owner, Ops.open, .{});
     const next = try app.read(owner, Ops.child, .{});
     _ = try app.step(8);

@@ -128,9 +128,10 @@ pub const Window = struct {
         const route_root = staging_modal orelse root.index;
         if (w.pointer_position) |position| staging.hovered_node = hitTest(staging, route_root, position, .{ .width = w.dimensions.width, .height = w.dimensions.height });
         const profile_laid_out = w.profileNow();
-        var next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, route_root, null, false);
+        const reconciled_focus = reconcile(&w.frames.committed, staging, w.focus);
+        var next_focus = reconciled_focus orelse nextFocus(staging, route_root, null, false);
         var next_restore = reconcile(&w.frames.committed, staging, w.restore_focus);
-        if (w.modal == null and staging_modal != null) next_restore = reconcile(&w.frames.committed, staging, w.focus);
+        if (w.modal == null and staging_modal != null) next_restore = reconciled_focus;
         if (w.modal != null and staging_modal == null) {
             next_focus = next_restore orelse next_focus;
             next_restore = null;
@@ -146,6 +147,11 @@ pub const Window = struct {
             } else next_focus = @intCast(i);
         }
         staging.focused_node = if (w.active) next_focus else null;
+        if (staging.focused_node) |focused| {
+            const previous = w.frames.committed.focused_node;
+            const reconciled_previous = if (previous == w.focus) reconciled_focus else reconcile(&w.frames.committed, staging, previous);
+            staging.retained_focus = reconciled_previous == focused;
+        }
         if (staging_modal) |modal| {
             var count: usize = 0;
             for (staging.accessibility.items) |node| {

@@ -4,6 +4,7 @@ pub const blame_view = @import("blame_view.zig");
 const canvas = @import("canvas.zig");
 pub const code_line = @import("code_line.zig");
 const commands = @import("commands.zig");
+pub const cursor = @import("cursor.zig");
 pub const display = @import("display.zig");
 const editor = @import("editor.zig");
 pub const element = @import("element.zig");

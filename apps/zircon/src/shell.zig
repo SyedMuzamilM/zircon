@@ -127,7 +127,7 @@ pub const Shell = struct {
     settings: ?ui.Entity(model.Settings) = null,
     settings_window: ?ui.WindowHandle = null,
     colors: theme_module.Palette = .{},
-    editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
+    editor_options: struct { indent_guides: bool = true, active_line: bool = true, fold_controls: bool = true, soft_wrap: editor.wrap.Mode = .none, vim_mode: bool = false, vim_bindings: editor.vim.Bindings = .{}, cursor: editor.cursor.Config = .{}, font_size: f32 = 14, line_height: f32 = 1.6, tab_width: usize = 4, line_numbers: bool = true, git_gutters: bool = true, theme: editor.Theme = .{} } = .{},
     git: services_git.Model = .{},
     recovery: ?services_recovery.Model = null,
     search: services_search.Model = .{},
@@ -323,12 +323,14 @@ pub const Shell = struct {
         };
         self.follows_system = follows_system;
         const light = theme_module.isLight(values.theme, self.system_dark);
+        const cursor: editor.cursor.Config = .{ .shape = values.cursor_shape, .blink = values.cursor_blink, .smooth = values.smooth_cursor and !values.reduced_motion };
         self.colors = if (light) theme_module.Palette.light else .{};
         for (self.tabs.items) |*tab| {
             tab.editor.soft_wrap = values.soft_wrap;
             tab.editor.wrap_cache.revision = null;
             tab.editor.setVim(values.vim_mode);
             tab.editor.vim.bindings = values.vim_bindings;
+            tab.editor.cursor_config = cursor;
             tab.editor.font_size = values.font_size;
             tab.editor.line_height = values.font_size * values.line_height;
             tab.editor.tab_width = values.tab_width;
@@ -344,6 +346,7 @@ pub const Shell = struct {
             pane.editor.wrap_cache.revision = null;
             pane.editor.setVim(values.vim_mode);
             pane.editor.vim.bindings = values.vim_bindings;
+            pane.editor.cursor_config = cursor;
             pane.editor.font_size = values.font_size;
             pane.editor.line_height = values.font_size * values.line_height;
             pane.editor.tab_width = values.tab_width;
@@ -384,7 +387,7 @@ pub const Shell = struct {
             pane.editor.synchronize(snapshot);
             try actions.prepareEditor(self, cx, &pane.editor, snapshot, "secondary-editor");
         }
-        self.editor_options = .{ .indent_guides = values.indent_guides, .active_line = values.active_line, .fold_controls = values.fold_controls, .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
+        self.editor_options = .{ .indent_guides = values.indent_guides, .active_line = values.active_line, .fold_controls = values.fold_controls, .soft_wrap = values.soft_wrap, .vim_mode = values.vim_mode, .vim_bindings = values.vim_bindings, .cursor = cursor, .font_size = values.font_size, .line_height = values.line_height, .tab_width = values.tab_width, .line_numbers = values.line_numbers, .git_gutters = values.git_gutters, .theme = self.editor_options.theme };
         for (self.git.editing.views.items) |*view| {
             const record = self.workspace.getConst(view.document) catch continue;
             self.configureEditor(&view.editor, record.path orelse "");
@@ -429,6 +432,7 @@ pub const Shell = struct {
         state.soft_wrap = options.soft_wrap;
         state.setVim(options.vim_mode);
         state.vim.bindings = options.vim_bindings;
+        state.cursor_config = options.cursor;
         state.font_size = options.font_size;
         state.line_height = options.font_size * options.line_height;
         state.tab_width = options.tab_width;

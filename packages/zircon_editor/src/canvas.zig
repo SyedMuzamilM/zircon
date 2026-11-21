@@ -6,6 +6,7 @@ const ui = @import("zircon_ui");
 const annotations = @import("annotations.zig");
 const blame_view = @import("blame_view.zig");
 const brackets = @import("brackets.zig");
+const cursor_module = @import("cursor.zig");
 const display = @import("display.zig");
 const editor = @import("editor.zig");
 const element = @import("element.zig");
@@ -25,7 +26,7 @@ pub fn gutterWidth(lines: usize, font_size: f32) f32 {
     while (remaining >= 10) : (remaining /= 10) digits += 1;
     return @max(76, @as(f32, @floatFromInt(digits)) * font_size * 0.62 + 46);
 }
-pub fn render(state: *const editor.Editor, document: *const text.Document, b: *ui.Ui, row_limit: usize) !ui.Element {
+pub fn render(state: *const editor.Editor, document: *const text.Document, b: *ui.Ui, row_limit: usize, show_unfocused_caret: bool) !ui.Element {
     var snapshot = document.snapshot();
     errdefer snapshot.deinit();
     const selections = try b.allocator().dupe(selection.Selection, state.selections.items.items);
@@ -56,7 +57,44 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
         while (hi < state.grammar_spans.len and state.grammar_spans[hi].start < end) hi += 1;
         break :blk try b.allocator().dupe(syntax.Span, state.grammar_spans[lo..hi]);
     } else null;
-    const value: Canvas = .{ .snapshot = snapshot, .grammar_spans = grammar_spans, .wrap_cache = state.wrap_cache.retain(), .soft_wrap = state.projected(), .wrap_enabled = state.soft_wrap != .none, .block_cursor = state.vim.enabled and state.vim.mode != .insert, .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else if (state.selections.items.items.len > 0) state.primary().head else 0, .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null, .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null, .git_changes = changes, .expanded_changes = expanded_changes.items, .blame_message_scroll = state.blame_message_scroll, .theme = state.theme, .show_line_numbers = state.show_line_numbers, .gutter_hovered = state.gutter_hovered, .indent_guides = state.show_indent_guides, .highlight_active_line = state.highlight_active_line, .fold_controls = state.show_fold_controls, .selections = selections, .scroll = state.scroll.offset, .horizontal = if (state.soft_wrap == .none) state.horizontal else 0, .font_size = state.font_size, .line_height = state.line_height, .tab_width = state.tab_width, .language = state.language, .states = states, .state_start = start, .marked = state.marked, .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{}, .external_search = state.search_revision == snapshot.revision(), .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "" };
+    const vim_command_mode = state.vim.enabled and state.vim.mode != .insert;
+    const value: Canvas = .{
+        .snapshot = snapshot,
+        .grammar_spans = grammar_spans,
+        .wrap_cache = state.wrap_cache,
+        .soft_wrap = state.projected(),
+        .wrap_enabled = state.soft_wrap != .none,
+        .vim_command_mode = vim_command_mode,
+        .cursor = if (state.vim.enabled and state.vim.visual()) state.vim.cursor else if (selections.len > 0) selections[0].head else 0,
+        .profile = if (state.language_profile) |profile| try profile.copy(b.allocator()) else null,
+        .blame = if (state.inline_blame != null and state.inline_blame.?.revision == snapshot.revision()) try state.inline_blame.?.copy(b.allocator()) else null,
+        .git_changes = changes,
+        .expanded_changes = expanded_changes.items,
+        .blame_message_scroll = state.blame_message_scroll,
+        .theme = state.theme,
+        .show_line_numbers = state.show_line_numbers,
+        .gutter_hovered = state.gutter_hovered,
+        .indent_guides = state.show_indent_guides,
+        .highlight_active_line = state.highlight_active_line,
+        .fold_controls = state.show_fold_controls,
+        .selections = selections,
+        .scroll = state.scroll.offset,
+        .horizontal = if (state.soft_wrap == .none) state.horizontal else 0,
+        .font_size = state.font_size,
+        .line_height = state.line_height,
+        .tab_width = state.tab_width,
+        .language = state.language,
+        .states = states,
+        .state_start = start,
+        .marked = state.marked,
+        .search_ranges = if (state.search_visible and state.search_revision == snapshot.revision()) try b.allocator().dupe(text.Range, state.search_ranges) else &.{},
+        .external_search = state.search_revision == snapshot.revision(),
+        .search = if (state.search_visible or state.search_revision == null) try b.allocator().dupe(u8, state.search_query) else "",
+        .cursor_config = state.cursor_config,
+        .cursor_runtime = state.cursor_runtime,
+        .cursor_shape = if (!state.vim.enabled) state.cursor_config.shape else if (vim_command_mode) .block else .bar,
+        .show_unfocused_caret = show_unfocused_caret,
+    };
     var canvas = value;
     canvas.diagnostics = if (state.diagnostics_revision == snapshot.revision()) state.diagnostics else &.{};
     if (state.selections.items.items.len > 0) {
@@ -64,6 +102,10 @@ pub fn render(state: *const editor.Editor, document: *const text.Document, b: *u
         canvas.scope_guide = state.bracket_cache.guide;
     }
     canvas.show_scrollbars = state.show_scrollbars;
+    _ = canvas.wrap_cache.retain();
+    errdefer canvas.wrap_cache.release();
+    _ = canvas.cursor_runtime.retain();
+    errdefer canvas.cursor_runtime.release();
     return b.custom(Canvas, canvas, .{ .flex_grow = 1, .overflow = .hidden, .background = state.theme.background });
 }
 const RenderLine = struct {
@@ -78,8 +120,31 @@ const RenderLine = struct {
     oversized: bool = false,
     segment: ?wrap.Row = null,
 };
-const Caret = struct { offset: usize, row: usize, visual_row: ?usize };
-const Prepared = struct { lines: []RenderLine, first_visual: usize, carets: []Caret, gutter: f32, content_width: f32 };
+const Caret = struct {
+    offset: usize,
+    row: usize,
+    visual_row: ?usize,
+
+    fn onLine(self: Caret, line: RenderLine, visual_row: usize) bool {
+        return self.row == line.row and (line.segment == null or self.visual_row == visual_row);
+    }
+};
+const CaretPaint = struct {
+    layout: cursor_module.Layout,
+    start: usize,
+    end: usize,
+    left: f32,
+};
+const Prepared = struct {
+    lines: []RenderLine,
+    first_visual: usize,
+    carets: []Caret,
+    gutter: f32,
+    content_width: f32,
+    cursor_shape: ?cursor_module.Shape,
+    primary_caret: ?CaretPaint,
+    moving_caret: ?ui.Rect,
+};
 const Canvas = struct {
     scope: ?brackets.Scope = null,
     scope_guide: ?brackets.Scope = null,
@@ -89,8 +154,12 @@ const Canvas = struct {
     wrap_cache: *wrap.Cache,
     soft_wrap: bool,
     wrap_enabled: bool,
-    block_cursor: bool,
+    vim_command_mode: bool,
     cursor: usize,
+    cursor_config: cursor_module.Config,
+    cursor_runtime: *cursor_module.Runtime,
+    cursor_shape: cursor_module.Shape,
+    show_unfocused_caret: bool,
     profile: ?profile_module.Profile,
     blame: ?annotations.Blame,
     git_changes: []const annotations.GitChange,
@@ -120,6 +189,7 @@ const Canvas = struct {
     pub const PrepaintState = Prepared;
     pub fn deinit(self: *Canvas) void {
         self.wrap_cache.release();
+        self.cursor_runtime.release();
         self.snapshot.deinit();
     }
     pub fn requestLayout(_: *Canvas, cx: *ui.LayoutCx) !ui.LayoutResult(LayoutState) {
@@ -132,17 +202,21 @@ const Canvas = struct {
         const total_rows = if (self.soft_wrap) self.wrap_cache.rowCount() else self.snapshot.lineCount();
         const visible = try ui.controls.visibleRows(total_rows, self.line_height, @as(f32, @floatFromInt(first)) * self.line_height, bounds.height, 2);
         const lines = try cx.allocator.alloc(RenderLine, visible.end - visible.start);
-        var caret: ui.Rect = .{ .x = bounds.x + gutter - self.horizontal, .y = bounds.y, .width = 1.5, .height = self.line_height - 4 };
+        var caret: ui.Rect = .{ .x = bounds.x + gutter - self.horizontal, .y = bounds.y, .width = 1.5, .height = @max(1, self.line_height - 4) };
         const style: ui.TextStyle = .{ .size = self.font_size, .mono = true };
-        const carets = try cx.allocator.alloc(Caret, if (self.block_cursor) @min(self.selections.len, 1) else self.selections.len);
+        const needs_text_input = cx.focused and !self.vim_command_mode and self.selections.len > 0;
+        const carets = try cx.allocator.alloc(Caret, if (self.vim_command_mode) @min(self.selections.len, 1) else self.selections.len);
         for (carets, self.selections[0..carets.len]) |*entry, item| {
-            const offset = if (self.block_cursor) self.cursor else item.head;
+            const offset = if (self.vim_command_mode) self.cursor else item.head;
             entry.* = .{
                 .offset = offset,
                 .row = (try self.snapshot.pointAt(offset)).line,
                 .visual_row = if (self.soft_wrap) self.wrap_cache.atOffset(offset) else null,
             };
         }
+        var cursor_shape = if (cx.focused or self.show_unfocused_caret) self.cursor_config.shapeForFocus(self.cursor_shape, cx.focused) else null;
+        var primary_caret: ?CaretPaint = null;
+        var moving_caret: ?ui.Rect = null;
         var content_width: f32 = 0;
         var stream = if (!self.soft_wrap and lines.len > 0) try self.snapshot.linesFrom(visible.start) else null;
         for (lines, 0..) |*line, i| {
@@ -194,14 +268,38 @@ const Canvas = struct {
                 };
                 line.* = .{ .row = row, .range = range, .original = original, .display = expanded, .spans = spans, .y = y, .oversized = oversized, .height = self.line_height, .text_size = size, .segment = segment };
             }
-            if (!self.block_cursor and carets.len != 0 and carets[0].row == row and (segment == null or carets[0].visual_row == visual_row)) {
-                caret.x = bounds.x + gutter - self.horizontal - (if (segment) |part| part.x else 0) + if (line.oversized) @as(f32, 0) else line.display.caret(metrics.*, style, @min(carets[0].offset - line.range.start, line.original.len));
+            if ((needs_text_input or cursor_shape != null) and carets.len != 0 and carets[0].onLine(line.*, visual_row)) {
+                const x = bounds.x + gutter - self.horizontal - (if (segment) |part| part.x else 0);
+                const offset = @min(carets[0].offset - line.range.start, line.original.len);
+                const left = if (line.oversized) 0 else line.display.caret(metrics.*, style, offset);
+                caret.x = x + left;
                 caret.y = line.y + 3;
+                if (!line.oversized) if (cursor_shape) |shape| {
+                    primary_caret = try self.caretPaint(line.*, metrics.*, style, x, carets[0].offset, offset, left, shape);
+                };
             }
         }
         if (cx.focused and self.selections.len > 0) {
-            if (!self.block_cursor) {
-                try cx.requestFrameAfter(0.5 - @mod(cx.time, 0.5));
+            const runtime = self.cursor_runtime;
+            const moved = runtime.sync(
+                .{ .head = carets[0].offset, .revision = self.snapshot.revision(), .shape = self.cursor_shape },
+                .{ .bounds = bounds, .scroll = self.scroll, .horizontal = self.horizontal, .line_height = self.line_height, .gutter = gutter },
+                cx.time,
+                cx.retained_focus,
+            );
+            if (self.cursor_config.smooth and self.marked == null) {
+                const target = if (primary_caret) |primary| primary.layout.rect() else null;
+                const onscreen = if (target) |rect| rect.intersection(bounds) else ui.Rect{};
+                moving_caret = runtime.glide(if (onscreen.width > 0 and onscreen.height > 0) target else null, cx.time, self.cursor_config.smooth_duration, moved);
+                if (moving_caret != null) try cx.requestFrameAfter(1.0 / 120.0);
+            } else {
+                runtime.smooth = null;
+            }
+            if (primary_caret != null or carets.len > 1) if (runtime.blink.nextWake(self.cursor_config, cx.time, self.cursor_shape)) |delay| {
+                try cx.requestFrameAfter(delay);
+            };
+            if (moving_caret == null and !runtime.blink.visible(self.cursor_config, cx.time, self.cursor_shape)) cursor_shape = null;
+            if (needs_text_input) {
                 const selected = self.selections[0].range();
                 var begin = selected.start -| 2048;
                 var end = @min(self.snapshot.byteLen(), selected.end +| 2048);
@@ -215,7 +313,26 @@ const Canvas = struct {
                 try cx.setTextInput(.{ .text = surrounding, .revision = self.snapshot.revision(), .selection = .{ .start = selected.start - begin, .end = selected.end - begin }, .marked = if (self.marked) |marked| .{ .start = marked.start - begin, .end = marked.end - begin } else null, .caret = caret, .base_byte = begin, .base_utf16 = try self.snapshot.utf16Offset(begin) });
             }
         }
-        return .{ .lines = lines, .first_visual = visible.start, .carets = carets, .gutter = gutter, .content_width = content_width };
+        return .{ .lines = lines, .first_visual = visible.start, .carets = carets, .gutter = gutter, .content_width = content_width, .cursor_shape = cursor_shape, .primary_caret = primary_caret, .moving_caret = moving_caret };
+    }
+    fn caretPaint(self: *const Canvas, line: RenderLine, metrics: LayoutState, style: ui.TextStyle, x: f32, head: usize, offset: usize, left: f32, shape: cursor_module.Shape) !CaretPaint {
+        const next = if (shape == .bar) offset else @min(line.original.len, (try self.snapshot.nextGraphemeBoundary(head)) - line.range.start);
+        const right = if (next == offset or line.original[offset] == '\t')
+            left
+        else
+            line.display.caret(metrics, style, next);
+        const width = if (left == right) self.font_size * 0.6 else @abs(right - left);
+        return .{
+            .layout = .{
+                .shape = shape,
+                .cell = .{ .x = x + @min(left, right), .y = line.y, .width = width, .height = line.height },
+                .color = self.cursor_config.color orelse self.theme.caret,
+                .config = self.cursor_config,
+            },
+            .start = offset,
+            .end = next,
+            .left = left,
+        };
     }
     pub fn paint(self: *Canvas, cx: *ui.PaintCx, bounds: ui.Rect, metrics: *LayoutState, prepared: *Prepared) !void {
         try cx.painter.fillRect(.{ .bounds = bounds, .color = self.theme.background });
@@ -317,19 +434,23 @@ const Canvas = struct {
                 const right = line.display.caret(metrics.*, style, @min(marked.end, line.range.end) - line.range.start);
                 try cx.painter.fillRect(.{ .bounds = .{ .x = x + @min(left, right), .y = line.y + self.line_height - 3, .width = @max(1, @abs(right - left)), .height = 1 }, .color = self.theme.caret });
             };
-            if (cx.focused and (self.block_cursor or @mod(cx.time, 1.0) < 0.5) and !line.oversized) for (prepared.carets) |entry| {
-                if (entry.row != line.row or (line.segment != null and entry.visual_row != visual_row)) continue;
-                const head = entry.offset;
-                const offset = @min(head - line.range.start, line.original.len);
-                const left = line.display.caret(metrics.*, style, offset);
-                const next = if (self.block_cursor) @min(line.original.len, (try self.snapshot.nextGraphemeBoundary(head)) - line.range.start) else offset;
-                const width = if (self.block_cursor) (if (offset < line.original.len and line.original[offset] == '\t') self.font_size * 0.6 else @max(self.font_size * 0.6, line.display.caret(metrics.*, style, next) - left)) else @as(f32, 1.5);
-                try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = line.y + (if (self.block_cursor) @as(f32, 0) else 3), .width = width, .height = if (self.block_cursor) self.line_height else self.line_height - 4 }, .color = self.theme.caret });
-                if (self.block_cursor and next > offset) {
+            if (!line.oversized) if (prepared.cursor_shape) |shape| for (prepared.carets, 0..) |entry, index| {
+                if (!entry.onLine(line, visual_row)) continue;
+                if (index == 0 and prepared.moving_caret != null) continue;
+                const visual = if (index == 0) prepared.primary_caret.? else blk: {
+                    const offset = @min(entry.offset - line.range.start, line.original.len);
+                    const left = line.display.caret(metrics.*, style, offset);
+                    break :blk try self.caretPaint(line, metrics.*, style, x, entry.offset, offset, left, shape);
+                };
+                const rect = visual.layout.rect();
+                try visual.layout.paint(cx.painter, rect);
+                if (shape == .block and visual.end > visual.start) {
+                    try cx.painter.pushClip(rect);
+                    defer cx.painter.popClip();
                     var inverted = self.theme;
                     inverted.tokens[@backingInt(syntax.Kind.plain)] = self.theme.background;
                     const carets = metrics.lineCarets(line.display.bytes, style);
-                    _ = try drawRun(cx, line, inverted, carets, style, x, offset, next, .plain, left);
+                    _ = try drawRun(cx, line, inverted, carets, style, x, visual.start, visual.end, .plain, visual.left);
                 }
             };
             cx.painter.popClip();
@@ -364,6 +485,11 @@ const Canvas = struct {
         if (self.blame) |blame| if (try blame_view.layout(cx.painter.allocator, self.snapshot, blame, self.expanded_changes, .{ .source_y = if (self.soft_wrap) self.wrap_cache.rowY(self.wrap_cache.rowStart(blame.line + 1) - 1, self.line_height, self.expanded_changes) else null, .source_x = if (self.soft_wrap) self.wrap_cache.rowAt(self.wrap_cache.rowStart(blame.line + 1) - 1).x else 0, .font = self.font_size, .line_height = self.line_height, .gutter = prepared.gutter, .horizontal = self.horizontal, .scroll = self.scroll, .tab_width = self.tab_width }, metrics.*, bounds)) |geometry| {
             try blame_view.paint(cx, geometry, blame, self.theme, self.font_size, self.blame_message_scroll);
         };
+        if (prepared.moving_caret) |rect| {
+            try cx.painter.pushClip(.{ .x = bounds.x + prepared.gutter - 4, .y = bounds.y, .width = @max(0, bounds.width - prepared.gutter + 4), .height = bounds.height });
+            defer cx.painter.popClip();
+            try prepared.primary_caret.?.layout.paint(cx.painter, rect);
+        }
         if (!self.show_scrollbars) return;
         const available = @max(1, bounds.width - prepared.gutter - 12);
         const content_width = @max(prepared.content_width, self.horizontal + available);

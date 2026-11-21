@@ -8,6 +8,7 @@ const brackets = @import("brackets.zig");
 const canvas = @import("canvas.zig");
 const commands = @import("commands.zig");
 const comments = @import("comments.zig");
+const cursor = @import("cursor.zig");
 const element = @import("element.zig");
 const input = @import("input.zig");
 const navigation = @import("navigation.zig");
@@ -29,6 +30,8 @@ pub const Editor = struct {
     pairs: pairing.State = .{},
     auto_close_pairs: bool = true,
     bracket_cache: *brackets.Cache,
+    cursor_config: cursor.Config = .{},
+    cursor_runtime: *cursor.Runtime,
     /// Optional source range exposed by an excerpt view. Edits cannot consume
     /// bytes outside it; insertion at either endpoint remains valid.
     edit_scope: ?text.Range = null,
@@ -83,7 +86,9 @@ pub const Editor = struct {
         const bracket_cache = try a.create(brackets.Cache);
         errdefer a.destroy(bracket_cache);
         bracket_cache.* = .{};
-        return .{ .allocator = a, .bracket_cache = bracket_cache, .selections = selections, .syntax_cache = .init(a), .wrap_cache = try wrap.Cache.init(a) };
+        const cursor_runtime = try cursor.Runtime.init(a);
+        errdefer cursor_runtime.release();
+        return .{ .allocator = a, .bracket_cache = bracket_cache, .cursor_runtime = cursor_runtime, .selections = selections, .syntax_cache = .init(a), .wrap_cache = try wrap.Cache.init(a) };
     }
     pub fn deinit(self: *Editor) void {
         self.allocator.free(self.grammar_spans);
@@ -95,6 +100,7 @@ pub const Editor = struct {
         self.selections.deinit(self.allocator);
         self.pairs.deinit(self.allocator);
         self.allocator.destroy(self.bracket_cache);
+        self.cursor_runtime.release();
         self.syntax_cache.deinit();
         for (self.history.items) |entry| self.allocator.free(entry.items);
         self.history.deinit(self.allocator);
@@ -165,11 +171,11 @@ pub const Editor = struct {
     }
     pub fn render(self: *const Editor, document: *const text.Document, builder: *ui.Ui) !ui.Element {
         try self.validate();
-        return canvas.render(self, document, builder, 1024);
+        return canvas.render(self, document, builder, 1024, true);
     }
     pub fn renderExcerpt(self: *const Editor, document: *const text.Document, builder: *ui.Ui, rows: usize) !ui.Element {
         try self.validate();
-        return canvas.render(self, document, builder, rows +| 4);
+        return canvas.render(self, document, builder, rows +| 4, false);
     }
     pub fn offsetAtPoint(self: *Editor, snapshot: text.Snapshot, event: *ui.Event(ui.Input), point: ui.Point) !usize {
         return navigation.position(self, snapshot, event, point);
@@ -185,6 +191,7 @@ pub const Editor = struct {
         return try navigation.wordRange(snapshot, at);
     }
     pub fn validate(self: *const Editor) !void {
+        try self.cursor_config.validate();
         if (!std.math.isFinite(self.font_size) or self.font_size <= 0 or self.font_size > 128 or !std.math.isFinite(self.line_height) or self.line_height < self.font_size or !std.math.isFinite(self.scroll.offset) or self.scroll.offset < 0 or !std.math.isFinite(self.horizontal) or self.horizontal < 0 or self.tab_width == 0 or self.tab_width > 32) return error.InvalidEditorOptions;
     }
     pub fn synchronize(self: *Editor, snapshot: text.Snapshot) void {
@@ -315,6 +322,7 @@ pub const Editor = struct {
     pub fn setSelection(self: *Editor, snapshot: text.Snapshot, range: text.Range) !void {
         try snapshot.validateRange(range);
         self.selections.single(.{ .anchor = range.start, .head = range.end });
+        self.cursor_runtime.pause();
         self.typing_group = 0;
     }
     pub fn freshGroup() !u64 {
@@ -383,6 +391,7 @@ pub const Editor = struct {
             const editor_value = self.editor;
             editor_value.anchorGitChanges(self.before);
             var change = try self.text_edit.commit(self.document);
+            editor_value.cursor_runtime.pause();
             if (change.before == change.after) {
                 change.deinit();
                 return .{ .handled = true };
@@ -469,6 +478,7 @@ pub const Editor = struct {
     }
     pub fn execute(self: *Editor, document: *text.Document, command: commands.Command) !Outcome {
         try self.validate();
+        self.cursor_runtime.pause();
         if (command != .move or (command.move.direction != .up and command.move.direction != .down and command.move.direction != .page_up and command.move.direction != .page_down)) self.preferred_x = null;
         var snapshot = document.snapshot();
         defer snapshot.deinit();
@@ -734,6 +744,10 @@ pub const Editor = struct {
     }
     pub fn handle(self: *Editor, document: *text.Document, event: *ui.Event(ui.Input)) !Outcome {
         const result = try input.handle(self, document, event);
+        if (result.handled) switch (event.data) {
+            .key_down, .text, .edit, .unmark, .pointer_down, .pointer_move, .pointer_up, .focus => self.cursor_runtime.pause(),
+            else => {},
+        };
         if (self.soft_wrap != .none and result.handled) {
             var snapshot = document.snapshot();
             defer snapshot.deinit();

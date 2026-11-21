@@ -10,6 +10,8 @@ pub const LayoutCx = struct { allocator: std.mem.Allocator, available: g.Size, m
 pub const PrepaintCx = struct {
     allocator: std.mem.Allocator,
     focused: bool = false,
+    /// The same element held focus in the last committed frame.
+    retained_focus: bool = false,
     time: f64 = 0,
     next_deadline: ?*?f64 = null,
     text_input: ?*?platform.TextSnapshot = null,
@@ -28,7 +30,7 @@ pub const PrepaintCx = struct {
         target.* = owned;
     }
 };
-pub const PaintCx = struct { painter: *Painter, measurer: measure.Measurer, focused: bool = false, text_input: ?*?platform.TextSnapshot = null, time: f64 = 0, next_deadline: ?*?f64 = null };
+pub const PaintCx = struct { painter: *Painter, measurer: measure.Measurer, focused: bool = false, retained_focus: bool = false, text_input: ?*?platform.TextSnapshot = null, time: f64 = 0, next_deadline: ?*?f64 = null };
 pub fn LayoutResult(comptime State: type) type {
     return struct { size: g.Size, state: State };
 }
@@ -56,7 +58,7 @@ pub fn create(comptime T: type, a: std.mem.Allocator, value: T) !Custom {
         }
         fn paint(raw: *anyopaque, cx: *PaintCx, bounds: g.Rect) !void {
             const self: *@This() = @ptrCast(@alignCast(raw));
-            var before: PrepaintCx = .{ .allocator = cx.painter.allocator, .focused = cx.focused, .text_input = cx.text_input, .time = cx.time, .next_deadline = cx.next_deadline };
+            var before: PrepaintCx = .{ .allocator = cx.painter.allocator, .focused = cx.focused, .retained_focus = cx.retained_focus, .text_input = cx.text_input, .time = cx.time, .next_deadline = cx.next_deadline };
             self.prepaint = try self.value.prepaint(&before, bounds, &self.layout.?);
             try self.value.paint(cx, bounds, &self.layout.?, &self.prepaint.?);
         }

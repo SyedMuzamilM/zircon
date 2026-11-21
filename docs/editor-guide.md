@@ -95,7 +95,9 @@ The font pickers include the bundled faces and installed macOS font families. Se
 
 On macOS, `Cmd+Delete` deletes back to the logical line beginning. `Cmd+Fn+Delete` deletes to its end. At a line boundary these commands consume the adjacent newline, including CRLF. Option with backward/forward Delete deletes by word. `Cmd+Shift+K` deletes the current line. Ctrl+A/E, B/F and P/N move to the line boundaries, previous/next character and previous/next row; Ctrl+H/D, W, U and K delete backward/forward, backward by word, to the beginning and to the end. These editor commands keep document undo and split-view mapping. Search/settings text inputs support Command/Option deletion too.
 
-Enable **Vim mode** in Settings > Editor, or set `"vim_mode": true` in settings.json and restart. Normal mode uses a steady block cursor. Insert mode retains the native caret, IME input and ordinary macOS editing keys. Escape, Ctrl+[ or Ctrl+C returns to Normal. The status bar names the active mode. Native text insertion is disabled in Normal and Visual modes; unsupported command text is consumed without changing the document. Search, command and settings fields retain ordinary typing.
+Settings > Editor controls the text cursor. Choose Bar, Block, Underline or Hollow with `cursor_shape`. Set `cursor_blink` to `false` for a steady cursor, or leave it on to blink after input pauses. Set `smooth_cursor` to `true` to animate cursor movement. Reduced Motion disables the animation.
+
+Enable **Vim mode** in Settings > Editor, or set `"vim_mode": true` in settings.json and restart. Normal and Visual modes use a block, and Insert uses a bar with native IME input and ordinary macOS editing keys. Escape, Ctrl+[ or Ctrl+C returns to Normal. The status bar names the active mode. Native text insertion is disabled in Normal and Visual modes; unsupported command text is consumed without changing the document. Search, command and settings fields retain ordinary typing.
 
 | Task | Keys |
 | --- | --- |

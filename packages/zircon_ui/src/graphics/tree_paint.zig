@@ -75,7 +75,8 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             const previous_opacity = painter.opacity;
             painter.opacity = opacity;
             defer painter.opacity = previous_opacity;
-            var cx: ui_custom.PaintCx = .{ .painter = painter, .measurer = measurer, .focused = frame.focused_node == index, .text_input = &frame.text_input, .time = frame.time, .next_deadline = &frame.next_deadline };
+            const focused = frame.focused_node == index;
+            var cx: ui_custom.PaintCx = .{ .painter = painter, .measurer = measurer, .focused = focused, .retained_focus = focused and frame.retained_focus, .text_input = &frame.text_input, .time = frame.time, .next_deadline = &frame.next_deadline };
             try custom.paint(custom.object, &cx, bounds);
         },
         .container => {},

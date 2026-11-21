@@ -12,6 +12,9 @@ pub const Values = struct {
     panel_layout: PanelLayout = .classic,
     key_bindings: key_bindings_module.Overrides = .{},
     vim_mode: bool = false,
+    cursor_shape: zircon_editor.cursor.Shape = .bar,
+    cursor_blink: bool = true,
+    smooth_cursor: bool = false,
     soft_wrap: zircon_editor.wrap.Mode = .none,
     vim_bindings: zircon_editor.vim.Bindings = .{},
     font_size: f32 = 14,
@@ -42,7 +45,7 @@ pub const Values = struct {
     theme: []const u8 = "zircon.dark",
     icon_theme: []const u8 = "zircon.default",
 };
-pub const Patch = union(enum) { terminal_dock: TerminalDock, panel_layout: PanelLayout, indent_guides: bool, active_line: bool, fold_controls: bool, project_file_icons: bool, project_folder_icons: bool, project_panel_width: f32, project_entry_spacing: f32, tooltips: bool, tooltip_delay: f32, search_case_sensitive: bool, search_whole_word: bool, agent_editor: bool, soft_wrap: zircon_editor.wrap.Mode, editor_font_name: typography.FontName, interface_font_name: typography.FontName, vim_mode: bool, font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
+pub const Patch = union(enum) { terminal_dock: TerminalDock, panel_layout: PanelLayout, indent_guides: bool, active_line: bool, fold_controls: bool, project_file_icons: bool, project_folder_icons: bool, project_panel_width: f32, project_entry_spacing: f32, tooltips: bool, tooltip_delay: f32, search_case_sensitive: bool, search_whole_word: bool, agent_editor: bool, soft_wrap: zircon_editor.wrap.Mode, editor_font_name: typography.FontName, interface_font_name: typography.FontName, vim_mode: bool, cursor_shape: zircon_editor.cursor.Shape, cursor_blink: bool, smooth_cursor: bool, font_family: typography.CodeFont, ui_font_family: typography.UiFont, ui_font_size: f32, line_height: f32, font_ligatures: bool, font_size: f32, tab_width: u8, reduced_motion: bool, line_numbers: bool, git_gutters: bool, git_inline_blame: bool, theme: []const u8, icon_theme: []const u8 };
 pub const Store = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -86,10 +89,11 @@ pub const Store = struct {
             .editor_font_name, .interface_font_name => |font| .{ .string = try arena.dupe(u8, font.slice()) },
             .font_size, .ui_font_size, .line_height, .project_panel_width, .project_entry_spacing, .tooltip_delay => |n| .{ .float = n },
             .tab_width => |n| .{ .integer = n },
-            .vim_mode, .reduced_motion, .line_numbers, .git_gutters, .git_inline_blame, .font_ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor => |b| .{ .bool = b },
+            .vim_mode, .cursor_blink, .smooth_cursor, .reduced_motion, .line_numbers, .git_gutters, .git_inline_blame, .font_ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor => |b| .{ .bool = b },
             .terminal_dock => |mode| .{ .string = @tagName(mode) },
             .panel_layout => |mode| .{ .string = @tagName(mode) },
             .soft_wrap => |mode| .{ .string = @tagName(mode) },
+            .cursor_shape => |shape| .{ .string = @tagName(shape) },
             .font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
             .ui_font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
             .theme, .icon_theme => |s| .{ .string = try arena.dupe(u8, s) },
@@ -130,10 +134,11 @@ fn read(value: std.json.Value) Values {
     if (value.object.get("terminal_dock")) |v| result.terminal_dock = parseEnum(TerminalDock, v) orelse .bottom;
     if (value.object.get("panel_layout")) |v| result.panel_layout = parseEnum(PanelLayout, v) orelse .classic;
     if (value.object.get("soft_wrap")) |v| result.soft_wrap = parseEnum(zircon_editor.wrap.Mode, v) orelse .none;
+    if (value.object.get("cursor_shape")) |v| result.cursor_shape = parseEnum(zircon_editor.cursor.Shape, v) orelse .bar;
     if (value.object.get("tab_width")) |v| if (v == .integer and v.integer >= 1 and v.integer <= 16) {
         result.tab_width = @intCast(v.integer);
     };
-    inline for (.{ "vim_mode", "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures", "indent_guides", "active_line", "fold_controls", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| {
+    inline for (.{ "vim_mode", "cursor_blink", "smooth_cursor", "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures", "indent_guides", "active_line", "fold_controls", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| {
         if (v == .bool) @field(result, key) = v.bool;
     };
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
@@ -198,8 +203,9 @@ fn validate(value: std.json.Value) !void {
         _ = try typography.FontName.init(v.string);
     } else return error.InvalidSettings;
     if (value.object.get("soft_wrap")) |v| if (parseEnum(zircon_editor.wrap.Mode, v) == null) return error.InvalidSettings;
+    if (value.object.get("cursor_shape")) |v| if (parseEnum(zircon_editor.cursor.Shape, v) == null) return error.InvalidSettings;
     if (value.object.get("tab_width")) |v| if (v != .integer or v.integer < 1 or v.integer > 16) return error.InvalidSettings;
-    inline for (.{ "vim_mode", "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures", "indent_guides", "active_line", "fold_controls", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
+    inline for (.{ "vim_mode", "cursor_blink", "smooth_cursor", "reduced_motion", "line_numbers", "git_gutters", "git_inline_blame", "font_ligatures", "indent_guides", "active_line", "fold_controls", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
         if (v != .string or v.string.len == 0 or v.string.len > 256 or !std.unicode.utf8ValidateSlice(v.string)) return error.InvalidSettings;
     };

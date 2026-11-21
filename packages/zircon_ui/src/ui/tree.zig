@@ -55,6 +55,7 @@ pub const Frame = struct {
     text_input: ?interface.TextSnapshot = null,
     accessibility: std.ArrayList(interface.AccessibilityTree.Node) = .empty,
     focused_node: ?u32 = null,
+    retained_focus: bool = false,
     hovered_node: ?u32 = null,
     hover_started: f64 = 0,
     tooltip_delay: f64 = 0.4,
@@ -86,6 +87,7 @@ pub const Frame = struct {
         frame.text_input = null;
         frame.accessibility = .empty;
         frame.focused_node = null;
+        frame.retained_focus = false;
         frame.hovered_node = null;
         frame.hover_started = 0;
         frame.tooltip_delay = 0.4;
@@ -107,6 +109,7 @@ pub const Frame = struct {
         frame.text_input = null;
         frame.accessibility = .empty;
         frame.focused_node = null;
+        frame.retained_focus = false;
         frame.next_deadline = null;
     }
     fn retire(frame: *Frame) void {
