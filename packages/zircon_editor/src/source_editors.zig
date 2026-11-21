@@ -1,9 +1,10 @@
 //! Source views share text/history while retaining independent selections.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const editing = @import("editor.zig");
 pub fn Sources(comptime DocumentId: type) type {
-    const a = std.heap.page_allocator;
+    const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 
     return struct {
         pub const View = struct { document: DocumentId, editor: editing.Editor };
@@ -11,6 +12,9 @@ pub fn Sources(comptime DocumentId: type) type {
         horizontal: f32 = 0,
         views: std.ArrayList(View) = .empty,
         active: ?DocumentId = null,
+        pub fn append(self: *Model, view: View) !void {
+            try self.views.append(a, view);
+        }
         pub fn find(self: *const Model, id: DocumentId) ?*const View {
             for (self.views.items) |*view| if (std.meta.eql(view.document, id)) return view;
             return null;

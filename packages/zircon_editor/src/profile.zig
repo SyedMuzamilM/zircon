@@ -16,6 +16,14 @@ pub const Profile = struct {
     }
 };
 pub fn lex(a: std.mem.Allocator, bytes: []const u8, profile: Profile, initial: syntax.State) !syntax.Lexed {
+    return scan(a, bytes, profile, initial, true);
+}
+
+pub fn endState(bytes: []const u8, profile: Profile, initial: syntax.State) !syntax.State {
+    return (try scan(std.heap.page_allocator, bytes, profile, initial, false)).state;
+}
+
+fn scan(a: std.mem.Allocator, bytes: []const u8, profile: Profile, initial: syntax.State, comptime collect: bool) !syntax.Lexed {
     var state = initial;
     var spans: std.ArrayList(syntax.Span) = .empty;
     var i: usize = 0;
@@ -69,16 +77,16 @@ pub fn lex(a: std.mem.Allocator, bytes: []const u8, profile: Profile, initial: s
         } else if (std.ascii.isAlphabetic(bytes[i]) or bytes[i] == '_') {
             i += 1;
             while (i < bytes.len and (std.ascii.isAlphanumeric(bytes[i]) or bytes[i] == '_')) : (i += 1) {}
-            for (profile.keywords) |word| if (std.mem.eql(u8, bytes[start..i], word)) {
+            if (collect) for (profile.keywords) |word| if (std.mem.eql(u8, bytes[start..i], word)) {
                 kind = .keyword;
                 break;
             };
         } else {
             i += 1;
             while (i < bytes.len and bytes[i] & 0xc0 == 0x80) : (i += 1) {}
-            if (!std.ascii.isWhitespace(bytes[start])) kind = .punctuation;
+            if (collect and !std.ascii.isWhitespace(bytes[start])) kind = .punctuation;
         }
-        if (kind != .plain) try spans.append(a, .{ .start = start, .end = i, .kind = kind });
+        if (collect and kind != .plain) try spans.append(a, .{ .start = start, .end = i, .kind = kind });
     }
     return .{ .spans = spans.items, .state = state };
 }

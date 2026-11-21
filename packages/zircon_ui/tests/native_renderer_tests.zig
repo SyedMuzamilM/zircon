@@ -123,7 +123,7 @@ test "Metal preserves clipping painter order rounding and native glyph rendering
     try t.expectEqual(@as(u64, 9), stats.frames);
     try t.expect(stats.glyphs > 0);
     try t.expectEqual(@as(usize, 4 * 1024 * 1024), stats.atlas_bytes);
-    try t.expect(stats.layout_bytes <= 4 * 1024 * 1024);
+    try t.expect(stats.layout_bytes <= native.text.layout_budget);
     try t.expect(stats.instance_bytes > 0);
     var invalid = shapes[4];
     invalid.segment.?.width = std.math.nan(f32);

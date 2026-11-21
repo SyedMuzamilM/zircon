@@ -1,6 +1,7 @@
 //! Real repository queries/mutations run as entity-owned jobs. UI installation
 //! checks document revisions and uses an explicit single-owner result handoff.
 const std = @import("std");
+const builtin = @import("builtin");
 const zircon_editor = @import("zircon_editor");
 const git = @import("zircon_git");
 const zircon_git_ui = @import("zircon_git_ui");
@@ -18,7 +19,12 @@ const commit_form = @import("../views/git/commit.zig");
 const handoff = @import("handoff.zig");
 const diff_layout = zircon_git_ui.layout;
 const Shell = shell.Shell;
+// Git model strings are also allocated by view and command handlers.
 const a = std.heap.page_allocator;
+const scratch_allocator = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
+// Selection strings move between the Git model and its view handlers.
+pub const selection_allocator = scratch_allocator;
+pub const Refresh = enum { edit, full };
 const BlameRequest = struct { line: usize, expanded: bool = true, document: ?workspace.DocumentId = null };
 pub const Operation = union(enum) { refresh, buffer_diff, all_diff, diff: struct { path: []const u8, staged: bool }, history: []const u8, stage: []const u8, unstage: []const u8, stage_all, unstage_all, commit: []const u8, blame: BlameRequest, network: git.Network, switch_branch: struct { name: []const u8, create: bool = false, track: bool = false }, stash_save: bool, stash_apply: struct { oid: []const u8, pop: bool }, stash_show: []const u8 };
 const BlameTarget = struct { document: workspace.DocumentId, revision: u64, line: usize };
@@ -77,6 +83,7 @@ pub const Model = struct {
     background: bool = false,
     pending_actions: std.ArrayList(Operation) = .empty,
     blame_target: ?BlameTarget = null,
+    blame_head: usize = 0,
     blame_changed_at: f64 = 0,
     blame_requested: bool = false,
     pending_blame: ?struct { document: workspace.DocumentId, revision: u64, request: BlameRequest } = null,
@@ -92,7 +99,7 @@ pub const Model = struct {
     operation_label: []const u8 = "",
     generation: u64 = 0,
     status_generation: u64 = 0,
-    needs_refresh: bool = false,
+    pending_refresh: ?Refresh = null,
     needs_buffer_diff: bool = false,
     baselines: []*BaseSource = &.{},
     next_refresh: f64 = 0,
@@ -127,10 +134,10 @@ pub const Model = struct {
         git.deinitHistory(a, self.commits);
         if (self.diff) |*value| value.deinit();
         if (self.references) |*refs| refs.deinit();
-        a.free(self.stash_oid);
-        a.free(self.reveal_path);
-        a.free(self.selected_path);
-        a.free(self.selected_commit);
+        selection_allocator.free(self.stash_oid);
+        selection_allocator.free(self.reveal_path);
+        selection_allocator.free(self.selected_path);
+        selection_allocator.free(self.selected_commit);
         a.free(self.commit_message);
         if (self.working_presentation) |*presentation| presentation.deinit();
         if (self.pending_history) |oid| a.free(oid);
@@ -193,15 +200,15 @@ pub const Model = struct {
     pub fn showWorking(self: *Model) void {
         if (self.selected_commit.len == 0) return;
         self.stashPresentation();
-        a.free(self.selected_commit);
+        selection_allocator.free(self.selected_commit);
         self.selected_commit = &.{};
         self.stash_view = false;
         self.restorePresentation(&self.working_presentation);
     }
     pub fn openHistoryTab(self: *Model, oid: []const u8, pane: u8) !void {
         if (std.mem.eql(u8, self.selected_commit, oid)) return;
-        const selected = try a.dupe(u8, oid);
-        errdefer a.free(selected);
+        const selected = try selection_allocator.dupe(u8, oid);
+        errdefer selection_allocator.free(selected);
         var found: ?usize = null;
         for (self.history_tabs.items, 0..) |tab, index| if (std.mem.eql(u8, tab.oid, oid)) {
             found = index;
@@ -221,7 +228,7 @@ pub const Model = struct {
             found = self.history_tabs.items.len - 1;
         }
         self.stashPresentation();
-        a.free(self.selected_commit);
+        selection_allocator.free(self.selected_commit);
         self.selected_commit = selected;
         self.restorePresentation(&self.history_tabs.items[found.?].presentation);
     }
@@ -258,6 +265,7 @@ fn sameDiff(left: git.Diff, right: git.Diff) bool {
 }
 
 pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
+    const scratch = scratch_allocator;
     var projection = multibuffer.MultiBuffer.init(a);
     errdefer projection.deinit();
     var source: ?workspace.DocumentId = null;
@@ -268,8 +276,8 @@ pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
             if (std.mem.eql(u8, previous, hunk.path)) continue;
             previous = hunk.path;
             if (isBinaryHunk(hunk)) continue;
-            const absolute = try std.fs.path.resolve(a, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, hunk.path });
-            defer a.free(absolute);
+            const absolute = try std.fs.path.resolve(scratch, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, hunk.path });
+            defer scratch.free(absolute);
             const retained = for (self.git.editing.views.items) |view| {
                 const record = self.workspace.getConst(view.document) catch continue;
                 if (record.path != null and std.mem.eql(u8, record.path.?, absolute)) break view.document;
@@ -282,8 +290,8 @@ pub fn rebuildEditable(self: *Shell, diff: git.Diff) !void {
             defer snapshot.deinit();
             try projection.addSource(id, snapshot);
             const view = try git_editing.getView(self, id);
-            const ranges = try zircon_git_ui.sources.ranges(a, snapshot, diff.hunks, hunk.path);
-            defer a.free(ranges);
+            const ranges = try zircon_git_ui.sources.ranges(scratch, snapshot, diff.hunks, hunk.path);
+            defer scratch.free(ranges);
             try projection.setExcerpts(id, ranges);
             try view.editor.wrap_cache.setExcerpts(ranges);
             source = id;
@@ -395,10 +403,11 @@ const Box = handoff.Handoff(Result);
 const Job = struct {
     pub const Output = *Box;
     io: std.Io,
+    inputs_arena: std.heap.ArenaAllocator = .init(scratch_allocator),
     buffers: []CapturedBuffer = &.{},
     baselines: []*BaseSource = &.{},
     patch: ?[]u8 = null,
-    root: []u8,
+    root: []const u8 = "",
     operation: Operation,
     generation: u64,
     snapshot: ?text.Snapshot = null,
@@ -438,33 +447,28 @@ const Job = struct {
             if (result.status == null) result.status = repo.status(a) catch null;
             if (result.references == null) result.references = repo.references(a) catch null;
         };
+        var captured = std.heap.ArenaAllocator.init(scratch_allocator);
+        defer captured.deinit();
+        const scratch = captured.allocator();
+        var inputs: std.ArrayList(git.buffer_diff.Buffer) = .empty;
         if (result.diff != null and self.operation != .history and self.operation != .stash_show and !(self.operation == .diff and self.operation.diff.staged) and !(self.comparison != null and self.comparison.?.staged)) {
-            var inputs: std.ArrayList(git.buffer_diff.Buffer) = .empty;
-            defer {
-                for (inputs.items) |input| {
-                    a.free(input.path);
-                    a.free(input.before);
-                    a.free(input.after);
-                }
-                inputs.deinit(a);
-            }
             var versions: std.ArrayList(SourceVersion) = .empty;
             defer versions.deinit(a);
+            const all = self.operation == .all_diff or (self.comparison != null and self.comparison.?.all);
             for (self.buffers) |buffer| {
                 try versions.append(a, .{ .document = buffer.document, .revision = buffer.snapshot.revision() });
                 if (!buffer.dirty) continue;
-                const path = repo.relativePath(a, buffer.path) catch continue;
-                errdefer a.free(path);
-                const selected_path = if (self.operation == .diff) self.operation.diff.path else if (self.comparison) |comparison| comparison.path else null;
-                if (selected_path) |selected| if (!std.mem.eql(u8, selected, path)) {
-                    a.free(path);
-                    continue;
+                try cancel.check();
+                const path = repo.relativePath(scratch, buffer.path) catch |err| switch (err) {
+                    error.OutOfMemory => return err,
+                    else => continue,
                 };
-                const before = try repo.baseline(a, path, if (self.operation == .all_diff or (self.comparison != null and self.comparison.?.all)) .head else .index);
-                errdefer a.free(before);
-                const after = try buffer.snapshot.copy(a, .{ .start = 0, .end = buffer.snapshot.byteLen() });
-                errdefer a.free(after);
-                try inputs.append(a, .{ .path = path, .before = before, .after = after });
+                const selected_path = if (self.operation == .diff) self.operation.diff.path else if (self.comparison) |comparison| comparison.path else null;
+                if (selected_path) |selected| if (!std.mem.eql(u8, selected, path)) continue;
+                const gutter_base = !all and result.changes_ready and std.meta.eql(result.document, @as(?workspace.DocumentId, buffer.document));
+                const before = if (gutter_base) result.baseline else try repo.baseline(scratch, path, if (all) .head else .index);
+                const after = try buffer.snapshot.copy(scratch, .{ .start = 0, .end = buffer.snapshot.byteLen() });
+                try inputs.append(scratch, .{ .path = path, .before = before, .after = after });
             }
             if (inputs.items.len > 0) {
                 const replacement = try git.buffer_diff.replace(a, result.diff.?, inputs.items);
@@ -475,7 +479,7 @@ const Job = struct {
         }
         try cancel.check();
         if (result.diff) |*diff| {
-            try self.captureContext(&repo, diff, cancel);
+            try self.captureContext(&repo, diff, inputs.items, cancel);
             result.baselines = self.baselines;
             self.baselines = &.{};
         }
@@ -487,14 +491,15 @@ const Job = struct {
         result.buffer_only = true;
         result.preserve_scroll = true;
         result.root_path = try a.dupe(u8, self.root);
-        var patch = try git.parseDiff(a, self.patch.?);
+        const scratch = scratch_allocator;
+        var patch = try git.parseDiff(scratch, self.patch.?);
         defer patch.deinit();
         var inputs: std.ArrayList(git.buffer_diff.Buffer) = .empty;
         defer {
             for (inputs.items) |input| {
-                a.free(input.after);
+                scratch.free(input.after);
             }
-            inputs.deinit(a);
+            inputs.deinit(scratch);
         }
         var versions: std.ArrayList(SourceVersion) = .empty;
         defer versions.deinit(a);
@@ -502,14 +507,14 @@ const Job = struct {
             try versions.append(a, .{ .document = buffer.document, .revision = buffer.snapshot.revision() });
             if (!buffer.dirty) continue;
             for (self.baselines) |base| {
-                const absolute = try std.fs.path.resolve(a, &.{ self.root, base.path });
-                defer a.free(absolute);
+                const absolute = try std.fs.path.resolve(scratch, &.{ self.root, base.path });
+                defer scratch.free(absolute);
                 if (!std.mem.eql(u8, buffer.path, absolute)) continue;
                 try cancel.check();
                 const before = base.bytes;
-                const after = try buffer.snapshot.copy(a, .{ .start = 0, .end = buffer.snapshot.byteLen() });
-                errdefer a.free(after);
-                try inputs.append(a, .{ .path = base.path, .before = before, .after = after });
+                const after = try buffer.snapshot.copy(scratch, .{ .start = 0, .end = buffer.snapshot.byteLen() });
+                errdefer scratch.free(after);
+                try inputs.append(scratch, .{ .path = base.path, .before = before, .after = after });
                 break;
             }
         }
@@ -519,11 +524,16 @@ const Job = struct {
         for (result.diff.?.hunks) |hunk| {
             if (std.mem.eql(u8, previous, hunk.path)) continue;
             previous = hunk.path;
-            const absolute = try std.fs.path.resolve(a, &.{ self.root, hunk.path });
-            defer a.free(absolute);
+            try cancel.check();
+            if (inputForPath(inputs.items, hunk.path)) |input| {
+                try zircon_git_ui.context.attach(&result.diff.?, hunk.path, input.after);
+                continue;
+            }
+            const absolute = try std.fs.path.resolve(scratch, &.{ self.root, hunk.path });
+            defer scratch.free(absolute);
             for (self.buffers) |buffer| if (std.mem.eql(u8, buffer.path, absolute)) {
-                const bytes = try buffer.snapshot.copy(a, .{ .start = 0, .end = buffer.snapshot.byteLen() });
-                defer a.free(bytes);
+                const bytes = try buffer.snapshot.copy(scratch, .{ .start = 0, .end = buffer.snapshot.byteLen() });
+                defer scratch.free(bytes);
                 try zircon_git_ui.context.attach(&result.diff.?, hunk.path, bytes);
                 break;
             };
@@ -543,7 +553,12 @@ const Job = struct {
         a.free(self.baselines);
         self.baselines = bases;
     }
-    fn captureContext(self: *Job, repo: *git.Repository, diff: *git.Diff, cancel: *ui.tasks.Cancellation) !void {
+    fn inputForPath(inputs: []const git.buffer_diff.Buffer, path: []const u8) ?git.buffer_diff.Buffer {
+        for (inputs) |input| if (std.mem.eql(u8, input.path, path)) return input;
+        return null;
+    }
+
+    fn captureContext(self: *Job, repo: *git.Repository, diff: *git.Diff, inputs: []const git.buffer_diff.Buffer, cancel: *ui.tasks.Cancellation) !void {
         var previous: []const u8 = "";
         for (diff.hunks) |hunk| {
             if (std.mem.eql(u8, previous, hunk.path) or isBinaryHunk(hunk)) continue;
@@ -562,11 +577,19 @@ const Job = struct {
                 try zircon_git_ui.context.attach(diff, hunk.path, bytes);
                 continue;
             }
-            const before = try repo.baseline(a, hunk.path, if (self.operation == .all_diff or (self.comparison != null and self.comparison.?.all)) .head else .index);
+            const input = inputForPath(inputs, hunk.path);
+            const before = if (input) |buffer|
+                try a.dupe(u8, buffer.before)
+            else
+                try repo.baseline(a, hunk.path, if (self.operation == .all_diff or (self.comparison != null and self.comparison.?.all)) .head else .index);
             self.addBase(hunk.path, before) catch |err| {
                 a.free(before);
                 return err;
             };
+            if (input) |buffer| {
+                try zircon_git_ui.context.attach(diff, hunk.path, buffer.after);
+                continue;
+            }
             const absolute = try std.fs.path.resolve(a, &.{ repo.root, hunk.path });
             defer a.free(absolute);
             var captured = false;
@@ -685,15 +708,8 @@ const Job = struct {
     }
     pub fn deinit(self: *Job, _: std.mem.Allocator) void {
         freeBases(self.baselines);
-        if (self.patch) |patch| a.free(patch);
-        a.free(self.root);
-        for (self.buffers) |*buffer| {
-            a.free(buffer.path);
-            buffer.snapshot.deinit();
-        }
-        a.free(self.buffers);
-        if (self.comparison) |comparison| if (comparison.path) |path| a.free(path);
-        if (self.path) |path| a.free(path);
+        for (self.buffers) |*buffer| buffer.snapshot.deinit();
+        self.inputs_arena.deinit();
         if (self.snapshot) |*snapshot| snapshot.deinit();
         freeOperation(self.operation);
     }
@@ -708,14 +724,18 @@ pub fn edited(self: *Shell, cx: *ui.Context(Shell)) !void {
     const first = self.git.edit_refresh_at == null;
     self.git.edit_refresh_at = try cx.app.currentTime() + 0.25;
     const current = actions.active(self) catch return;
-    if (first and (current.editor.git_changes.len == 0 or !std.meta.eql(@as(?workspace.DocumentId, current.id), self.git.active_document))) try start(self, cx, .refresh);
+    if (first and (current.editor.git_changes.len == 0 or !std.meta.eql(@as(?workspace.DocumentId, current.id), self.git.active_document))) try startRefresh(self, cx, .edit);
 }
 
 pub fn start(self: *Shell, cx: *ui.Context(Shell), operation: Operation) !void {
-    return startOperation(self, cx, operation, true);
+    return startOperation(self, cx, operation, true, .full);
 }
 
-fn startOperation(self: *Shell, cx: *ui.Context(Shell), operation: Operation, prepare_mutation: bool) !void {
+pub fn startRefresh(self: *Shell, cx: *ui.Context(Shell), mode: Refresh) !void {
+    return startOperation(self, cx, .refresh, true, mode);
+}
+
+fn startOperation(self: *Shell, cx: *ui.Context(Shell), operation: Operation, prepare_mutation: bool, refresh: Refresh) !void {
     const changes_worktree = switch (operation) {
         .switch_branch, .stash_save, .stash_apply => true,
         .network => |n| n == .pull,
@@ -746,7 +766,7 @@ fn startOperation(self: *Shell, cx: *ui.Context(Shell), operation: Operation, pr
             return;
         }
         if (operation == .refresh) {
-            self.git.needs_refresh = true;
+            if (self.git.pending_refresh != .full) self.git.pending_refresh = refresh;
             return;
         }
         if (operation == .history) {
@@ -764,8 +784,10 @@ fn startOperation(self: *Shell, cx: *ui.Context(Shell), operation: Operation, pr
         return error.GitBusy;
     }
     if (self.git.generation == std.math.maxInt(u64)) return error.GitGenerationExhausted;
-    var job: Job = .{ .io = self.workspace.io, .root = try a.dupe(u8, self.workspace.root_path), .operation = .refresh, .generation = self.git.generation + 1 };
+    var job: Job = .{ .io = self.workspace.io, .operation = .refresh, .generation = self.git.generation + 1 };
     errdefer job.deinit(a);
+    const inputs = job.inputs_arena.allocator();
+    job.root = try inputs.dupe(u8, if (operation == .buffer_diff and self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path);
     job.operation = try copyOperation(operation);
     job.preflight = prepare_mutation and (operation == .stage or operation == .stage_all or operation == .commit);
     job.metadata_fingerprint = self.git.metadata_fingerprint;
@@ -774,38 +796,31 @@ fn startOperation(self: *Shell, cx: *ui.Context(Shell), operation: Operation, pr
         const record = try self.workspace.getConst(id);
         job.snapshot = record.doc.snapshot();
         job.document = id;
-        if (record.path) |path| job.path = try a.dupe(u8, path);
+        if (record.path) |path| job.path = try inputs.dupe(u8, path);
     }
     const mutation = switch (operation) {
         .stage, .unstage, .stage_all, .unstage_all, .commit, .network, .switch_branch, .stash_save, .stash_apply => true,
         else => false,
     };
-    if ((mutation or operation == .refresh) and (self.panel == .git_diff or self.secondary_tool == .git_diff) and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (!self.git.combined and self.git.selected_path.len > 0) try a.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
-    job.include_references = self.git.needs_metadata or self.git.references == null or operation == .refresh or switch (operation) {
+    if ((mutation or operation == .refresh) and (self.panel == .git_diff or self.secondary_tool == .git_diff) and self.git.selected_commit.len == 0) job.comparison = .{ .path = if (!self.git.combined and self.git.selected_path.len > 0) try inputs.dupe(u8, self.git.selected_path) else null, .staged = self.git.staged_diff, .all = self.git.combined };
+    job.include_references = self.git.needs_metadata or self.git.references == null or (operation == .refresh and refresh == .full) or switch (operation) {
         .network, .switch_branch, .stash_save, .stash_apply, .commit => true,
         else => false,
     };
-    var buffers: std.ArrayList(CapturedBuffer) = .empty;
-    defer buffers.deinit(a);
-    errdefer for (buffers.items) |*buffer| {
-        a.free(buffer.path);
-        buffer.snapshot.deinit();
-    };
+    const buffers = try inputs.alloc(CapturedBuffer, self.workspace.slots.items.len);
+    var captured: usize = 0;
     for (self.workspace.slots.items, 0..) |slot, index| {
         const record = slot.record orelse continue;
-        const id: workspace.DocumentId = .{ .workspace = self.workspace.identity, .slot = @intCast(index), .generation = slot.generation };
         const path = record.path orelse continue;
-        const owned = try a.dupe(u8, path);
-        errdefer a.free(owned);
-        try buffers.append(a, .{ .document = id, .path = owned, .snapshot = record.doc.snapshot(), .dirty = record.dirty() });
+        const id: workspace.DocumentId = .{ .workspace = self.workspace.identity, .slot = @intCast(index), .generation = slot.generation };
+        const owned = try inputs.dupe(u8, path);
+        buffers[captured] = .{ .document = id, .path = owned, .snapshot = record.doc.snapshot(), .dirty = record.dirty() };
+        captured += 1;
+        job.buffers = buffers[0..captured];
     }
-    job.buffers = try buffers.toOwnedSlice(a);
     if (operation == .buffer_diff) {
-        const root = try a.dupe(u8, if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path);
-        a.free(job.root);
-        job.root = root;
         job.include_references = false;
-        job.patch = try a.dupe(u8, self.git.diff.?.text);
+        job.patch = try inputs.dupe(u8, self.git.diff.?.text);
         job.baselines = try a.alloc(*BaseSource, self.git.baselines.len);
         for (self.git.baselines, job.baselines) |base, *copy| copy.* = base.retain();
     }
@@ -847,7 +862,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
             if (!(try self.workspace.getConst(source.document)).dirty()) continue;
             self.workspace.save(source.document, null) catch |err| return failPreparation(self, cx, err);
         }
-        try startOperation(self, cx, operation, false);
+        try startOperation(self, cx, operation, false, .full);
         return;
     }
     if (value.committed_message) |message| try commit_form.completed(self, cx, message);
@@ -868,7 +883,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         if (value.commits_ready or self.git.metadata_fingerprint == fingerprint_value) self.git.metadata_fingerprint = fingerprint_value;
     }
     if (value.reload_worktree) {
-        self.git.needs_refresh = true;
+        self.git.pending_refresh = .full;
         try actions.refreshExternalDocuments(self, cx);
         try actions.refreshTree(self);
     }
@@ -951,7 +966,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
             if (self.git.projection) |projection| if (projection.fileOffset(&self.git.diff_view, self.git.reveal_path, self.editor_options.font_size * self.editor_options.line_height)) |offset| {
                 self.git.diff_scroll.offset = offset;
             };
-            a.free(self.git.reveal_path);
+            selection_allocator.free(self.git.reveal_path);
             self.git.reveal_path = &.{};
         }
     }
@@ -1014,13 +1029,13 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         try bufferChanged(self, cx);
         return;
     }
-    if (self.git.needs_refresh) {
-        if (self.git.edit_refresh_at) |due| if (try cx.app.currentTime() < due) {
+    if (self.git.pending_refresh) |mode| {
+        if (mode == .edit) if (self.git.edit_refresh_at) |due| if (try cx.app.currentTime() < due) {
             const current = actions.active(self) catch return;
             if (current.editor.git_changes.len > 0 and std.meta.eql(@as(?workspace.DocumentId, current.id), self.git.active_document)) return;
         };
-        self.git.needs_refresh = false;
-        try start(self, cx, .refresh);
+        self.git.pending_refresh = null;
+        try startRefresh(self, cx, mode);
     }
 }
 
@@ -1072,11 +1087,19 @@ pub fn pollBlame(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (state.inline_blame) |blame| if (blame.expanded) return;
     const record = try self.workspace.getConst(id);
     if (record.path == null) return;
-    var snapshot = record.doc.snapshot();
-    defer snapshot.deinit();
-    const line = (try snapshot.pointAt(@min(state.primary().head, snapshot.byteLen()))).line;
-    const target: BlameTarget = .{ .document = id, .revision = snapshot.revision(), .line = line };
     const now = if (self.window) |h| (try cx.app.window(h)).time else return;
+    const revision = record.doc.revision();
+    const head = state.primary().head;
+    const previous = self.git.blame_target;
+    const line = if (previous != null and std.meta.eql(previous.?.document, id) and previous.?.revision == revision and self.git.blame_head == head)
+        previous.?.line
+    else blk: {
+        var snapshot = record.doc.snapshot();
+        defer snapshot.deinit();
+        break :blk (try snapshot.pointAt(@min(head, snapshot.byteLen()))).line;
+    };
+    self.git.blame_head = head;
+    const target: BlameTarget = .{ .document = id, .revision = revision, .line = line };
     if (self.git.blame_target == null or !std.meta.eql(self.git.blame_target.?, target)) {
         self.git.blame_target = target;
         self.git.blame_changed_at = now;
@@ -1084,7 +1107,7 @@ pub fn pollBlame(self: *Shell, cx: *ui.Context(Shell)) !void {
     }
     if (self.git.blame_requested or self.git.busy or now - self.git.blame_changed_at < 0.3) return;
     self.git.blame_requested = true;
-    if (state.inline_blame) |blame| if (blame.revision == snapshot.revision() and blame.line == line) return;
+    if (state.inline_blame) |blame| if (blame.revision == revision and blame.line == line) return;
     try start(self, cx, .{ .blame = .{ .line = line + 1, .expanded = false } });
 }
 

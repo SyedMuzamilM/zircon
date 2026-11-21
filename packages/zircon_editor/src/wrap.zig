@@ -22,6 +22,7 @@ pub const Cache = struct {
     width: f32 = 0,
     font_size: f32 = 0,
     tab_width: usize = 0,
+    metrics_generation: u64 = 0,
     folding: folding_module.State = .{},
     root: ?*index.Node = null,
     builds: usize = 0,
@@ -104,7 +105,7 @@ pub const Cache = struct {
 
     pub fn ensure(self: *Cache, s: text.Snapshot, width: f32, font_size: f32, tabs: usize, metrics: ui.layout.Measurer) !void {
         const available = @max(font_size * 2, width);
-        const same_geometry = self.width == available and self.font_size == font_size and self.tab_width == tabs;
+        const same_geometry = self.width == available and self.font_size == font_size and self.tab_width == tabs and self.metrics_generation == metrics.generation;
         if (self.revision == s.revision() and self.state_id == s.stateId() and same_geometry) return;
         const a = self.allocator;
         if (self.excerpt_ranges == null and self.folding.collapsed.items.len > 0) try self.folding.ensure(a, s, tabs);
@@ -143,6 +144,7 @@ pub const Cache = struct {
         self.width = available;
         self.font_size = font_size;
         self.tab_width = tabs;
+        self.metrics_generation = metrics.generation;
         self.builds += 1;
         self.shaped_lines += builder.shaped_lines;
         self.pending = null;
@@ -246,46 +248,53 @@ const Builder = struct {
     shaped_lines: usize = 0,
 
     fn build(self: *Builder, first: usize, end: usize) error{ OutOfMemory, InvalidUtf8, InvalidTabWidth }!?*index.Node {
+        if (first == end) return null;
+        var lines = self.snapshot.linesFrom(first) catch unreachable;
+        return try self.buildRange(&lines, first, end);
+    }
+
+    fn buildRange(self: *Builder, stream: *text.LineIterator, first: usize, end: usize) error{ OutOfMemory, InvalidUtf8, InvalidTabWidth }!*index.Node {
         std.debug.assert(end >= first);
         const count = end - first;
         const a = self.allocator;
-        if (count == 0) return null;
         if (count > index.leaf_lines) {
             const mid = first + count / 2;
-            const left = (try self.build(first, mid)).?;
+            const left = try self.buildRange(stream, first, mid);
             defer index.release(a, left);
-            const right = (try self.build(mid, end)).?;
+            const right = try self.buildRange(stream, mid, end);
             defer index.release(a, right);
             return try index.branch(a, left, right);
         }
 
         var lines: [index.leaf_lines]index.Line = undefined;
         self.segments.clearRetainingCapacity();
-        var start = self.snapshot.lineStart(first) catch unreachable;
         for (first..end, lines[0..count]) |line, *entry| {
-            const next = if (line + 1 == self.snapshot.lineCount()) self.snapshot.byteLen() else self.snapshot.lineStart(line + 1) catch unreachable;
-            entry.* = .{ .bytes = next - start, .rows = 0 };
-            const line_start = start;
-            start = next;
-            if (!self.visible(line, line_start)) continue;
+            const info = stream.next().?;
+            entry.* = .{ .bytes = stream.offset - info.range.start, .rows = 0 };
+            if (!self.visible(line, info.range.start)) continue;
             if (self.tabs == 0) return error.InvalidTabWidth;
 
             _ = self.arena.reset(.retain_capacity);
             const scratch = self.arena.allocator();
             self.shaped_lines += 1;
-            var content_end = if (line + 1 == self.snapshot.lineCount()) next else next - 1;
-            if (content_end < next and content_end > line_start and (self.snapshot.byteAt(content_end - 1) catch unreachable) == '\r') content_end -= 1;
-            const content_len = content_end - line_start;
+            const content_len = info.range.end - info.range.start;
             if (content_len == 0 or content_len > 64 * 1024) {
                 try self.segments.append(a, .{ .start = 0, .end = content_len, .x = 0 });
                 entry.rows = 1;
                 continue;
             }
-            const original = self.snapshot.copy(scratch, .{ .start = line_start, .end = content_end }) catch |err| switch (err) {
+            const original = info.bytes orelse self.snapshot.copy(scratch, info.range) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => unreachable,
             };
-            const pieces = try segments(scratch, original, 0, self.width, self.font_size, self.tabs, self.metrics);
+            const expanded = try display.Line.build(scratch, original, self.tabs);
+            const style: ui.TextStyle = .{ .size = self.font_size, .mono = true };
+            if (self.metrics.fitsSingleRow(expanded.bytes, style, self.width)) {
+                try self.segments.append(a, .{ .start = 0, .end = content_len, .x = 0 });
+                entry.rows = 1;
+                continue;
+            }
+            const pieces = try split(scratch, original, expanded, 0, self.width, style, self.metrics);
             try self.segments.ensureUnusedCapacity(a, pieces.len);
             for (pieces) |piece| self.segments.appendAssumeCapacity(.{ .start = piece.start, .end = piece.end, .x = piece.x });
             entry.rows = pieces.len;
@@ -314,9 +323,13 @@ fn previous(bytes: []const u8, at: usize) usize {
 pub fn segments(a: std.mem.Allocator, original: []const u8, source_start: usize, width: f32, font_size: f32, tabs: usize, metrics: ui.layout.Measurer) ![]Row {
     const available = @max(font_size * 2, width);
     const style: ui.TextStyle = .{ .size = font_size, .mono = true };
+    const expanded = try display.Line.build(a, original, tabs);
+    return split(a, original, expanded, source_start, available, style, metrics);
+}
+
+fn split(a: std.mem.Allocator, original: []const u8, expanded: display.Line, source_start: usize, available: f32, style: ui.TextStyle, metrics: ui.layout.Measurer) ![]Row {
     var rows: std.ArrayList(Row) = .empty;
     errdefer rows.deinit(a);
-    const expanded = try display.Line.build(a, original, tabs);
     var leading: usize = 0;
     while (leading < original.len and (original[leading] == ' ' or original[leading] == '\t')) leading += 1;
     const indent = if (leading == original.len) 0 else @min(expanded.caret(metrics, style, leading), available / 2);

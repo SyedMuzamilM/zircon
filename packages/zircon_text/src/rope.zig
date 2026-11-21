@@ -41,8 +41,24 @@ pub fn release(a: Allocator, root: ?*Node) void {
 }
 fn scan(bytes: []const u8) Summary {
     var result: Summary = .{ .bytes = bytes.len, .starts_lf = bytes.len > 0 and bytes[0] == '\n', .ends_cr = bytes.len > 0 and bytes[bytes.len - 1] == '\r' };
-    for (bytes, 0..) |byte, index| {
-        if (byte == '\r' and (index + 1 == bytes.len or bytes[index + 1] != '\n')) result.bare_cr += 1;
+    var index: usize = 0;
+    // Leave the final byte available for the CR lookahead.
+    while (bytes.len - index > 16) : (index += 16) {
+        const chunk: @Vector(16, u8) = bytes[index..][0..16].*;
+        const lf: u16 = @bitCast(chunk == @as(@Vector(16, u8), @splat('\n')));
+        const cr = chunk == @as(@Vector(16, u8), @splat('\r'));
+        result.lines += @popCount(lf);
+        if (@reduce(.Or, cr)) {
+            const next: @Vector(16, u8) = bytes[index + 1 ..][0..16].*;
+            const followed_by_lf = next == @as(@Vector(16, u8), @splat('\n'));
+            result.bare_cr += @popCount(@as(u16, @bitCast(cr & ~followed_by_lf)));
+        }
+        const starts = (chunk & @as(@Vector(16, u8), @splat(0xc0))) != @as(@Vector(16, u8), @splat(0x80));
+        const supplementary = chunk >= @as(@Vector(16, u8), @splat(0xf0));
+        result.utf16 += @as(usize, @popCount(@as(u16, @bitCast(starts)))) + @popCount(@as(u16, @bitCast(supplementary)));
+    }
+    for (bytes[index..], index..) |byte, at| {
+        if (byte == '\r' and (at + 1 == bytes.len or bytes[at + 1] != '\n')) result.bare_cr += 1;
         if (byte == '\n') result.lines += 1;
         if (byte & 0xc0 != 0x80) result.utf16 += if (byte >= 0xf0) @as(usize, 2) else 1;
     }
@@ -266,10 +282,19 @@ pub fn newline(root: *const Node, ordinal: usize) usize {
             node = b.right;
         }
     }
-    for (node.data.leaf, 0..) |byte, i| if (byte == '\n') {
-        if (nth == 0) return base + i;
+    const bytes = node.data.leaf;
+    var pos: usize = 0;
+    while (bytes.len - pos >= 16) : (pos += 16) {
+        const block: @Vector(16, u8) = bytes[pos..][0..16].*;
+        const count = @popCount(@as(u16, @bitCast(block == @as(@Vector(16, u8), @splat('\n')))));
+        if (nth < count) break;
+        nth -= count;
+    }
+    while (std.mem.indexOfScalarPos(u8, bytes, pos, '\n')) |found| {
+        if (nth == 0) return base + found;
         nth -= 1;
-    };
+        pos = found + 1;
+    }
     unreachable;
 }
 pub fn offsetFromUtf16(root: ?*const Node, units: usize) !usize {

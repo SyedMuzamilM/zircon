@@ -26,8 +26,9 @@ if mode == "malformed":
 def send(value):
     body = json.dumps(value, ensure_ascii=False).encode("utf-8")
     data = ("Content-Length: %d\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n" % len(body)).encode() + body
-    for offset in range(0, len(data), 7):
-        sys.stdout.buffer.write(data[offset:offset + 7])
+    chunk_size = 65536 if mode == "large-diagnostics" else 7
+    for offset in range(0, len(data), chunk_size):
+        sys.stdout.buffer.write(data[offset:offset + chunk_size])
         sys.stdout.buffer.flush()
 
 def read():
@@ -97,6 +98,16 @@ while True:
         assert mode not in ("sync-none", "sync-omitted")
         document = params["textDocument"]
         opened[document["uri"]] = document
+        if mode == "large-diagnostics":
+            diagnostic = {
+                "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}},
+                "message": "large response \u2192 compact diagnostic", "source": "fixture",
+                "data": [{"ignored": [0]}] * 200000,
+            }
+            send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+                "uri": document["uri"], "version": document["version"], "diagnostics": [diagnostic],
+            }})
+            continue
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"], "version": document["version"], "diagnostics": [{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}}, "severity": 2, "message": "emoji warning", "source": "fixture"}]}})
         if mode == "project-diagnostics" and document["uri"].endswith("/one.zig"):
             send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": document["uri"].rsplit("/", 1)[0] + "/two.zig", "diagnostics": [{"range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}}, "severity": 1, "message": "project issue", "source": "fixture"}]}})

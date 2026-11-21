@@ -75,6 +75,9 @@ pub fn loadTree(self: *Shell) !void {
 
 pub fn refreshTree(self: *Shell) !void {
     var previous = self.tree;
+    var expanded: std.StringHashMapUnmanaged(void) = .empty;
+    defer expanded.deinit(self.allocator);
+    for (previous.items) |row| if (row.directory and row.expanded) try expanded.put(self.allocator, row.path, {});
     self.tree = .empty;
     errdefer {
         for (self.tree.items) |row| freeRow(self.allocator, row);
@@ -85,14 +88,12 @@ pub fn refreshTree(self: *Shell) !void {
     var index: usize = 0;
     while (index < self.tree.items.len) : (index += 1) {
         const row = self.tree.items[index];
-        if (!row.directory) continue;
-        for (previous.items) |old| if (old.directory and old.expanded and std.mem.eql(u8, old.path, row.path)) {
+        if (row.directory and expanded.contains(row.path)) {
             expandDirectory(self, index) catch |err| switch (err) {
                 error.FileNotFound, error.NotDir, error.AccessDenied => {},
                 else => return err,
             };
-            break;
-        };
+        }
     }
     for (previous.items) |row| freeRow(self.allocator, row);
     previous.deinit(self.allocator);
@@ -411,9 +412,9 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     if (pane == 0 and self.tabs.items.len == 0) return false;
     if (e.data == .pointer_down) self.active_pane = if (pane == 0) .primary else .secondary;
     const selected: struct { id: ws.DocumentId, editor: *editing.Editor } = if (pane == 1) .{ .id = self.secondary.?.document, .editor = &self.secondary.?.editor } else .{ .id = self.tabs.items[self.active].document, .editor = &self.tabs.items[self.active].editor };
-    const history_command = self.key_bindings.resolve(e.data);
-    if (history_command == .undo or history_command == .redo) {
-        if (try multibuffer_editing.travel(self, cx, selected.id, if (history_command == .undo) .undo else .redo)) {
+    const shortcut = self.key_bindings.resolve(e.data);
+    if (shortcut == .undo or shortcut == .redo) {
+        if (try multibuffer_editing.travel(self, cx, selected.id, if (shortcut == .undo) .undo else .redo)) {
             e.preventDefault();
             return true;
         }
@@ -424,7 +425,6 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
     try symbol_hover.pointer(self, cx, selected.editor, &record.doc, selected.id, e);
     if (try editor_git.handle(self, cx, selected.editor, &record.doc, selected.id, e)) return true;
     const old_gutter_hover = selected.editor.gutter_hovered;
-    const shortcut = self.key_bindings.resolve(e.data);
     var outcome = if (shortcut == .delete_line or shortcut == .toggle_comment) try selected.editor.execute(&record.doc, if (shortcut == .delete_line) .delete_line else .toggle_comment) else try selected.editor.handle(&record.doc, e);
     errdefer if (outcome.change) |*change| change.deinit();
     if (outcome.handled and (shortcut == .delete_line or shortcut == .toggle_comment)) e.preventDefault();

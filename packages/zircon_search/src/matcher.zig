@@ -19,6 +19,30 @@ pub const Matcher = struct {
         }
         return .{ .query = query, .prefix = table };
     }
+    /// Reject disk files without a match before constructing their rope.
+    pub fn contains(self: Matcher, bytes: []const u8, cancel: types.Cancellation) !bool {
+        var matched: usize = 0;
+        for (bytes, 1..) |byte, end| {
+            if ((end - 1) % 4096 == 0) try cancel.check();
+            matched = self.advance(matched, byte);
+            if (matched != self.query.text.len) continue;
+            const start = end - matched;
+            if (!self.query.whole_word or
+                ((start == 0 or !word(bytes[start - 1])) and (end == bytes.len or !word(bytes[end])))) return true;
+            matched = self.prefix[matched - 1];
+        }
+        try cancel.check();
+        return false;
+    }
+
+    fn advance(self: Matcher, matched: usize, original: u8) usize {
+        const byte = fold(original, self.query.case_sensitive);
+        var n = matched;
+        while (n > 0 and byte != fold(self.query.text[n], self.query.case_sensitive)) n = self.prefix[n - 1];
+        if (byte == fold(self.query.text[n], self.query.case_sensitive)) n += 1;
+        return n;
+    }
+
     pub fn collect(self: Matcher, a: std.mem.Allocator, snapshot: text.Snapshot, max_matches: usize, cancel: types.Cancellation) !struct { matches: []const types.Match, truncated: bool } {
         var matches: std.ArrayList(types.Match) = .empty;
         var iterator = try snapshot.chunks(.{ .start = 0, .end = snapshot.byteLen() });
@@ -26,9 +50,7 @@ pub const Matcher = struct {
         var n: usize = 0;
         while (iterator.next()) |part| for (part) |original| {
             if (offset % 4096 == 0) try cancel.check();
-            const byte = fold(original, self.query.case_sensitive);
-            while (n > 0 and byte != fold(self.query.text[n], self.query.case_sensitive)) n = self.prefix[n - 1];
-            if (byte == fold(self.query.text[n], self.query.case_sensitive)) n += 1;
+            n = self.advance(n, original);
             offset += 1;
             if (n == self.query.text.len) {
                 const range: text.Range = .{ .start = offset - self.query.text.len, .end = offset };

@@ -11,3 +11,4 @@ pub const Document = document.Document;
 pub const Change = document.Change;
 pub const Mapping = document.Mapping;
 pub const Snapshot = snapshot.Snapshot;
+pub const LineIterator = snapshot.LineIterator;

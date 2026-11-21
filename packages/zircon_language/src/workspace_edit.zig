@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const model = @import("model.zig");
+/// The caller owns the returned files and their strings in the supplied arena.
 pub fn parse(a: std.mem.Allocator, value: std.json.Value) ![]const model.FileEdits {
     if (value == .null) return &.{};
     if (value != .object) return error.InvalidWorkspaceEdit;
@@ -16,7 +17,7 @@ pub fn parse(a: std.mem.Allocator, value: std.json.Value) ![]const model.FileEdi
             const document = field(item, "textDocument") orelse return error.InvalidWorkspaceEdit;
             const version = field(document, "version") orelse return error.InvalidWorkspaceEdit;
             file.* = .{
-                .uri = try string(field(document, "uri") orelse return error.InvalidWorkspaceEdit),
+                .uri = try a.dupe(u8, try string(field(document, "uri") orelse return error.InvalidWorkspaceEdit)),
                 .version = if (version == .null) null else try unsigned(version),
                 .edits = try parseEdits(a, field(item, "edits") orelse return error.InvalidWorkspaceEdit),
             };
@@ -28,7 +29,7 @@ pub fn parse(a: std.mem.Allocator, value: std.json.Value) ![]const model.FileEdi
         const files = try a.alloc(model.FileEdits, items.object.count());
         var iterator = items.object.iterator();
         var index: usize = 0;
-        while (iterator.next()) |entry| : (index += 1) files[index] = .{ .uri = entry.key_ptr.*, .edits = try parseEdits(a, entry.value_ptr.*) };
+        while (iterator.next()) |entry| : (index += 1) files[index] = .{ .uri = try a.dupe(u8, entry.key_ptr.*), .edits = try parseEdits(a, entry.value_ptr.*) };
         return files;
     }
     return &.{};
@@ -41,7 +42,7 @@ fn parseEdits(a: std.mem.Allocator, value: std.json.Value) ![]const model.TextEd
         const range = field(item, "range") orelse return error.InvalidWorkspaceEdit;
         edit.* = .{
             .range = .{ .start = try position(field(range, "start") orelse return error.InvalidWorkspaceEdit), .end = try position(field(range, "end") orelse return error.InvalidWorkspaceEdit) },
-            .new_text = try string(field(item, "newText") orelse return error.InvalidWorkspaceEdit),
+            .new_text = try a.dupe(u8, try string(field(item, "newText") orelse return error.InvalidWorkspaceEdit)),
         };
     }
     return edits;

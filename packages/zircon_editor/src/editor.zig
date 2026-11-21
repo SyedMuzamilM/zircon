@@ -135,11 +135,25 @@ pub const Editor = struct {
     }
     pub fn setHighlights(self: *Editor, snapshot: text.Snapshot, spans: []const syntax.Span) !void {
         if (spans.len > 1_000_000) return error.TooManyHighlights;
-        var previous: usize = 0;
-        for (spans) |span| {
-            try snapshot.validateRange(.{ .start = span.start, .end = span.end });
-            if (span.start < previous) return error.InvalidHighlights;
-            previous = span.end;
+        if (spans.len > 0) {
+            const total = snapshot.byteLen();
+            var chunk_start = spans[0].start;
+            var chunks = try snapshot.chunks(.{ .start = chunk_start, .end = total });
+            var chunk = chunks.next() orelse &.{};
+            var previous = chunk_start;
+            for (spans) |span| {
+                if (span.start > span.end or span.end > total) return error.InvalidRange;
+                if (span.start < previous) return error.InvalidHighlights;
+                for ([_]usize{ span.start, span.end }) |offset| {
+                    if (offset == total) continue;
+                    while (offset - chunk_start >= chunk.len) {
+                        chunk_start += chunk.len;
+                        chunk = chunks.next() orelse return error.InvalidRange;
+                    }
+                    if (chunk[offset - chunk_start] & 0xc0 == 0x80) return error.InvalidRange;
+                }
+                previous = span.end;
+            }
         }
         const next = try self.allocator.dupe(syntax.Span, spans);
         self.allocator.free(self.grammar_spans);
@@ -178,10 +192,10 @@ pub const Editor = struct {
         self.bracket_cache.revision = null;
         self.selections.synchronize(snapshot);
         vim_module.synchronize(self, snapshot);
-        self.syntax_cache.profile = self.language_profile;
+        self.syntax_cache.setProfile(self.language_profile);
         if (self.language == .plain) self.syntax_cache.clear() else if (self.syntax_cache.revision != snapshot.revision() or self.syntax_cache.language != self.language) {
             self.syntax_cache.clear();
-            self.syntax_cache.refresh(snapshot, self.language, 0) catch self.syntax_cache.clear();
+            self.syntax_cache.refresh(snapshot, self.language) catch self.syntax_cache.clear();
         }
         if (self.marked) |range| if (range.end > snapshot.byteLen()) {
             self.marked = null;
@@ -240,11 +254,25 @@ pub const Editor = struct {
 
     fn mapHighlights(self: *Editor, change: *const text.Change) void {
         if (self.grammar_revision != change.before) return;
-        for (self.grammar_spans) |*span| {
-            span.start = change.map(span.start, .after);
-            span.end = @max(span.start, change.map(span.end, .before));
-        }
         self.grammar_revision = change.after;
+        if (change.mappings.len == 0) return;
+        const edit = change.mappings[0];
+        var lo: usize = 0;
+        var hi = self.grammar_spans.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (self.grammar_spans[mid].end < edit.range.start) lo = mid + 1 else hi = mid;
+        }
+        for (self.grammar_spans[lo..]) |*span| {
+            if (change.mappings.len == 1 and span.start > edit.range.end) {
+                const removed = edit.range.end - edit.range.start;
+                span.start = span.start - removed + edit.inserted;
+                span.end = span.end - removed + edit.inserted;
+            } else {
+                span.start = change.map(span.start, .after);
+                span.end = @max(span.start, change.map(span.end, .before));
+            }
+        }
     }
     pub fn setBlame(self: *Editor, value: annotations.Blame) !void {
         const prepared = try value.copy(self.allocator);
@@ -295,7 +323,11 @@ pub const Editor = struct {
         return id;
     }
     fn remember(self: *Editor, state: u64, items: []const selection.Selection) !void {
-        for (self.history.items) |entry| if (entry.state == state) return;
+        var i = self.history.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (self.history.items[i].state == state) return;
+        }
         const copy = try self.allocator.dupe(selection.Selection, items);
         errdefer self.allocator.free(copy);
         try self.history.append(self.allocator, .{ .state = state, .items = copy });
@@ -376,10 +408,11 @@ pub const Editor = struct {
             var snapshot = self.document.snapshot();
             defer snapshot.deinit();
             editor_value.synchronizeGitChanges(snapshot);
-            const row = if (self.edits.len > 0) (self.before.pointAt(self.edits[0].range.start) catch unreachable).line else 0;
-            if (editor_value.language == .plain) editor_value.syntax_cache.clear() else {
-                if (editor_value.syntax_cache.revision != self.before.revision() or self.edits.len > 1) editor_value.syntax_cache.clear();
-                editor_value.syntax_cache.refresh(snapshot, editor_value.language, row) catch editor_value.syntax_cache.clear();
+            if (editor_value.language == .plain) {
+                editor_value.syntax_cache.clear();
+            } else {
+                editor_value.syntax_cache.setProfile(editor_value.language_profile);
+                editor_value.syntax_cache.update(self.before, snapshot, editor_value.language, &change) catch editor_value.syntax_cache.clear();
             }
             editor_value.reveal(snapshot);
             return .{ .handled = true, .change = change };

@@ -45,6 +45,7 @@ pub const App = struct {
         const app_id = try reserveId();
         const state = try options.allocator.create(State);
         state.* = .{ .allocator = options.allocator, .store = .init(options.allocator, app_id), .thread = std.Thread.getCurrentId(), .jobs = .init(options.allocator) };
+        state.jobs.queue.on_complete = windows.wake;
         state.icon = if (options.icon) |image| image.clone() else null;
         return .{ .state = state };
     }
@@ -222,14 +223,14 @@ pub const App = struct {
             for (app.state.windows.items) |entry| if (entry) |w| {
                 if (!w.closed) {
                     open = true;
-                    animated = animated or w.animating;
+                    animated = animated or w.animating or w.scene_animating;
                     if (w.deadline) |time| deadline = @min(deadline orelse std.math.inf(f64), time);
                 }
             };
             if (!open) return;
             if (app.state.dirty or app.state.close_requests.items.len > 0) continue;
             const next = if (deadline) |time| @max(0, time - windows.now()) else std.math.inf(f64);
-            const interval = if (animated or app.state.jobs.queue.pending()) @min(next, 1.0 / 120.0) else next;
+            const interval = if (animated) @min(next, 1.0 / 120.0) else next;
             try windows.pump(if (std.math.isFinite(interval)) interval else -1);
         }
     }

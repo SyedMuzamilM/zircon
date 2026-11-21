@@ -82,6 +82,33 @@ test "monospaced caret geometry and hit testing agree on ASCII code" {
     try t.expectEqual(source.len, system.index(source, 14, true, 100000));
 }
 
+test "ASCII caret and hit-test shortcuts match Core Text" {
+    var autorelease = pool();
+    defer autorelease.deinit();
+    var system = text.TextSystem.init(t.allocator);
+    defer system.deinit();
+    for ([_]bool{ false, true }) |ligatures| {
+        system.setTypography(.{ .ligatures = ligatures });
+        for ([_][]const u8{ "  const answer = 42;  ", "ffi -> => != ===", "0123456789", "abc \t", "A日本語🌍" }) |source| {
+            for ([_]f32{ 9, 13, 24 }) |size| {
+                const layout = try system.layout(source, size, true);
+                for (0..source.len + 1) |at| {
+                    const native_offset = text.byteToUtf16(source, at);
+                    const x: f32 = @floatCast(text.CTLineGetOffsetForStringIndex(layout.line, @intCast(native_offset), null));
+                    try t.expectApproxEqAbs(x, system.caret(source, size, true, at), 0.011);
+                }
+                const sample_count = @as(usize, @intFromFloat(layout.width * 4)) + 8;
+                for (1..sample_count) |i| {
+                    const x = @as(f32, @floatFromInt(i)) / 4;
+                    const offset = text.CTLineGetStringIndexForPosition(layout.line, .{ .x = x, .y = 0 });
+                    const expected = if (offset < 0) source.len else text.utf16ToByte(source, @intCast(offset));
+                    try t.expectEqual(expected, system.index(source, size, true, x));
+                }
+            }
+        }
+    }
+}
+
 test "fallback glyph runs preserve Unicode measurement and code point boundaries" {
     var autorelease = pool();
     defer autorelease.deinit();
@@ -117,22 +144,26 @@ test "layout cache evicts by both entry count and bounded estimated cost" {
     var system = text.TextSystem.init(t.allocator);
     defer system.deinit();
     var buffer: [128]u8 = undefined;
-    for (0..600) |i| {
+    for (0..text.max_layouts) |i| {
         const source = try std.fmt.bufPrint(&buffer, "entry {d}", .{i});
         _ = try system.layout(source, 14, true);
-        try t.expect(system.layout_count <= 512);
-        try t.expect(system.layout_bytes <= 4 * 1024 * 1024);
+        try t.expect(system.layout_count <= text.max_layouts);
+        try t.expect(system.layout_bytes <= text.layout_budget);
     }
+    _ = try system.layout("entry 0", 14, true);
+    _ = try system.layout("new entry", 14, true);
     const misses = system.shape_misses;
     _ = try system.layout("entry 0", 14, true);
+    try t.expectEqual(misses, system.shape_misses);
+    _ = try system.layout("entry 1", 14, true);
     try t.expectEqual(misses + 1, system.shape_misses);
-    const line = try t.allocator.alloc(u8, 8192);
+    const line = try t.allocator.alloc(u8, 16 * 1024);
     defer t.allocator.free(line);
     @memset(line, 'a');
     for (0..20) |i| {
         line[0] = @intCast('A' + i);
         _ = try system.layout(line, 14, true);
-        try t.expect(system.layout_bytes <= 4 * 1024 * 1024);
+        try t.expect(system.layout_bytes <= text.layout_budget);
     }
     try t.expect(system.layout_count < 20);
 }
@@ -144,11 +175,11 @@ test "oversized lines are transient and do not empty the bounded cache" {
     defer system.deinit();
     _ = try system.layout("cached", 14, true);
     const cached_bytes = system.layout_bytes;
-    const source = try t.allocator.alloc(u8, 80 * 1024);
+    const source = try t.allocator.alloc(u8, 256 * 1024);
     defer t.allocator.free(source);
     @memset(source, 'a');
     const large = try system.layout(source, 14, true);
-    try t.expect(large.cost > 4 * 1024 * 1024);
+    try t.expect(large.cost > text.layout_budget);
     try t.expect(system.temporary != null);
     try t.expectEqual(cached_bytes, system.layout_bytes);
     _ = try system.layout("cached", 14, true);

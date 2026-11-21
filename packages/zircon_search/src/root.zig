@@ -29,8 +29,11 @@ pub fn search(allocator: std.mem.Allocator, io: std.Io, request: Request, cancel
     var scratch = std.heap.ArenaAllocator.init(allocator);
     defer scratch.deinit();
     const scratch_a = scratch.allocator();
-    const matcher = try Matcher.init(a, request.query);
-    const cwd = try std.process.currentPathAlloc(io, a);
+    var bookkeeping = std.heap.ArenaAllocator.init(allocator);
+    defer bookkeeping.deinit();
+    const keys = bookkeeping.allocator();
+    const matcher = try Matcher.init(keys, request.query);
+    const cwd = try std.process.currentPathAlloc(io, keys);
     var seen: std.StringHashMapUnmanaged(void) = .empty;
     var ids: std.AutoHashMapUnmanaged(u64, void) = .empty;
     var groups: std.ArrayList(Group) = .empty;
@@ -44,21 +47,22 @@ pub fn search(allocator: std.mem.Allocator, io: std.Io, request: Request, cancel
         }
         examined += 1;
         if (ids.contains(buffer.document_id)) continue;
-        try ids.put(a, buffer.document_id, {});
-        const path = if (buffer.path) |p| files.canonical(a, io, cwd, p) catch |err| {
+        try ids.put(keys, buffer.document_id, {});
+        _ = scratch.reset(.retain_capacity);
+        const path = if (buffer.path) |p| files.canonical(scratch_a, io, cwd, p) catch |err| {
             if (err == error.OutOfMemory) return err;
             try addError(a, &errors, p, err);
             continue;
         } else null;
         if (path) |p| {
             if (seen.contains(p)) continue;
-            try seen.put(a, p, {});
+            try seen.put(keys, try keys.dupe(u8, p), {});
         }
         if (!try budget(a, &result, &errors, buffer.title, buffer.snapshot.byteLen(), request.limits)) continue;
         const found = try matcher.collect(a, buffer.snapshot, request.limits.matches - result.total_matches, cancel);
         result.truncated = result.truncated or found.truncated;
         result.total_matches += found.matches.len;
-        if (found.matches.len > 0) try groups.append(a, .{ .source = .{ .buffer = .{ .document_id = buffer.document_id, .revision = buffer.snapshot.revision(), .state = buffer.snapshot.stateId(), .path = path } }, .title = try a.dupe(u8, buffer.title), .matches = found.matches, .excerpts = try excerpts.build(a, buffer.snapshot, found.matches, request.limits.context_lines, cancel) });
+        if (found.matches.len > 0) try groups.append(a, .{ .source = .{ .buffer = .{ .document_id = buffer.document_id, .revision = buffer.snapshot.revision(), .state = buffer.snapshot.stateId(), .path = if (path) |p| try a.dupe(u8, p) else null } }, .title = try a.dupe(u8, buffer.title), .matches = found.matches, .excerpts = try excerpts.build(a, buffer.snapshot, found.matches, request.limits.context_lines, cancel) });
         if (result.total_matches == request.limits.matches) {
             result.truncated = true;
             break;
@@ -72,13 +76,13 @@ pub fn search(allocator: std.mem.Allocator, io: std.Io, request: Request, cancel
         }
         examined += 1;
         _ = scratch.reset(.retain_capacity);
-        const path = files.canonical(a, io, cwd, path_input) catch |err| {
+        const path = files.canonical(scratch_a, io, cwd, path_input) catch |err| {
             if (err == error.OutOfMemory) return err;
             try addError(a, &errors, path_input, err);
             continue;
         };
         if (seen.contains(path)) continue;
-        try seen.put(a, path, {});
+        try seen.put(keys, try keys.dupe(u8, path), {});
         const remaining = request.limits.total_bytes - result.searched_bytes;
         if (remaining == 0) {
             result.truncated = true;
@@ -100,6 +104,7 @@ pub fn search(allocator: std.mem.Allocator, io: std.Io, request: Request, cancel
             try addError(a, &errors, path, error.BinaryFile);
             continue;
         }
+        if (!try matcher.contains(loaded.bytes, cancel)) continue;
         var document = try text.Document.init(scratch_a, loaded.bytes);
         defer document.deinit();
         var snapshot = document.snapshot();
@@ -107,7 +112,7 @@ pub fn search(allocator: std.mem.Allocator, io: std.Io, request: Request, cancel
         const found = try matcher.collect(a, snapshot, request.limits.matches - result.total_matches, cancel);
         result.truncated = result.truncated or found.truncated;
         result.total_matches += found.matches.len;
-        if (found.matches.len > 0) try groups.append(a, .{ .source = .{ .disk = .{ .path = path, .stamp = loaded.stamp } }, .title = try a.dupe(u8, std.fs.path.basename(path)), .matches = found.matches, .excerpts = try excerpts.build(a, snapshot, found.matches, request.limits.context_lines, cancel) });
+        if (found.matches.len > 0) try groups.append(a, .{ .source = .{ .disk = .{ .path = try a.dupe(u8, path), .stamp = loaded.stamp } }, .title = try a.dupe(u8, std.fs.path.basename(path)), .matches = found.matches, .excerpts = try excerpts.build(a, snapshot, found.matches, request.limits.context_lines, cancel) });
         if (result.total_matches == request.limits.matches) {
             result.truncated = true;
             break;

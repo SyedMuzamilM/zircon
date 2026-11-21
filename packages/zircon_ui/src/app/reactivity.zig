@@ -131,14 +131,16 @@ pub const Reactivity = struct {
     fn rememberError(self: *Reactivity, err: anyerror) void {
         if (self.effect_error == null) self.effect_error = err;
     }
-    fn flushChanges(self: *Reactivity, app: *App) void {
+    fn flushChanges(self: *Reactivity, app: *App) bool {
         app.state.store.flushDestruction();
         const destroyed = self.destruction_version != app.state.store.destruction_version;
         self.destruction_version = app.state.store.destruction_version;
-        if ((app.state.store.flushNotifications() or destroyed) and !app.state.dirty) {
+        const changed = app.state.store.flushNotifications() or destroyed;
+        if (changed and !app.state.dirty) {
             app.state.dirty = true;
             app.state.scheduled_frames += 1;
         }
+        return changed;
     }
     fn discardEvents(self: *Reactivity, allocator: std.mem.Allocator) void {
         for (self.events.items[self.event_cursor..]) |event| event.destroy(event.value, allocator);
@@ -149,9 +151,9 @@ pub const Reactivity = struct {
         if (self.settling or app.state.depth != 0) return;
         self.settling = true;
         defer self.settling = false;
+        if (!self.flushChanges(app) and self.events.items.len == 0) return;
         var budget: usize = 4096;
         while (true) {
-            self.flushChanges(app);
             var delivered = false;
             const limit = self.registrations.items.len;
             for (0..limit) |i| {
@@ -197,12 +199,13 @@ pub const Reactivity = struct {
                 delivered = true;
             }
             if (!delivered) break;
+            _ = self.flushChanges(app);
         }
         self.discardEvents(app.state.allocator);
     }
     fn stopEffectCycle(self: *Reactivity, app: *App) void {
         self.rememberError(error.EffectCycle);
-        self.flushChanges(app);
+        _ = self.flushChanges(app);
         self.discardEvents(app.state.allocator);
         // Terminate this delivery wave. The latest state is retained; future
         // explicit mutations can notify again after the caller handles the error.

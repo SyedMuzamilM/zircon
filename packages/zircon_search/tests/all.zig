@@ -79,6 +79,22 @@ test "case folding and whole-word matching use an explicit non-overlapping polic
     defer sensitive.deinit();
     try t.expectEqual(@as(usize, 1), sensitive.total_matches);
 }
+test "disk search keeps literal matching across scan boundaries and excludes embedded words" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var bytes: [4120]u8 = @splat(' ');
+    @memcpy(bytes[2..9], "scatter");
+    @memcpy(bytes[4095..4098], "CaT");
+    @memcpy(bytes[4100..4107], "bobcat_");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "words.zig", .data = &bytes });
+    const file = try path(t.allocator, &tmp, "words.zig");
+    defer t.allocator.free(file);
+    var result = try search.search(t.allocator, t.io, .{ .generation = 2, .query = .{ .text = "cat", .case_sensitive = false, .whole_word = true }, .files = &.{file} }, .{});
+    defer result.deinit();
+    try t.expectEqual(@as(usize, 1), result.total_matches);
+    try t.expectEqual(@as(usize, 4095), result.groups[0].matches[0].range.start);
+    try t.expectEqualStrings(file, result.groups[0].path().?);
+}
 test "disk fingerprints and buffer versions reject stale source activation" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();

@@ -104,6 +104,8 @@ pub const File = struct {
 pub const Projection = struct {
     arena: std.heap.ArenaAllocator,
     files: []File,
+    added: usize = 0,
+    deleted: usize = 0,
     pub fn init(a: std.mem.Allocator, diff: git.Diff) !Projection {
         var arena = std.heap.ArenaAllocator.init(a);
         errdefer arena.deinit();
@@ -111,15 +113,19 @@ pub const Projection = struct {
         var files: std.ArrayList(File) = .empty;
         errdefer for (files.items) |*file| deinitFile(file);
         var first: usize = 0;
+        var added: usize = 0;
+        var deleted: usize = 0;
         while (first < diff.hunks.len) {
             var end = first + 1;
             while (end < diff.hunks.len and std.mem.eql(u8, diff.hunks[first].path, diff.hunks[end].path)) : (end += 1) {}
             var file = try projectFile(a, diff, first, end);
             errdefer deinitFile(&file);
             try files.append(aa, file);
+            added += file.added;
+            deleted += file.deleted;
             first = end;
         }
-        return .{ .arena = arena, .files = files.items };
+        return .{ .arena = arena, .files = files.items, .added = added, .deleted = deleted };
     }
     pub fn deinit(self: *Projection) void {
         for (self.files) |*file| deinitFile(file);
@@ -162,6 +168,8 @@ pub const Projection = struct {
     pub fn updateFile(self: *Projection, diff: git.Diff, path: []const u8) !void {
         for (self.files) |*file| if (std.mem.eql(u8, file.path, path)) {
             const next = try projectFile(self.arena.child_allocator, diff, file.first_hunk, file.end_hunk);
+            self.added = self.added - file.added + next.added;
+            self.deleted = self.deleted - file.deleted + next.deleted;
             deinitFile(file);
             file.* = next;
             return;

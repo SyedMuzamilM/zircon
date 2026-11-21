@@ -47,14 +47,11 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
             .text = .{ .size = 12, .color = c.muted },
         }).build());
     try tools.append(b.allocator(), try b.fluent().div().grow().min_w(.{ .px = 0 }).children(.{}).build());
-    if (self.git.diff) |diff| {
-        var added: usize = 0;
-        var deleted: usize = 0;
-        for (diff.hunks) |hunk| for (hunk.lines) |line| {
-            if (line.kind == .addition) added += 1;
-            if (line.kind == .deletion) deleted += 1;
-        };
-        if (b.viewport().width - (if (self.sidebar_visible) self.panelWidth() else 0) >= 560) try tools.appendSlice(b.allocator(), &.{ try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{added}), c.added, 12), try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{deleted}), c.deleted, 12) });
+    if (self.git.projection) |projection| {
+        if (b.viewport().width - (if (self.sidebar_visible) self.panelWidth() else 0) >= 560) try tools.appendSlice(b.allocator(), &.{
+            try v.text(b, try std.fmt.allocPrint(b.allocator(), "+{d}", .{projection.added}), c.added, 12),
+            try v.text(b, try std.fmt.allocPrint(b.allocator(), "−{d}", .{projection.deleted}), c.deleted, 12),
+        });
     }
     const labels = b.viewport().width - self.panelWidth() > 660;
     if (self.git.selected_commit.len == 0) {
@@ -70,6 +67,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32) !ui.Element {
         .overflow_hidden()
         .flex()
         .children(tools.items)
+        .id(.{ .string = "git-diff-toolbar" })
         .build());
     if (self.git.selected_commit.len > 0 and !self.git.stash_view) try rows.append(b.allocator(), try commit_details.render(self, b));
     try rows.append(b.allocator(), try v.rule(b, c));

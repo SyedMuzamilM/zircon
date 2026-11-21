@@ -23,7 +23,7 @@ const Counts = struct {
 };
 const Ops = struct {
     fn explainWait(self: *const Shell) void {
-        std.debug.print("Wait state: status={s}; error={}; git_busy={}; syntax_waiting={}\n", .{ self.status, self.status_is_error, self.git.busy, self.language.syntax_waiting });
+        std.debug.print("Wait state: status={s}; error={}; git_busy={}; syntax_due={?d}\n", .{ self.status, self.status_is_error, self.git.busy, self.language.syntax_due });
         for (self.language.syntax_documents.items) |doc| std.debug.print("syntax pending={} revision={?}\n", .{ doc.pending, doc.revision });
         for (self.language.documents.items) |doc| std.debug.print("LSP version={?} diagnostics={}\n", .{ doc.version, doc.diagnostics != null });
         for (self.language.sessions.items) |session| if (session.client) |client| {
@@ -53,10 +53,10 @@ const Ops = struct {
         cx.notify();
     }
     fn ready(self: *const Shell, services: bool) bool {
-        if (self.git.busy or self.language.syntax_waiting) return false;
+        if (self.git.busy or self.language.syntax_due != null) return false;
         for (self.language.syntax_documents.items) |doc| if (doc.pending) return false;
         if (services) {
-            if (!self.git.repository or self.git.needs_refresh) return false;
+            if (!self.git.repository or self.git.pending_refresh != null) return false;
             if (self.language.documents.items.len == 0) return false;
             for (self.language.sessions.items) |session| if (session.client == null or !session.client.?.ready()) return false;
             for (self.language.documents.items) |doc| {

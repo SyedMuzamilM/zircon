@@ -10,7 +10,7 @@ const model = @import("model.zig");
 const synchronization = @import("synchronization.zig");
 const workspace_edit = @import("workspace_edit.zig");
 const DocumentState = struct { snapshot: text.Snapshot };
-const transport_allocator = std.heap.page_allocator;
+const transport_allocator = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 pub const Wake = struct { context: ?*anyopaque = null, notify: *const fn (?*anyopaque) void };
 pub const Config = struct { outgoing_limit_bytes: usize = 16 * 1024 * 1024, environment: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null, root_path: ?[]const u8 = null, command: []const u8, args: []const []const u8 = &.{}, cwd: []const u8, wake: ?Wake = null };
 pub const Status = enum(u8) { starting, ready, closing, failed, exited };
@@ -42,11 +42,12 @@ pub const Client = struct {
     sync_options: synchronization.Options = .{},
     lock: std.Io.Mutex = .init,
     changed: std.Io.Condition = .init,
-    outgoing: std.ArrayList([]u8) = .empty,
+    outgoing: std.Deque([]u8) = .empty,
     outgoing_bytes: usize = 0,
     outgoing_limit_bytes: usize = 16 * 1024 * 1024,
     incoming: std.ArrayList(model.Message) = .empty,
     incoming_bytes: usize = 0,
+    has_incoming: std.atomic.Value(bool) = .init(false),
     pending: std.AutoHashMapUnmanaged(u64, Pending) = .empty,
     documents: std.StringHashMapUnmanaged(DocumentState) = .empty,
     next_id: u64 = 2,
@@ -357,11 +358,13 @@ pub const Client = struct {
     }
     pub fn drain(self: *Client, a: std.mem.Allocator) ![]model.Message {
         if (self.owner != std.Thread.getCurrentId()) return error.WrongThread;
+        if (!self.has_incoming.load(.acquire)) return &.{};
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
         const result = try a.dupe(model.Message, self.incoming.items);
         self.incoming.clearRetainingCapacity();
         self.incoming_bytes = 0;
+        self.has_incoming.store(false, .release);
         return result;
     }
     pub fn stderrCopy(self: *Client, a: std.mem.Allocator) ![]u8 {
@@ -422,7 +425,7 @@ pub const Client = struct {
     }
     fn cleanupData(self: *Client) void {
         if (self.configuration) |*configuration| configuration.deinit();
-        for (self.outgoing.items) |bytes| transport_allocator.free(bytes);
+        while (self.outgoing.popFront()) |bytes| transport_allocator.free(bytes);
         self.outgoing.deinit(transport_allocator);
         for (self.incoming.items) |*message| message.deinit();
         self.incoming.deinit(transport_allocator);
@@ -446,7 +449,7 @@ pub const Client = struct {
         defer self.lock.unlock(self.io);
         if (self.stopping.load(.acquire)) return error.ClientClosing;
         if (bytes.len > self.outgoing_limit_bytes or self.outgoing_bytes > self.outgoing_limit_bytes - bytes.len) return error.OutgoingQueueFull;
-        try self.outgoing.append(transport_allocator, bytes);
+        try self.outgoing.pushBack(transport_allocator, bytes);
         self.outgoing_bytes += bytes.len;
         self.counters.queued_messages +%= 1;
         self.counters.queued_bytes +%= bytes.len;
@@ -458,6 +461,12 @@ pub const Client = struct {
         defer self.lock.unlock(self.io);
         return self.counters;
     }
+    fn publishOwned(self: *Client, arena: *std.heap.ArenaAllocator, data: @FieldType(model.Message, "data")) void {
+        const message: model.Message = .{ .arena = arena.*, .data = data };
+        arena.* = .init(transport_allocator);
+        self.publish(message);
+    }
+
     fn publish(self: *Client, message_value: model.Message) void {
         var message = message_value;
         self.lock.lockUncancelable(self.io);
@@ -476,6 +485,7 @@ pub const Client = struct {
             return;
         };
         self.incoming_bytes += message.arena.queryCapacity();
+        self.has_incoming.store(true, .release);
         self.lock.unlock(self.io);
         self.notify();
     }
@@ -516,12 +526,12 @@ fn forceKill(child: *std.process.Child, io: std.Io) void {
 fn writerMain(self: *Client) void {
     while (true) {
         self.lock.lockUncancelable(self.io);
-        while (self.outgoing.items.len == 0 and !self.stopping.load(.acquire)) self.changed.wait(self.io, &self.lock) catch {};
+        while (self.outgoing.len == 0 and !self.stopping.load(.acquire)) self.changed.wait(self.io, &self.lock) catch {};
         if (self.stopping.load(.acquire)) {
             self.lock.unlock(self.io);
             return;
         }
-        const bytes = self.outgoing.orderedRemove(0);
+        const bytes = self.outgoing.popFront().?;
         self.outgoing_bytes -= bytes.len;
         self.lock.unlock(self.io);
         defer transport_allocator.free(bytes);
@@ -603,6 +613,12 @@ fn string(value: std.json.Value) ![]const u8 {
     if (value != .string) return error.InvalidMessage;
     return value.string;
 }
+fn copyString(a: std.mem.Allocator, value: std.json.Value) ![]const u8 {
+    return a.dupe(u8, try string(value));
+}
+fn optionalString(a: std.mem.Allocator, value: std.json.Value, name: []const u8) !?[]const u8 {
+    return if (field(value, name)) |item| try copyString(a, item) else null;
+}
 fn unsigned(value: std.json.Value) !u64 {
     if (value != .integer or value.integer < 0) return error.InvalidMessage;
     return @intCast(value.integer);
@@ -613,14 +629,16 @@ fn position(value: std.json.Value) !model.Position {
 fn range(value: std.json.Value) !model.Range {
     return .{ .start = try position(field(value, "start") orelse return error.InvalidMessage), .end = try position(field(value, "end") orelse return error.InvalidMessage) };
 }
-fn edit(value: std.json.Value) !model.TextEdit {
-    return .{ .range = try range(field(value, "range") orelse return error.InvalidMessage), .new_text = try string(field(value, "newText") orelse return error.InvalidMessage) };
+fn edit(a: std.mem.Allocator, value: std.json.Value) !model.TextEdit {
+    return .{ .range = try range(field(value, "range") orelse return error.InvalidMessage), .new_text = try copyString(a, field(value, "newText") orelse return error.InvalidMessage) };
 }
 fn parse(self: *Client, body: []const u8) !void {
+    var scratch = std.heap.ArenaAllocator.init(transport_allocator);
+    defer scratch.deinit();
     var arena = std.heap.ArenaAllocator.init(transport_allocator);
-    errdefer arena.deinit();
+    defer arena.deinit();
     const a = arena.allocator();
-    const root = try std.json.parseFromSliceLeaky(std.json.Value, a, body, .{ .allocate = .alloc_always, .max_value_len = frame.max_message });
+    const root = try std.json.parseFromSliceLeaky(std.json.Value, scratch.allocator(), body, .{ .allocate = .alloc_if_needed, .max_value_len = frame.max_message });
     if (root != .object) return error.InvalidMessage;
     if (field(root, "jsonrpc")) |v| {
         if (!std.mem.eql(u8, try string(v), "2.0")) return error.InvalidMessage;
@@ -633,7 +651,7 @@ fn parse(self: *Client, body: []const u8) !void {
                 const params = field(root, "params") orelse return error.InvalidMessage;
                 const items = field(params, "items") orelse return error.InvalidMessage;
                 if (items != .array or items.array.items.len > 1024) return error.InvalidMessage;
-                const values = try a.alloc(std.json.Value, items.array.items.len);
+                const values = try scratch.allocator().alloc(std.json.Value, items.array.items.len);
                 for (items.array.items, values) |item, *value| {
                     value.* = if (self.configuration) |configuration| configuration.value else .null;
                     if (field(item, "section")) |section| if (section == .string and section.string.len > 0) {
@@ -642,60 +660,53 @@ fn parse(self: *Client, body: []const u8) !void {
                     };
                 }
                 try self.enqueue(.{ .jsonrpc = "2.0", .id = request_id, .result = values });
-                arena.deinit();
                 return;
             }
             if (std.mem.eql(u8, method, "client/registerCapability") or std.mem.eql(u8, method, "client/unregisterCapability") or std.mem.eql(u8, method, "window/workDoneProgress/create")) {
                 try self.enqueue(.{ .jsonrpc = "2.0", .id = request_id, .result = @as(?u8, null) });
-                arena.deinit();
                 return;
             }
             try self.enqueue(.{ .jsonrpc = "2.0", .id = request_id, .@"error" = .{ .code = @as(i32, -32601), .message = "Method not supported by Zircon" } });
-            arena.deinit();
             return;
         }
         const params = field(root, "params") orelse return error.InvalidMessage;
         if (std.mem.eql(u8, method, "textDocument/publishDiagnostics")) {
-            const uri = try string(field(params, "uri") orelse return error.InvalidMessage);
+            const uri = try copyString(a, field(params, "uri") orelse return error.InvalidMessage);
             const values = field(params, "diagnostics") orelse return error.InvalidMessage;
             if (values != .array) return error.InvalidMessage;
             if (values.array.items.len > 10_000) return error.TooManyDiagnostics;
             const diagnostics = try a.alloc(model.Diagnostic, values.array.items.len);
             for (values.array.items, diagnostics) |item, *diagnostic| {
                 const severity = if (field(item, "severity")) |v| try unsigned(v) else 1;
-                diagnostic.* = .{ .range = try range(field(item, "range") orelse return error.InvalidMessage), .message = try string(field(item, "message") orelse return error.InvalidMessage), .severity = switch (severity) {
+                diagnostic.* = .{ .range = try range(field(item, "range") orelse return error.InvalidMessage), .message = try copyString(a, field(item, "message") orelse return error.InvalidMessage), .severity = switch (severity) {
                     2 => .warning,
                     3 => .information,
                     4 => .hint,
                     else => .error_value,
-                }, .source = if (field(item, "source")) |v| try string(v) else null };
+                }, .source = try optionalString(a, item, "source") };
             }
             const version = if (field(params, "version")) |v| if (v == .null) null else try unsigned(v) else null;
-            self.publish(.{ .arena = arena, .data = .{ .diagnostics = .{ .uri = uri, .version = version, .items = diagnostics } } });
+            self.publishOwned(&arena, .{ .diagnostics = .{ .uri = uri, .version = version, .items = diagnostics } });
             return;
         }
         if (std.mem.eql(u8, method, "window/logMessage") or std.mem.eql(u8, method, "window/showMessage")) {
-            const message = try string(field(params, "message") orelse return error.InvalidMessage);
+            const message = try copyString(a, field(params, "message") orelse return error.InvalidMessage);
             const severity = if (field(params, "type")) |v| try unsigned(v) else 3;
-            self.publish(.{ .arena = arena, .data = .{ .log = .{ .message = message, .severity = @intCast(@min(255, severity)) } } });
+            self.publishOwned(&arena, .{ .log = .{ .message = message, .severity = @intCast(@min(255, severity)) } });
             return;
         }
-        arena.deinit();
         return;
     }
     const number = try unsigned(id orelse return error.InvalidMessage);
     self.lock.lockUncancelable(self.io);
     const removed = self.pending.fetchRemove(number);
     self.lock.unlock(self.io);
-    const request = if (removed) |entry| entry.value else {
-        arena.deinit();
-        return;
-    };
+    const request = if (removed) |entry| entry.value else return;
     defer transport_allocator.free(request.uri);
     if (field(root, "error")) |failure| {
-        const message = if (field(failure, "message")) |v| try string(v) else "Language server request failed";
+        const message = if (field(failure, "message")) |v| try copyString(a, v) else "Language server request failed";
         if (request.kind == .initialize) self.state.store(.failed, .release);
-        self.publish(.{ .arena = arena, .data = .{ .failure = .{ .message = message, .request_id = number } } });
+        self.publishOwned(&arena, .{ .failure = .{ .message = message, .request_id = number } });
         return;
     }
     const result = field(root, "result") orelse return error.InvalidMessage;
@@ -722,85 +733,84 @@ fn parse(self: *Client, body: []const u8) !void {
             try self.enqueue(.{ .jsonrpc = "2.0", .method = "initialized", .params = @as(struct {}, .{}) });
             if (self.configuration) |configuration| try self.enqueue(.{ .jsonrpc = "2.0", .method = "workspace/didChangeConfiguration", .params = .{ .settings = configuration.value } });
             self.state.store(.ready, .release);
-            self.publish(.{ .arena = arena, .data = .initialized });
+            self.publishOwned(&arena, .initialized);
         },
         .shutdown => {
             self.shutdown_answer.store(true, .release);
             self.changed.broadcast(self.io);
-            arena.deinit();
         },
         .completion => {
             const entries = if (result == .array) result else if (result == .null) std.json.Value{ .array = std.array_list.Managed(std.json.Value).init(a) } else field(result, "items") orelse return error.InvalidCompletionResult;
             if (entries != .array or entries.array.items.len > 10_000) return error.InvalidCompletionResult;
             const items = try a.alloc(model.Completion, entries.array.items.len);
             for (entries.array.items, items) |item, *completion| {
-                const label = try string(field(item, "label") orelse return error.InvalidCompletionResult);
-                const insert_text = if (field(item, "insertText")) |v| try string(v) else label;
-                completion.* = .{ .label = label, .insert_text = insert_text, .filter_text = if (field(item, "filterText")) |v| try string(v) else null, .sort_text = if (field(item, "sortText")) |v| try string(v) else null, .detail = if (field(item, "detail")) |v| try string(v) else null, .text_edit = if (field(item, "textEdit")) |v| if (field(v, "range") != null) try edit(v) else null else null, .snippet = if (field(item, "insertTextFormat")) |v| try unsigned(v) == 2 else false };
+                const label = try copyString(a, field(item, "label") orelse return error.InvalidCompletionResult);
+                const insert_text = (try optionalString(a, item, "insertText")) orelse label;
+                completion.* = .{ .label = label, .insert_text = insert_text, .filter_text = try optionalString(a, item, "filterText"), .sort_text = try optionalString(a, item, "sortText"), .detail = try optionalString(a, item, "detail"), .text_edit = if (field(item, "textEdit")) |v| if (field(v, "range") != null) try edit(a, v) else null else null, .snippet = if (field(item, "insertTextFormat")) |v| try unsigned(v) == 2 else false };
                 if (field(item, "additionalTextEdits")) |edits| {
                     if (edits != .array or edits.array.items.len > 1024) return error.InvalidCompletionResult;
                     const additional = try a.alloc(model.TextEdit, edits.array.items.len);
-                    for (edits.array.items, additional) |value, *actual| actual.* = try edit(value);
+                    for (edits.array.items, additional) |value, *actual| actual.* = try edit(a, value);
                     completion.additional_edits = additional;
                 }
             }
             const incomplete = if (field(result, "isIncomplete")) |v| if (v == .bool) v.bool else false else false;
             const uri = try a.dupe(u8, request.uri);
-            self.publish(.{ .arena = arena, .data = .{ .completion = .{ .id = number, .uri = uri, .version = request.version, .items = items, .incomplete = incomplete } } });
+            self.publishOwned(&arena, .{ .completion = .{ .id = number, .uri = uri, .version = request.version, .items = items, .incomplete = incomplete } });
         },
         .hover => {
             const contents = if (result == .null) "" else try hover_content.contents(a, field(result, "contents") orelse return error.InvalidHover);
-            self.publish(.{ .arena = arena, .data = .{ .hover = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } } });
+            self.publishOwned(&arena, .{ .hover = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } });
         },
         .definition, .references => {
             if (result == .null) {
-                self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = &.{} } } });
+                self.publishOwned(&arena, .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = &.{} } });
                 return;
             }
             const items = if (result == .array) blk: {
                 if (result.array.items.len > 1024) return error.InvalidDefinitionResult;
                 const many = try a.alloc(model.Location, result.array.items.len);
-                for (result.array.items, many) |value, *location| location.* = .{ .uri = try string(field(value, "uri") orelse return error.InvalidDefinitionResult), .range = try range(field(value, "range") orelse return error.InvalidDefinitionResult) };
+                for (result.array.items, many) |value, *location| location.* = .{ .uri = try copyString(a, field(value, "uri") orelse return error.InvalidDefinitionResult), .range = try range(field(value, "range") orelse return error.InvalidDefinitionResult) };
                 break :blk many;
             } else blk: {
                 const one = try a.alloc(model.Location, 1);
-                one[0] = .{ .uri = try string(field(result, "uri") orelse return error.InvalidDefinitionResult), .range = try range(field(result, "range") orelse return error.InvalidDefinitionResult) };
+                one[0] = .{ .uri = try copyString(a, field(result, "uri") orelse return error.InvalidDefinitionResult), .range = try range(field(result, "range") orelse return error.InvalidDefinitionResult) };
                 break :blk one;
             };
-            self.publish(.{ .arena = arena, .data = .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = items } } });
+            self.publishOwned(&arena, .{ .locations = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .kind = if (request.kind == .references) .references else .definition, .items = items } });
         },
         .rename => {
             const files = workspace_edit.parse(a, result) catch |err| {
-                self.publish(.{ .arena = arena, .data = .{ .failure = .{ .request_id = number, .message = try std.fmt.allocPrint(a, "Cannot apply rename: {s}", .{@errorName(err)}) } } });
+                self.publishOwned(&arena, .{ .failure = .{ .request_id = number, .message = try std.fmt.allocPrint(a, "Cannot apply rename: {s}", .{@errorName(err)}) } });
                 return;
             };
-            self.publish(.{ .arena = arena, .data = .{ .workspace_edit = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .files = files } } });
+            self.publishOwned(&arena, .{ .workspace_edit = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .files = files } });
         },
         .formatting => {
             if (result == .null) {
-                self.publish(.{ .arena = arena, .data = .{ .edits = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = &.{} } } });
+                self.publishOwned(&arena, .{ .edits = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = &.{} } });
                 return;
             }
             if (result != .array or result.array.items.len > 4096) return error.InvalidFormattingResult;
             const items = try a.alloc(model.TextEdit, result.array.items.len);
-            for (result.array.items, items) |value, *actual| actual.* = try edit(value);
-            self.publish(.{ .arena = arena, .data = .{ .edits = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } } });
+            for (result.array.items, items) |value, *actual| actual.* = try edit(a, value);
+            self.publishOwned(&arena, .{ .edits = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } });
         },
         .signature => {
-            const contents = if (result == .null) "" else if (field(result, "signatures")) |signatures| if (signatures == .array and signatures.array.items.len > 0) try string(field(signatures.array.items[0], "label") orelse return error.InvalidSignatureHelp) else "" else "";
-            self.publish(.{ .arena = arena, .data = .{ .signature_help = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } } });
+            const contents = if (result == .null) "" else if (field(result, "signatures")) |signatures| if (signatures == .array and signatures.array.items.len > 0) try copyString(a, field(signatures.array.items[0], "label") orelse return error.InvalidSignatureHelp) else "" else "";
+            self.publishOwned(&arena, .{ .signature_help = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .contents = contents } });
         },
         .code_actions => {
             if (result == .null) {
-                self.publish(.{ .arena = arena, .data = .{ .code_actions = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = &.{} } } });
+                self.publishOwned(&arena, .{ .code_actions = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = &.{} } });
                 return;
             }
             if (result != .array or result.array.items.len > 256) return error.InvalidCodeActionsResult;
             const items = try a.alloc(model.CodeAction, result.array.items.len);
             for (result.array.items, items) |value, *action| {
-                action.* = .{ .title = try string(field(value, "title") orelse return error.InvalidCodeActionsResult), .files = &.{} };
+                action.* = .{ .title = try copyString(a, field(value, "title") orelse return error.InvalidCodeActionsResult), .files = &.{} };
                 if (field(value, "disabled")) |disabled| {
-                    action.disabled_reason = try string(field(disabled, "reason") orelse return error.InvalidCodeActionsResult);
+                    action.disabled_reason = try copyString(a, field(disabled, "reason") orelse return error.InvalidCodeActionsResult);
                     continue;
                 }
                 if (field(value, "command") != null) {
@@ -816,7 +826,7 @@ fn parse(self: *Client, body: []const u8) !void {
                     continue;
                 };
             }
-            self.publish(.{ .arena = arena, .data = .{ .code_actions = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } } });
+            self.publishOwned(&arena, .{ .code_actions = .{ .id = number, .uri = try a.dupe(u8, request.uri), .version = request.version, .items = items } });
         },
     }
 }

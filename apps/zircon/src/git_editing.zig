@@ -1,6 +1,7 @@
 //! Live Git rows resolve through multibuffer source identities. Source documents
 //! retain their own text and history; the diff owns only editor presentation.
 const std = @import("std");
+const builtin = @import("builtin");
 const editing = @import("zircon_editor");
 const git = @import("zircon_git");
 const zircon_git_ui = @import("zircon_git_ui");
@@ -14,40 +15,63 @@ const multibuffer_editing = @import("multibuffer_editing.zig");
 const services_git = @import("services/git.zig");
 const shell = @import("shell.zig");
 const Shell = shell.Shell;
-const a = std.heap.page_allocator;
+const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 
 pub const Model = zircon_git_ui.Editors;
 const View = zircon_git_ui.SourceEditor;
 pub const Target = struct { document: ws.DocumentId, revision: u64, row: usize, generation: u64 };
 
+fn plainRelativePath(path: []const u8) bool {
+    if (builtin.os.tag == .windows) return false;
+    var parts = std.mem.splitScalar(u8, path, '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
+}
+
+fn mapOffsets(self: *const Shell, id: ws.DocumentId, before: u64, after: u64, start: *usize, end: ?*usize) bool {
+    if (before == after) return true;
+    var revision = before;
+    for (0..self.document_changes.len) |index| {
+        const event = self.document_changes.get(index).?;
+        if (!std.meta.eql(event.document, id) or event.before != revision) continue;
+        if (event.mappings.len == 0) return false;
+        const change: text.Change = .{ .allocator = event.allocator, .before = event.before, .after = event.after, .state = event.state, .mappings = event.mappings };
+        start.* = change.map(start.*, .before);
+        if (end) |offset| offset.* = change.map(offset.*, .after);
+        revision = event.after;
+        if (revision == after) return true;
+    }
+    return false;
+}
+
 pub fn target(self: *const Shell, path: []const u8, row: usize) !?Target {
     if (self.git.selected_commit.len > 0 or self.git.staged_diff or self.git.stash_view) return null;
     const projection = self.git.editable orelse return null;
-    const absolute = try std.fs.path.resolve(a, &.{ if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path, path });
-    defer a.free(absolute);
+    const root = if (self.git.root_path.len > 0) self.git.root_path else self.workspace.root_path;
+    const prefix = std.mem.trimEnd(u8, root, "/");
+    const absolute = if (plainRelativePath(path)) null else try std.fs.path.resolve(a, &.{ root, path });
+    defer if (absolute) |value| a.free(value);
     for (projection.sources.items) |source| {
         const record = self.workspace.getConst(source.id) catch continue;
-        if (record.path == null or !std.mem.eql(u8, record.path.?, absolute)) continue;
+        const record_path = record.path orelse continue;
+        const matches = if (absolute) |value|
+            std.mem.eql(u8, record_path, value)
+        else
+            record_path.len > prefix.len and record_path[prefix.len] == '/' and std.mem.startsWith(u8, record_path, prefix) and std.mem.eql(u8, record_path[prefix.len + 1 ..], path);
+        if (!matches) continue;
         if (row >= source.snapshot.lineCount()) return null;
-        var offset = try source.snapshot.lineStart(row);
-        var revision = source.snapshot.revision();
-        while (revision != record.doc.revision()) {
-            var found = false;
-            for (0..self.document_changes.len) |index| {
-                const event = self.document_changes.get(index).?;
-                if (!std.meta.eql(event.document, source.id) or event.before != revision) continue;
-                if (event.mappings.len == 0) return null;
-                const change: text.Change = .{ .allocator = event.allocator, .before = event.before, .after = event.after, .state = event.state, .mappings = event.mappings };
-                offset = change.map(offset, .before);
-                revision = event.after;
-                found = true;
-                break;
-            }
-            if (!found) return null;
+        const revision = record.doc.revision();
+        var mapped_row = row;
+        if (source.snapshot.revision() != revision) {
+            var offset = try source.snapshot.lineStart(row);
+            if (!mapOffsets(self, source.id, source.snapshot.revision(), revision, &offset, null)) return null;
+            var snapshot = record.doc.snapshot();
+            defer snapshot.deinit();
+            mapped_row = (try snapshot.pointAt(offset)).line;
         }
-        var snapshot = record.doc.snapshot();
-        defer snapshot.deinit();
-        return .{ .document = source.id, .revision = revision, .row = (try snapshot.pointAt(offset)).line, .generation = self.git.diff_generation };
+        return .{ .document = source.id, .revision = revision, .row = mapped_row, .generation = self.git.diff_generation };
     }
     return null;
 }
@@ -59,13 +83,17 @@ pub fn active(self: *const Shell) bool {
 pub fn renderRow(self: *const Shell, b: *ui.Ui, original: git.Line, path: []const u8, fallback: ui.Element, width: f32) !ui.Element {
     const row = original.new_line orelse return b.fluent().adopt(fallback).listeners(.{ .focusable = true, .on_input = b.onInput(readOnly) }).build();
     const destination = (try target(self, path, row -| 1)) orelse return fallback;
-    if (try renderBlock(self, b, original, path, 1, width)) |block| return block;
+    if (try renderBlockAt(self, b, original, path, row, 1, width, destination)) |block| return block;
     return b.fluent().adopt(fallback).listeners(.{ .focusable = true, .on_input = b.onInputWith(input, destination) }).build();
 }
 
 pub fn renderBlock(self: *const Shell, b: *ui.Ui, original: git.Line, path: []const u8, count: usize, width: f32) !?ui.Element {
     const row = original.new_line orelse return null;
     const destination = (try target(self, path, row -| 1)) orelse return null;
+    return renderBlockAt(self, b, original, path, row, count, width, destination);
+}
+
+fn renderBlockAt(self: *const Shell, b: *ui.Ui, original: git.Line, path: []const u8, row: usize, count: usize, width: f32, destination: Target) !?ui.Element {
     const view = self.git.editing.find(destination.document) orelse return null;
     const record = try self.workspace.getConst(view.document);
     var snapshot = record.doc.snapshot();
@@ -131,14 +159,16 @@ pub fn renderBlock(self: *const Shell, b: *ui.Ui, original: git.Line, path: []co
     var canvas = try state.renderExcerpt(&record.doc, b, count);
     if (has_caret) canvas = try b.fluent().adopt(canvas).id(.{ .string = "git-diff-editor" }).listeners(.{ .focusable = true }).request_focus(self.editor_focus_request).build();
     var markers: std.ArrayList(ui.Element) = .empty;
-    var height: f32 = 0;
+    try markers.ensureTotalCapacity(b.allocator(), count);
+    const first_y = state.rowY(destination.row, snapshot.revision());
+    var y = first_y;
     for (0..count) |i| {
-        const source_row = destination.row + i;
-        const line_height = state.rowY(source_row + 1, snapshot.revision()) - state.rowY(source_row, snapshot.revision());
-        height += line_height;
-        try markers.append(b.allocator(), try b.fluent().div().h_px(line_height).shrink_0().id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-live:{s}:{d}", .{ path, row + i }) }).build());
+        const next_y = state.rowY(destination.row + i + 1, snapshot.revision());
+        const line_height = next_y - y;
+        y = next_y;
+        markers.appendAssumeCapacity(try b.fluent().div().h_px(line_height).shrink_0().id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-live:{s}:{d}", .{ path, row + i }) }).build());
     }
-    return try b.fluent().stack().h_px(height).shrink_0().overflow_hidden().children(.{
+    return try b.fluent().stack().h_px(y - first_y).shrink_0().overflow_hidden().children(.{
         canvas, b.fluent().column().children(markers.items),
     }).listeners(.{ .focusable = true, .on_input = b.onInputWith(input, destination) }).id(.{ .string = try std.fmt.allocPrint(b.allocator(), "git-excerpt:{s}:{d}", .{ path, row }) }).build();
 }
@@ -288,7 +318,7 @@ pub fn getView(self: *Shell, id: ws.DocumentId) !*View {
         try editor.setHighlights(snapshot, tab.editor.grammar_spans);
         break;
     };
-    try self.git.editing.views.append(a, .{ .document = id, .editor = editor });
+    try self.git.editing.append(.{ .document = id, .editor = editor });
     return &self.git.editing.views.items[self.git.editing.views.items.len - 1];
 }
 
@@ -298,22 +328,8 @@ pub fn visibleRange(self: *const Shell, id: ws.DocumentId, at: usize) ?text.Rang
     for (projection.excerpts.items) |excerpt| {
         if (!std.meta.eql(excerpt.value.source, id)) continue;
         var range = excerpt.value.source_range;
-        var revision = projection.sourceRevision(id) catch return null;
-        while (revision != record.doc.revision()) {
-            var found = false;
-            for (0..self.document_changes.len) |i| {
-                const event = self.document_changes.get(i).?;
-                if (!std.meta.eql(event.document, id) or event.before != revision) continue;
-                if (event.mappings.len == 0) return null;
-                const change: text.Change = .{ .allocator = event.allocator, .before = event.before, .after = event.after, .state = event.state, .mappings = event.mappings };
-                range.start = change.map(range.start, .before);
-                range.end = change.map(range.end, .after);
-                revision = event.after;
-                found = true;
-                break;
-            }
-            if (!found) return null;
-        }
+        const revision = projection.sourceRevision(id) catch return null;
+        if (!mapOffsets(self, id, revision, record.doc.revision(), &range.start, &range.end)) return null;
         if (at >= range.start and at <= range.end) return range;
     }
     return null;

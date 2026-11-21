@@ -20,16 +20,10 @@ pub const Fields = struct {
 };
 
 pub const Target = struct { group: u32, match: u32, generation: u64 };
-const header_height: f32 = 36;
+const header_height: f32 = search_editing.header_height;
 pub fn contentHeight(self: *const Shell) !f32 {
-    const results = self.search.results orelse return 0;
     const line_height = self.editor_options.font_size * self.editor_options.line_height;
-    var total: f32 = 0;
-    for (results.groups, 0..) |group, group_index| {
-        total += header_height;
-        total += search_editing.groupHeight(self, group_index, line_height, group.excerpts.len);
-    }
-    return total;
+    return self.search.editing.contentHeight(line_height);
 }
 
 pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
@@ -67,19 +61,21 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
         .padding(.{ .left = 14 })
         .flex()
         .children(.{v.text(b, summary, c.muted, 12)})
+        .id(.{ .string = "search-summary" })
         .build());
     try content.append(b.allocator(), try v.rule(b, c));
     const viewport = self.search.editing.viewport[pane] orelse @max(1, b.viewport().height - v.metrics.titlebar - v.metrics.tabs - v.metrics.status - 85);
     const total = try contentHeight(self);
     const top = @min(self.search.editing.scroll[pane].offset, @max(0, total - viewport));
     const bottom = top + viewport;
-    var y: f32 = 0;
+    const start = self.search.editing.firstVisible(top, line_height);
+    var y = start.y;
     var first: ?f32 = null;
     var sticky: ?ui.Element = null;
     var push: f32 = 0;
     var rows: std.ArrayList(ui.Element) = .empty;
     if (self.search.results) |results| {
-        for (results.groups, 0..) |group, group_index| {
+        for (results.groups[start.group..], start.group..) |group, group_index| {
             if (y >= bottom) break;
             const group_height = header_height + search_editing.groupHeight(self, group_index, line_height, group.excerpts.len);
             if (y + group_height <= top) {

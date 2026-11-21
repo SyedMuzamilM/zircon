@@ -102,6 +102,7 @@ pub const layout = struct {
     pub const calculateWithCache = flex.calculateWithCache;
     pub const Cache = layout_cache.LayoutCache;
     pub const Measurer = measure.Measurer;
+    pub const LineCarets = measure.LineCarets;
     pub const FixedMetrics = measure.FixedMetrics;
 };
 pub const Color = geometry.Color;

@@ -40,6 +40,7 @@ pub const Window = struct {
     dimensions: g.Size,
     background: g.Color,
     focus: ?u32 = null,
+    modal: ?u32 = null,
     restore_focus: ?u32 = null,
     capture: ?u32 = null,
     pressed: ?u32 = null,
@@ -123,27 +124,29 @@ pub const Window = struct {
         const profile_built = w.profileNow();
         const layout = try flex.calculateWithCache(staging.allocator(), staging, root, .{ .viewport = w.dimensions }, metrics, &w.layout_cache);
         staging.bounds = layout.bounds;
-        if (w.pointer_position) |position| staging.hovered_node = hitTest(staging, modalRoot(staging) orelse root.index, position, .{ .width = w.dimensions.width, .height = w.dimensions.height });
+        const staging_modal = modalRoot(staging);
+        const route_root = staging_modal orelse root.index;
+        if (w.pointer_position) |position| staging.hovered_node = hitTest(staging, route_root, position, .{ .width = w.dimensions.width, .height = w.dimensions.height });
         const profile_laid_out = w.profileNow();
-        var next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, null, false);
+        var next_focus = reconcile(&w.frames.committed, staging, w.focus) orelse nextFocus(staging, route_root, null, false);
         var next_restore = reconcile(&w.frames.committed, staging, w.restore_focus);
-        if (modalRoot(&w.frames.committed) == null and modalRoot(staging) != null) next_restore = reconcile(&w.frames.committed, staging, w.focus);
-        if (modalRoot(&w.frames.committed) != null and modalRoot(staging) == null) {
+        if (w.modal == null and staging_modal != null) next_restore = reconcile(&w.frames.committed, staging, w.focus);
+        if (w.modal != null and staging_modal == null) {
             next_focus = next_restore orelse next_focus;
             next_restore = null;
         }
-        if (modalRoot(staging)) |modal| if (next_focus) |focused| {
-            if (!descendant(staging, focused, modal)) next_focus = nextFocus(staging, null, false);
+        if (staging_modal) |modal| if (next_focus) |focused| {
+            if (!descendant(staging, focused, modal)) next_focus = nextFocus(staging, route_root, null, false);
         };
         for (staging.nodes.items, 0..) |value, i| {
             if ((!value.autofocus and value.focus_request == 0) or !value.focusable) continue;
-            if (modalRoot(staging)) |modal| if (!descendant(staging, @intCast(i), modal)) continue;
+            if (staging_modal) |modal| if (!descendant(staging, @intCast(i), modal)) continue;
             if (reconcile(staging, &w.frames.committed, @intCast(i))) |old| {
                 if (value.focus_request != 0 and value.focus_request != w.frames.committed.nodes.items[old].focus_request) next_focus = @intCast(i);
             } else next_focus = @intCast(i);
         }
         staging.focused_node = if (w.active) next_focus else null;
-        if (modalRoot(staging)) |modal| {
+        if (staging_modal) |modal| {
             var count: usize = 0;
             for (staging.accessibility.items) |node| {
                 if (descendant(staging, node.index, modal)) {
@@ -170,14 +173,15 @@ pub const Window = struct {
         w.focus = next_focus;
         w.restore_focus = next_restore;
         w.capture = reconcile(&w.frames.committed, staging, w.capture);
-        if (modalRoot(staging)) |modal| if (w.capture) |captured| {
+        if (staging_modal) |modal| if (w.capture) |captured| {
             if (!descendant(staging, captured, modal)) w.capture = null;
         };
         w.pressed = reconcile(&w.frames.committed, staging, w.pressed);
+        w.modal = staging_modal;
         w.frames.commitPrepared();
         surface.setTextInput(w.frames.committed.text_input);
         surface.setAccessibility(w.accessibilityTree());
-        if (w.pointer_position != null or w.capture != null) w.updateCursor();
+        if (w.pointer_position != null or w.capture != null) w.updateCursor(w.frames.committed.hovered_node, false);
         w.animations.commitFrame();
         w.animating = w.animations.active(w.time);
         w.scene_animating = w.frames.committed.scene.animations.len != 0 and w.frames.committed.scene.advance(w.time);
@@ -238,7 +242,7 @@ pub const Window = struct {
     fn dragRegion(raw: *anyopaque, point: g.Point) bool {
         const w: *Window = @ptrCast(@alignCast(raw));
         const frame = &w.frames.committed;
-        if (w.closed or frame.root == null or modalRoot(frame) != null) return false;
+        if (w.closed or frame.root == null or w.modal != null) return false;
         var current: ?u32 = hitTest(frame, frame.root.?.index, point, .{ .width = w.dimensions.width, .height = w.dimensions.height });
         while (current) |i| : (current = frame.nodes.items[i].parent) {
             const node = frame.nodes.items[i];
@@ -249,8 +253,12 @@ pub const Window = struct {
     }
     pub fn dispatch(w: *Window, input: platform.Input) !void {
         if (w.closed) return;
+        var hit: ?u32 = null;
+        const entered = w.pointer_position == null;
         defer switch (input) {
-            .pointer_down, .pointer_move, .pointer_up, .pointer_leave, .focus => w.updateCursor(),
+            .pointer_down, .pointer_move, .pointer_up => w.updateCursor(hit, entered),
+            .pointer_leave => w.updateCursor(null, true),
+            .focus => w.updateCursor(w.frames.committed.hovered_node, true),
             else => {},
         };
         if (input == .pointer_leave) {
@@ -298,8 +306,8 @@ pub const Window = struct {
             .files_hover => |s| s.position,
             else => null,
         };
-        const route_root = modalRoot(frame) orelse frame.root.?.index;
-        const hit = if (point) |p| hitTest(frame, route_root, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
+        const route_root = w.modal orelse frame.root.?.index;
+        hit = if (point) |p| hitTest(frame, route_root, p, .{ .width = w.dimensions.width, .height = w.dimensions.height }) else null;
         if (point) |position| {
             w.pointer_position = position;
             if (frame.hovered_node != hit) {
@@ -351,7 +359,7 @@ pub const Window = struct {
             },
             .key_down => |key| {
                 if (key.key == .tab) {
-                    w.focus = nextFocus(frame, w.focus, key.modifiers.shift);
+                    w.focus = nextFocus(frame, route_root, w.focus, key.modifiers.shift);
                     w.dirty = true;
                 }
                 if (key.key == .enter or key.key == .space) if (w.focus) |i| try w.click(i, .{}, key.modifiers);
@@ -384,12 +392,9 @@ pub const Window = struct {
     }
     /// Captured drags keep their cursor outside the original hit region.
     /// Otherwise the deepest explicit style inherits through its ancestors.
-    fn updateCursor(w: *Window) void {
+    fn updateCursor(w: *Window, hit: ?u32, force: bool) void {
         const frame = &w.frames.committed;
-        var current: ?u32 = if (w.active) w.capture else null;
-        if (current == null and w.active) if (w.pointer_position) |point| if (frame.root) |root| {
-            current = hitTest(frame, modalRoot(frame) orelse root.index, point, .{ .width = w.dimensions.width, .height = w.dimensions.height });
-        };
+        var current = if (w.active) w.capture orelse hit else null;
         var cursor: platform.Cursor = .arrow;
         while (current) |index| : (current = frame.nodes.items[index].parent) {
             if (frame.nodes.items[index].style.cursor) |value| {
@@ -397,6 +402,7 @@ pub const Window = struct {
                 break;
             }
         }
+        if (!force and cursor == w.cursor) return;
         w.cursor = cursor;
         if (w.surface) |surface| surface.setCursor(cursor);
     }
@@ -429,20 +435,6 @@ fn hitTest(frame: *const tree.Frame, index: u32, point: g.Point, inherited_clip:
     if (contains(bounds, point)) return index;
     return null;
 }
-fn pathEqual(a: *const tree.Frame, ai: u32, b: *const tree.Frame, bi: u32) bool {
-    const an = a.nodes.items[ai];
-    const bn = b.nodes.items[bi];
-    if (an.key) |key| {
-        if (bn.key == null or !tree.keysEqual(key, bn.key.?)) return false;
-    } else {
-        if (bn.key != null or ordinal(a, ai) != ordinal(b, bi)) return false;
-    }
-    if (an.parent) |ap| {
-        if (bn.parent) |bp| return pathEqual(a, ap, b, bp);
-        return false;
-    }
-    return bn.parent == null;
-}
 fn ordinal(frame: *const tree.Frame, index: u32) usize {
     if (frame.nodes.items[index].parent) |parent| for (frame.nodes.items[parent].children, 0..) |child, n| {
         if (child == index) return n;
@@ -450,14 +442,44 @@ fn ordinal(frame: *const tree.Frame, index: u32) usize {
     return 0;
 }
 fn reconcile(old: *const tree.Frame, new: *const tree.Frame, index: ?u32) ?u32 {
-    const previous = index orelse return null;
-    for (new.nodes.items, 0..) |_, i| if (pathEqual(old, previous, new, @intCast(i))) return @intCast(i);
-    return null;
+    var current = index orelse return null;
+    var target = (new.root orelse return null).index;
+    var path: [129]u32 = undefined;
+    var depth: usize = 0;
+    while (old.nodes.items[current].parent) |parent| {
+        if (depth == path.len) return null;
+        path[depth] = current;
+        depth += 1;
+        current = parent;
+    }
+    if (old.root == null or current != old.root.?.index) return null;
+    const old_key = old.nodes.items[current].key;
+    const new_key = new.nodes.items[target].key;
+    if (old_key) |key| {
+        if (new_key == null or !tree.keysEqual(key, new_key.?)) return null;
+    } else if (new_key != null) return null;
+    while (depth > 0) {
+        depth -= 1;
+        const child = path[depth];
+        const children = new.nodes.items[target].children;
+        if (old.nodes.items[child].key) |key| {
+            target = for (children) |candidate| {
+                if (new.nodes.items[candidate].key) |candidate_key| {
+                    if (tree.keysEqual(key, candidate_key)) break candidate;
+                }
+            } else return null;
+        } else {
+            const position = ordinal(old, child);
+            if (position >= children.len or new.nodes.items[children[position]].key != null) return null;
+            target = children[position];
+        }
+    }
+    return target;
 }
-fn nextFocus(frame: *const tree.Frame, current: ?u32, reverse: bool) ?u32 {
+fn nextFocus(frame: *const tree.Frame, route_root: u32, current: ?u32, reverse: bool) ?u32 {
     var order: [1024]u32 = undefined;
     var count: usize = 0;
-    focusOrder(frame, modalRoot(frame) orelse frame.root.?.index, &order, &count);
+    focusOrder(frame, route_root, &order, &count);
     if (count == 0) return null;
     if (current) |c| for (order[0..count], 0..) |i, n| if (i == c) return order[if (reverse) (n + count - 1) % count else (n + 1) % count];
     return order[if (reverse) count - 1 else 0];

@@ -48,7 +48,7 @@ pub const Model = struct {
     generation: u64 = 0,
     diagnostics_generation: u64 = 0,
     syntax_documents: std.ArrayList(SyntaxDocument) = .empty,
-    syntax_waiting: bool = false,
+    syntax_due: ?f64 = null,
     sessions: std.ArrayList(Session) = .empty,
     documents: std.ArrayList(Document) = .empty,
     completions: ?lsp.Message = null,
@@ -360,7 +360,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
                     if (!self.language.expects(session_index, value.uri, value.id, value.version) or record.doc.revision() != value.version) continue;
                     const current = actions.active(self) catch continue;
                     if (!std.meta.eql(current.id, pending.document) or current.editor.primary().head != pending.cursor) continue;
-                    try filterCompletions(&message, record.doc.snapshot(), pending.cursor);
+                    try filterCompletions(self.allocator, &message, record.doc.snapshot(), pending.cursor);
                     if (message.data.completion.items.len == 0) {
                         self.language.clearCompletion();
                         changed = true;
@@ -506,23 +506,34 @@ pub fn syncDiagnostics(self: *Shell) !bool {
 
 fn syncEditorDiagnostics(self: *Shell, state: *zircon_editor.Editor, id: ws.DocumentId) !bool {
     const record = self.workspace.getConst(id) catch return false;
-    var snapshot = record.doc.snapshot();
-    defer snapshot.deinit();
-    if (state.diagnostics_generation == self.language.diagnostics_generation and state.diagnostics_revision == snapshot.revision()) return false;
+    const revision = record.doc.revision();
+    const generation = self.language.diagnostics_generation;
+    if (state.diagnostics_generation == generation and state.diagnostics_revision == revision) return false;
     var marks: std.ArrayList(zircon_editor.element.Mark) = .empty;
     defer marks.deinit(self.allocator);
     for (self.language.documents.items) |doc| if (std.meta.eql(doc.id, id)) {
         if (doc.diagnostics) |message| {
-            if (message.data.diagnostics.version == snapshot.revision()) for (message.data.diagnostics.items) |item| {
-                const start = lsp.offsetAt(snapshot, item.range.start) catch continue;
-                const end = lsp.offsetAt(snapshot, item.range.end) catch continue;
-                if (end < start) continue;
-                try marks.append(self.allocator, .{ .range = .{ .start = start, .end = end }, .severity = severityOf(item.severity), .message = item.message, .source = item.source orelse "" });
-            };
+            const diagnostics = message.data.diagnostics;
+            if (diagnostics.version == revision and diagnostics.items.len > 0) {
+                var snapshot = record.doc.snapshot();
+                defer snapshot.deinit();
+                try marks.ensureTotalCapacity(self.allocator, diagnostics.items.len);
+                for (diagnostics.items) |item| {
+                    const start = lsp.offsetAt(snapshot, item.range.start) catch continue;
+                    const end = lsp.offsetAt(snapshot, item.range.end) catch continue;
+                    if (end < start) continue;
+                    marks.appendAssumeCapacity(.{ .range = .{ .start = start, .end = end }, .severity = severityOf(item.severity), .message = item.message, .source = item.source orelse "" });
+                }
+            }
         }
         break;
     };
-    try state.setDiagnostics(snapshot.revision(), self.language.diagnostics_generation, marks.items);
+    if (marks.items.len == 0 and state.diagnostics.len == 0) {
+        state.diagnostics_revision = revision;
+        state.diagnostics_generation = generation;
+        return false;
+    }
+    try state.setDiagnostics(revision, generation, marks.items);
     return true;
 }
 
@@ -540,29 +551,36 @@ fn matchRank(candidate: []const u8, prefix: []const u8) ?usize {
     return null;
 }
 
-fn filterCompletions(message: *lsp.Message, snapshot_value: text.Snapshot, cursor: usize) !void {
+fn filterCompletions(scratch: std.mem.Allocator, message: *lsp.Message, snapshot_value: text.Snapshot, cursor: usize) !void {
     var snapshot = snapshot_value;
     defer snapshot.deinit();
-    const a = message.arena.allocator();
     const word = try completionWordRange(snapshot, cursor);
-    const prefix = try snapshot.copy(a, .{ .start = word.start, .end = cursor });
+    const prefix = try snapshot.copy(scratch, .{ .start = word.start, .end = cursor });
+    defer scratch.free(prefix);
     const candidates = message.data.completion.items;
-    const items = try a.alloc(lsp.Completion, candidates.len);
+    const Ranked = struct { index: usize, rank: usize };
+    const ranked = try scratch.alloc(Ranked, candidates.len);
+    defer scratch.free(ranked);
+
     var count: usize = 0;
-    for (candidates) |candidate| {
-        if (candidate.snippet or matchRank(candidate.filter_text orelse candidate.label, prefix) == null) continue;
-        items[count] = candidate;
+    for (candidates, 0..) |candidate, index| {
+        if (candidate.snippet) continue;
+        const rank = matchRank(candidate.filter_text orelse candidate.label, prefix) orelse continue;
+        ranked[count] = .{ .index = index, .rank = rank };
         count += 1;
     }
-    std.mem.sort(lsp.Completion, items[0..count], prefix, struct {
-        fn less(typed: []const u8, left: lsp.Completion, right: lsp.Completion) bool {
-            const left_rank = matchRank(left.filter_text orelse left.label, typed).?;
-            const right_rank = matchRank(right.filter_text orelse right.label, typed).?;
-            if (left_rank != right_rank) return left_rank < right_rank;
-            return std.mem.lessThan(u8, left.sort_text orelse left.label, right.sort_text orelse right.label);
+    std.mem.sort(Ranked, ranked[0..count], candidates, struct {
+        fn less(items: []const lsp.Completion, left: Ranked, right: Ranked) bool {
+            if (left.rank != right.rank) return left.rank < right.rank;
+            const l = items[left.index];
+            const r = items[right.index];
+            return std.mem.lessThan(u8, l.sort_text orelse l.label, r.sort_text orelse r.label);
         }
     }.less);
-    message.data.completion.items = items[0..count];
+
+    const items = try message.arena.allocator().alloc(lsp.Completion, count);
+    for (ranked[0..count], items) |entry, *item| item.* = candidates[entry.index];
+    message.data.completion.items = items;
 }
 
 fn acceptDiagnostics(self: *Shell, session: usize, message: *lsp.Message) !bool {
@@ -913,10 +931,10 @@ fn resolved(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void
 }
 
 fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
-    const was_waiting = self.language.syntax_waiting;
-    defer if (was_waiting != self.language.syntax_waiting) cx.notify();
-    self.language.syntax_waiting = false;
-    const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
+    const previous_due = self.language.syntax_due;
+    defer if (previous_due != self.language.syntax_due) cx.notify();
+    self.language.syntax_due = null;
+    const now = try cx.app.currentTime();
     const snapshot = self.extension_snapshot orelse return;
     for (self.workspace.slots.items, 0..) |slot, slot_index| {
         const record = slot.record orelse continue;
@@ -950,21 +968,16 @@ fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {
             tracked.retry_at = 0;
         }
         if (tracked.pending or tracked.attempts >= 3) continue;
-        if (now < tracked.retry_at) {
-            self.language.syntax_waiting = true;
-            continue;
-        }
-        if (tracked.revision != null and now - tracked.changed_at < 0.08) {
-            self.language.syntax_waiting = true;
+        const due = @max(tracked.retry_at, if (tracked.revision != null) tracked.changed_at + 0.08 else 0);
+        if (now < due) {
+            self.language.syntax_due = @min(self.language.syntax_due orelse due, due);
             continue;
         }
         var source = record.doc.snapshot();
         defer source.deinit();
         if (source.byteLen() > 8 * 1024 * 1024) continue;
-        const bytes = try source.copy(self.allocator, .{ .start = 0, .end = source.byteLen() });
-        defer self.allocator.free(bytes);
         if (tracked.attempts == 0) tracked.status_sequence = self.status_sequence;
-        try host.start(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, bytes, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = id, .revision = source.revision(), .index = i }, highlighted);
+        try host.startSnapshot(self, cx, &.{ "highlight", grammar.wasm, grammar.name, grammar.highlights }, source, .{ .generation = self.language.generation, .epoch = tracked.epoch, .document = id, .revision = source.revision(), .index = i }, highlighted);
         self.language.syntax_jobs +%= 1;
         tracked.pending = true;
         tracked.attempts += 1;
@@ -1018,7 +1031,7 @@ fn highlighted(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !v
 /// Retry only the current source/configuration. The ordinary syntax wake keeps
 /// the UI asleep between attempts and stops after the third failure.
 fn syntaxFailed(self: *Shell, cx: *ui.Context(Shell), tracked: *SyntaxDocument, message: []const u8) !void {
-    const now = if (self.window) |handle| (try cx.app.window(handle)).time else 0;
+    const now = try cx.app.currentTime();
     tracked.retry_at = now + if (tracked.attempts <= 1) @as(f64, 0.25) else @as(f64, 0.5);
     if (self.status_sequence == tracked.status_sequence and !(self.status_is_error and self.status_origin == .general)) {
         try self.setStatus(try self.allocator.dupe(u8, message));
@@ -1030,10 +1043,7 @@ fn syntaxFailed(self: *Shell, cx: *ui.Context(Shell), tracked: *SyntaxDocument, 
 }
 
 fn syntaxTransportFailed(self: *Shell, cx: *ui.Context(Shell), err: anyerror) void {
-    const now = if (self.window) |handle| blk: {
-        const window = cx.app.window(handle) catch break :blk 0;
-        break :blk window.time;
-    } else 0;
+    const now = cx.app.currentTime() catch 0;
     for (self.language.syntax_documents.items) |*tracked| if (tracked.pending) {
         tracked.pending = false;
         if (tracked.attempts < 3) tracked.retry_at = now;
@@ -1051,19 +1061,4 @@ fn clearSyntaxError(self: *Shell, document: ws.DocumentId) void {
             self.status_origin = .general;
         },
     }
-}
-
-const SyntaxWake = struct {
-    pub const LayoutState = void;
-    pub const PrepaintState = void;
-    pub fn requestLayout(_: *SyntaxWake, _: *ui.LayoutCx) !ui.LayoutResult(void) {
-        return .{ .size = .{ .width = 0, .height = 0 }, .state = {} };
-    }
-    pub fn prepaint(_: *SyntaxWake, cx: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {
-        try cx.requestFrameAfter(0.08);
-    }
-    pub fn paint(_: *SyntaxWake, _: *ui.PaintCx, _: ui.Rect, _: *void, _: *void) !void {}
-};
-pub fn syntaxWake(b: *ui.Ui) !ui.Element {
-    return b.custom(SyntaxWake, .{}, .{ .width = .{ .px = 0 }, .height = .{ .px = 0 } });
 }

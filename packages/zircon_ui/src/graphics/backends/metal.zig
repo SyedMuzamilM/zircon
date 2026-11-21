@@ -18,7 +18,6 @@ const atlas_side = 2048;
 const max_instances = 262144;
 
 extern "c" fn MTLCreateSystemDefaultDevice() Id;
-extern "c" fn CFHash(CFRef) usize;
 extern "c" fn CFEqual(CFRef, CFRef) u8;
 extern "c" fn CTFontCreateCopyWithAttributes(CFRef, f64, ?*const anyopaque, ?CFRef) ?CFRef;
 extern "c" fn CTFontGetBoundingRectsForGlyphs(CFRef, u32, [*]const u16, ?[*]objc.CGRect, isize) objc.CGRect;
@@ -57,17 +56,9 @@ comptime {
     std.debug.assert(@sizeOf(Instance) == 128);
 }
 
-const GlyphKey = struct { font: CFRef, scale: u32, glyph: u16, phase_x: u8, phase_y: u8 };
+const RasterFont = struct { face: CFRef, hash: usize, scale: f32, pixel: CFRef, id: u64 };
+const GlyphKey = struct { font: u64, glyph: u16, phase_x: u8 };
 const Glyph = struct { bounds: Rect, uv: Rect };
-const GlyphContext = struct {
-    pub fn hash(_: GlyphContext, key: GlyphKey) u64 {
-        const parts = [4]u64{ CFHash(key.font), key.scale, key.glyph, @as(u64, key.phase_x) * 4 + key.phase_y };
-        return std.hash.Wyhash.hash(0, std.mem.asBytes(&parts));
-    }
-    pub fn eql(_: GlyphContext, a: GlyphKey, b: GlyphKey) bool {
-        return a.scale == b.scale and a.glyph == b.glyph and a.phase_x == b.phase_x and a.phase_y == b.phase_y and CFEqual(a.font, b.font) != 0;
-    }
-};
 const BufferSlot = struct { buffer: Id = null, command: Id = null, capacity: usize = 0 };
 const ImageTexture = struct { texture: Id, width: u32, height: u32, bytes: usize, touched: u64 };
 const Batch = struct { start: usize, count: usize, texture: Id };
@@ -100,7 +91,12 @@ pub const Renderer = struct {
     atlas_x: usize = 1,
     atlas_y: usize = 1,
     atlas_row: usize = 0,
-    glyphs: std.HashMapUnmanaged(GlyphKey, Glyph, GlyphContext, std.hash_map.default_max_load_percentage) = .empty,
+    glyphs: std.AutoHashMapUnmanaged(GlyphKey, Glyph) = .empty,
+    raster_fonts: [64]RasterFont = undefined,
+    raster_font_count: usize = 0,
+    next_font_slot: usize = 0,
+    next_font_id: u64 = 0,
+    glyph_pixels: std.ArrayList(u8) = .empty,
     instances: std.ArrayList(Instance) = .empty,
     batches: std.ArrayList(Batch) = .empty,
     images: std.AutoHashMapUnmanaged(u64, ImageTexture) = .empty,
@@ -158,10 +154,34 @@ pub const Renderer = struct {
         return texture;
     }
 
-    fn clearGlyphs(r: *Renderer) void {
-        var keys = r.glyphs.keyIterator();
-        while (keys.next()) |key| text_mod.CFRelease(key.font);
-        r.glyphs.clearRetainingCapacity();
+    fn releaseRasterFont(font: RasterFont) void {
+        text_mod.CFRelease(font.pixel);
+        text_mod.CFRelease(font.face);
+    }
+
+    fn clearRasterFonts(r: *Renderer) void {
+        for (r.raster_fonts[0..r.raster_font_count]) |font| releaseRasterFont(font);
+        r.raster_font_count = 0;
+        r.next_font_slot = 0;
+    }
+
+    fn rasterFont(r: *Renderer, face: CFRef, hash: usize, scale: f32) !RasterFont {
+        for (r.raster_fonts[0..r.raster_font_count]) |font| {
+            if (font.scale == scale and font.hash == hash and (font.face == face or CFEqual(font.face, face) != 0)) return font;
+        }
+        if (r.next_font_id == std.math.maxInt(u64)) return error.FontIdentityExhausted;
+        const pixel = CTFontCreateCopyWithAttributes(face, text_mod.CTFontGetSize(face) * scale, null, null) orelse return error.NativeFontUnavailable;
+        const font: RasterFont = .{ .face = text_mod.CFRetain(face), .hash = hash, .scale = scale, .pixel = pixel, .id = r.next_font_id };
+        r.next_font_id += 1;
+        if (r.raster_font_count == r.raster_fonts.len) {
+            releaseRasterFont(r.raster_fonts[r.next_font_slot]);
+            r.raster_fonts[r.next_font_slot] = font;
+            r.next_font_slot = (r.next_font_slot + 1) % r.raster_fonts.len;
+        } else {
+            r.raster_fonts[r.raster_font_count] = font;
+            r.raster_font_count += 1;
+        }
+        return font;
     }
 
     fn resetAtlas(r: *Renderer) !void {
@@ -181,17 +201,17 @@ pub const Renderer = struct {
         // therefore survive until every in-flight command using them completes.
         objc.release(r.atlas);
         r.atlas = fresh;
-        r.clearGlyphs();
+        r.glyphs.clearRetainingCapacity();
         r.atlas_x = 1;
         r.atlas_y = 1;
         r.atlas_row = 0;
     }
 
-    fn glyph(r: *Renderer, font: CFRef, glyph_id: u16, scale: f32, phase_x: u8, phase_y: u8) !Glyph {
-        const key: GlyphKey = .{ .font = font, .scale = @bitCast(scale), .glyph = glyph_id, .phase_x = phase_x, .phase_y = phase_y };
+    fn glyph(r: *Renderer, font: RasterFont, glyph_id: u16, phase_x: u8) !Glyph {
+        const key: GlyphKey = .{ .font = font.id, .glyph = glyph_id, .phase_x = phase_x };
         if (r.glyphs.get(key)) |cached| return cached;
-        const pixel_font = CTFontCreateCopyWithAttributes(font, text_mod.CTFontGetSize(font) * scale, null, null) orelse return error.NativeFontUnavailable;
-        defer text_mod.CFRelease(pixel_font);
+        const pixel_font = font.pixel;
+        const scale = font.scale;
         const native_bounds = CTFontGetBoundingRectsForGlyphs(pixel_font, 0, @ptrCast(&glyph_id), null, 1);
         const min_x: f32 = @floatCast(@floor(native_bounds.origin.x));
         const min_y: f32 = @floatCast(@floor(native_bounds.origin.y));
@@ -206,8 +226,8 @@ pub const Renderer = struct {
             r.atlas_row = 0;
         }
         if (r.atlas_y + height + 1 > atlas_side or r.glyphs.count() >= 32768) return error.AtlasFull;
-        const pixels = try r.allocator.alloc(u8, width * height);
-        defer r.allocator.free(pixels);
+        try r.glyph_pixels.resize(r.allocator, width * height);
+        const pixels = r.glyph_pixels.items;
         @memset(pixels, 0);
         const context = CGBitmapContextCreate(pixels.ptr, width, height, 8, width, null, 7) orelse return error.GlyphRasterizationFailed;
         defer CGContextRelease(context);
@@ -219,7 +239,7 @@ pub const Renderer = struct {
         CGContextSetAllowsFontSubpixelQuantization(context, false);
         CGContextSetShouldSubpixelQuantizeFonts(context, false);
         CGContextTranslateCTM(context, 1 - min_x, 1 - min_y);
-        const zero: objc.CGPoint = .{ .x = @as(f64, @floatFromInt(phase_x)) / 4, .y = -@as(f64, @floatFromInt(phase_y)) / 4 };
+        const zero: objc.CGPoint = .{ .x = @as(f64, @floatFromInt(phase_x)) / 4, .y = 0 };
         CTFontDrawGlyphs(pixel_font, @ptrCast(&glyph_id), @ptrCast(&zero), 1, context);
         objc.send(void, r.atlas, "replaceRegion:mipmapLevel:withBytes:bytesPerRow:", .{
             Region{ .origin = .{ .x = r.atlas_x, .y = r.atlas_y }, .size = .{ .width = width, .height = height } },
@@ -231,8 +251,6 @@ pub const Renderer = struct {
             .bounds = .{ .x = (min_x - 1) / scale, .y = (min_y - 1) / scale, .width = width_f / scale, .height = height_f / scale },
             .uv = .{ .x = @as(f32, @floatFromInt(r.atlas_x)) / atlas_side, .y = @as(f32, @floatFromInt(r.atlas_y)) / atlas_side, .width = width_f / atlas_side, .height = height_f / atlas_side },
         };
-        _ = text_mod.CFRetain(font);
-        errdefer text_mod.CFRelease(font);
         try r.glyphs.put(r.allocator, key, result);
         r.atlas_x += width + 1;
         r.atlas_row = @max(r.atlas_row, height);
@@ -277,34 +295,19 @@ pub const Renderer = struct {
                 .text => {
                     if (item.text.len == 0) continue;
                     const layout = try r.text.layout(item.text, item.font_size, item.mono);
-                    var ascent: f64 = 0;
-                    var descent: f64 = 0;
-                    _ = text_mod.CTLineGetTypographicBounds(layout.line, &ascent, &descent, null);
-                    const baseline: f32 = item.rect.y + @max(0, (item.rect.height - @as(f32, @floatCast(ascent + descent))) * 0.5) + @as(f32, @floatCast(ascent));
-                    const runs = text_mod.CTLineGetGlyphRuns(layout.line);
-                    var run_index: isize = 0;
-                    while (run_index < text_mod.CFArrayGetCount(runs)) : (run_index += 1) {
-                        const run = text_mod.CFArrayGetValueAtIndex(runs, run_index);
-                        const font = text_mod.CFDictionaryGetValue(text_mod.CTRunGetAttributes(run), text_mod.kCTFontAttributeName) orelse return error.NativeFontUnavailable;
-                        const count = text_mod.CTRunGetGlyphCount(run);
-                        var glyph_index: isize = 0;
-                        while (glyph_index < count) : (glyph_index += 1) {
-                            var glyph_id: u16 = 0;
-                            var position: text_mod.CGPoint = undefined;
-                            const range: text_mod.CFRange = .{ .location = glyph_index, .length = 1 };
-                            text_mod.CTRunGetGlyphs(run, range, @ptrCast(&glyph_id));
-                            text_mod.CTRunGetPositions(run, range, @ptrCast(&position));
-                            const at = item.rect.x + @as(f32, @floatCast(position.x));
+                    const baseline: f32 = item.rect.y + @max(0, (item.rect.height - @as(f32, @floatCast(layout.ascent + layout.descent))) * 0.5) + @as(f32, @floatCast(layout.ascent));
+                    const shaped = try layout.glyphGeometry(r.allocator);
+                    for (shaped.runs[0..shaped.run_count]) |run| {
+                        const font = try r.rasterFont(run.font, run.font_hash, scale);
+                        for (shaped.glyphs[run.start..][0..run.count]) |glyph_value| {
+                            const at = item.rect.x + glyph_value.x;
                             if (at > item.clip.x + item.clip.width + item.font_size * 2 or at < item.clip.x - item.font_size * 3) continue;
-                            // Rasterize fractional origins into distinct masks, then place
-                            // those masks on device pixels instead of blurring them again.
+                            // Keep horizontal hinting while reusing the same mask at every scroll offset.
                             const pixel_x = @round(at * scale * 4) / 4;
-                            const pixel_y = @round((baseline - @as(f32, @floatCast(position.y))) * scale * 4) / 4;
                             const base_x = @floor(pixel_x);
-                            const base_y = @floor(pixel_y);
-                            const cached = try r.glyph(font, glyph_id, scale, @intFromFloat((pixel_x - base_x) * 4), @intFromFloat((pixel_y - base_y) * 4));
+                            const cached = try r.glyph(font, glyph_value.id, @intFromFloat((pixel_x - base_x) * 4));
                             const b = cached.bounds;
-                            try r.append(.{ .x = base_x / scale + b.x, .y = base_y / scale - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1, item.transform, null);
+                            try r.append(.{ .x = base_x / scale + b.x, .y = baseline - glyph_value.y - b.y - b.height, .width = b.width, .height = b.height }, item.clip, item.color, cached.uv, 0, 1, item.transform, null);
                         }
                     }
                 },
@@ -331,7 +334,8 @@ pub fn stats(r: *Renderer) Stats {
 }
 pub fn setTypography(r: *Renderer, value: text_typography.Typography) void {
     if (std.meta.eql(r.text.typography, value)) return;
-    r.clearGlyphs();
+    r.glyphs.clearRetainingCapacity();
+    r.clearRasterFonts();
     r.text.setTypography(value);
 }
 
@@ -382,8 +386,9 @@ fn destroyRenderer(r: *Renderer) void {
         objc.release(slot.command);
         objc.release(slot.buffer);
     }
-    r.clearGlyphs();
+    r.clearRasterFonts();
     r.glyphs.deinit(r.allocator);
+    r.glyph_pixels.deinit(r.allocator);
     r.instances.deinit(r.allocator);
     r.clearBatches();
     r.batches.deinit(r.allocator);

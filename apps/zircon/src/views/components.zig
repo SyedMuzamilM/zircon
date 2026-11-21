@@ -1,6 +1,7 @@
 //! Small visual controls shared by workspace, panels and preferences. Icons are
 //! shared SVG assets; actions keep their readable labels for keyboard/tests.
 const std = @import("std");
+const extensions = @import("zircon_extensions");
 const git = @import("zircon_git");
 const ui = @import("zircon_ui");
 const zircon_widgets = @import("zircon_widgets");
@@ -99,7 +100,12 @@ pub fn menuRow(b: *ui.Ui, c: Palette, action: commands_module.Command, label: []
 /// the window even when a split pane or sidebar is narrower than the menu.
 /// Resolve semantic file icons everywhere through the active installed theme.
 pub fn fileGlyph(self: *const Shell, b: *ui.Ui, path: []const u8, directory: bool, expanded: bool, size: f32) !ui.Element {
-    if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(self.active_icon_theme)) |theme| switch (theme.resolve(path, directory)) {
+    const theme = if (self.extension_snapshot) |snapshot| snapshot.resolveIconTheme(self.active_icon_theme) else null;
+    return fileGlyphWithIcon(self, b, path, directory, expanded, size, if (theme) |value| value.resolve(path, directory) else null);
+}
+
+pub fn fileGlyphWithIcon(self: *const Shell, b: *ui.Ui, path: []const u8, directory: bool, expanded: bool, size: f32, contribution: ?extensions.Icon) !ui.Element {
+    if (contribution) |value| switch (value) {
         .symbol => |symbol| return text(b, symbol, if (directory) self.colors.folder else fileColor(self.colors, path), size),
         .png => |asset| if (self.icons.find(asset.path)) |image| return image_module.element(b, image, .{ .width = .{ .px = size }, .height = .{ .px = size }, .flex_shrink = 0 }),
     };

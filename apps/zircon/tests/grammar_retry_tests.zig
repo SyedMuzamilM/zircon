@@ -43,7 +43,7 @@ const Ops = struct {
         return self.language.syntax_jobs;
     }
     fn waiting(self: *const zircon.Shell) bool {
-        return self.language.syntax_waiting;
+        return self.language.syntax_due != null;
     }
 };
 

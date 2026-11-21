@@ -60,6 +60,9 @@ const State = struct {
     window: Id,
     view: Id,
     layer: Id,
+    layer_width: f64 = 0,
+    layer_height: f64 = 0,
+    layer_scale: f64 = 0,
     renderer: *metal.Renderer,
     accessibility_context: accessibility.Context,
     marked: Id = null,
@@ -86,8 +89,8 @@ pub fn now() f64 {
     return @as(f64, @floatFromInt(objc.clockNs())) / 1e9;
 }
 
-/// Pumps one native event, blocking at most the requested duration. A negative
-/// timeout blocks until input. Application rendering stays outside AppKit.
+/// Pumps native input, blocking at most the requested duration for the first
+/// event. Consecutive continuous events can share a frame.
 pub fn pump(timeout_seconds: f64) !void {
     if (pthread_main_np() == 0) return error.WrongThread;
     const pool = objc.Pool.init();
@@ -118,12 +121,52 @@ pub fn pump(timeout_seconds: f64) !void {
         objc.send(Id, objc.class("NSDate"), "distantFuture", .{})
     else
         objc.send(Id, objc.class("NSDate"), "dateWithTimeIntervalSinceNow:", .{@max(0, timeout_seconds)});
-    const event = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ @as(usize, std.math.maxInt(usize)), deadline, objc.string("kCFRunLoopDefaultMode"), true });
-    if (event != null) {
-        if (objc.send(usize, event, "type", .{}) == 15 and objc.send(i16, event, "subtype", .{}) == wake_subtype) wake_pending.store(false, .release) else objc.send(void, app, "sendEvent:", .{event});
+    const mode = objc.string("kCFRunLoopDefaultMode");
+    try takeCallbackError();
+    const mask: usize = std.math.maxInt(usize);
+    var event = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ mask, deadline, mode, true });
+    const past = objc.send(Id, objc.class("NSDate"), "distantPast", .{});
+    var remaining: usize = 32;
+    while (event != null) {
+        const kind = objc.send(usize, event, "type", .{});
+        const wake_event = kind == 15 and objc.send(i16, event, "subtype", .{}) == wake_subtype;
+        remaining -= 1;
+        var next: Id = null;
+        if (kind == 5) {
+            // Preserve enter/exit and the ordering across native windows.
+            const queued = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ mask, past, mode, false });
+            if (queued != null and objc.send(usize, queued, "type", .{}) == 5 and
+                objc.send(isize, queued, "windowNumber", .{}) == objc.send(isize, event, "windowNumber", .{}) and remaining != 0)
+            {
+                event = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ mask, past, mode, true });
+                continue;
+            }
+        }
+        if (wake_event) wake_pending.store(false, .release) else objc.send(void, app, "sendEvent:", .{event});
+        const continuous = kind == 5 or kind == 6 or kind == 7 or kind == 22 or kind == 27;
+        if (continuous and remaining != 0 and callback_error == null and !awaitingTextSnapshot(app)) {
+            const queued = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ mask, past, mode, false });
+            if (queued != null) {
+                const queued_kind = objc.send(usize, queued, "type", .{});
+                switch (queued_kind) {
+                    5, 6, 7, 22, 27 => next = objc.send(Id, app, "nextEventMatchingMask:untilDate:inMode:dequeue:", .{ mask, past, mode, true }),
+                    else => {},
+                }
+            }
+        }
+        event = next;
     }
     objc.send(void, app, "updateWindows", .{});
     try takeCallbackError();
+}
+fn awaitingTextSnapshot(app: Id) bool {
+    const windows = objc.send(Id, app, "windows", .{});
+    for (0..objc.send(usize, windows, "count", .{})) |window_index| {
+        const window = objc.send(Id, windows, "objectAtIndex:", .{window_index});
+        const view = objc.send(Id, window, "contentView", .{});
+        if (nativeState(view)) |s| if (!s.closed and (s.awaiting_snapshot or s.text_requests.items.len != 0)) return true;
+    }
+    return false;
 }
 fn takeCallbackError() !void {
     if (callback_error) |err| {
@@ -310,8 +353,15 @@ fn size(raw: *anyopaque) geometry.Size {
 fn updateLayer(s: *State) void {
     const dimensions = size(s);
     const scale = objc.send(f64, s.window, "backingScaleFactor", .{});
-    objc.send(void, s.layer, "setContentsScale:", .{scale});
-    objc.send(void, s.layer, "setDrawableSize:", .{objc.CGSize{ .width = dimensions.width * scale, .height = dimensions.height * scale }});
+    const width = dimensions.width * scale;
+    const height = dimensions.height * scale;
+    if (s.layer_scale != scale) objc.send(void, s.layer, "setContentsScale:", .{scale});
+    if (s.layer_width != width or s.layer_height != height) {
+        objc.send(void, s.layer, "setDrawableSize:", .{objc.CGSize{ .width = width, .height = height }});
+    }
+    s.layer_width = width;
+    s.layer_height = height;
+    s.layer_scale = scale;
 }
 fn present(raw: *anyopaque, frame: scene.Frame) !bool {
     const s = state(raw);
@@ -323,7 +373,7 @@ fn present(raw: *anyopaque, frame: scene.Frame) !bool {
     updateLayer(s);
     const drawable = objc.send(Id, s.layer, "nextDrawable", .{}) orelse return false;
     const texture = objc.send(Id, drawable, "texture", .{}) orelse return error.InvalidDrawable;
-    const scale: f32 = @floatCast(objc.send(f64, s.window, "backingScaleFactor", .{}));
+    const scale: f32 = @floatCast(s.layer_scale);
     try metal.draw(s.renderer, frame, dimensions, scale, texture, drawable, false);
     if (s.pending_icon != null) {
         objc.send(void, objc.send(Id, objc.class("NSApplication"), "sharedApplication", .{}), "setApplicationIconImage:", .{s.pending_icon});
@@ -333,7 +383,7 @@ fn present(raw: *anyopaque, frame: scene.Frame) !bool {
     return true;
 }
 fn measurer(raw: *anyopaque) measurement.Measurer {
-    return .{ .generation = state(raw).font_generation, .context = raw, .text = measureText, .caret_fn = caret, .index_fn = index };
+    return .{ .generation = state(raw).font_generation, .context = raw, .text = measureText, .caret_fn = caret, .index_fn = index, .fits_single_row_fn = fitsSingleRow, .line_carets_fn = lineCarets };
 }
 fn setTypography(raw: *anyopaque, value: text_typography.Typography) void {
     state(raw).font_generation +%= 1;
@@ -410,17 +460,25 @@ fn choosePath(_: *anyopaque, allocator: std.mem.Allocator, kind: platform.Surfac
 fn caret(raw: ?*anyopaque, bytes: []const u8, style: TextStyle, offset: usize) f32 {
     return state(raw.?).renderer.text.caret(bytes, style.size, style.mono, offset);
 }
+fn lineCarets(raw: ?*anyopaque, bytes: []const u8, style: TextStyle) ?measurement.LineCarets.Native {
+    if (bytes.len == 0) return null;
+    const layout = state(raw.?).renderer.text.layout(bytes, style.size, style.mono) catch return null;
+    return .{ .context = layout, .caret = layoutCaret, .uniform_advance = layout.uniformAdvance() };
+}
+fn layoutCaret(raw: *anyopaque, offset: usize) f32 {
+    const layout: *shaping.Layout = @ptrCast(@alignCast(raw));
+    return layout.caret(offset);
+}
 fn index(raw: ?*anyopaque, bytes: []const u8, style: TextStyle, x: f32) usize {
     return state(raw.?).renderer.text.index(bytes, style.size, style.mono, x);
+}
+fn fitsSingleRow(raw: ?*anyopaque, bytes: []const u8, style: TextStyle, width: f32) bool {
+    return state(raw.?).renderer.text.fitsSingleRow(bytes, style.size, style.mono, width);
 }
 fn measureText(raw: ?*anyopaque, bytes: []const u8, style: TextStyle) !geometry.Size {
     const s = state(raw.?);
     const layout = try s.renderer.text.layout(bytes, style.size, style.mono);
-    var ascent: f64 = 0;
-    var descent: f64 = 0;
-    var leading: f64 = 0;
-    const width = shaping.CTLineGetTypographicBounds(layout.line, &ascent, &descent, &leading);
-    return .{ .width = @floatCast(width), .height = @floatCast(@max(@as(f64, style.size), ascent + descent + leading)) };
+    return .{ .width = @floatCast(layout.width), .height = @floatCast(@max(@as(f64, style.size), layout.ascent + layout.descent + layout.leading)) };
 }
 fn snapshot(raw: *anyopaque, frame: scene.Frame, path: []const u8) !void {
     const s = state(raw);
@@ -444,6 +502,7 @@ fn clipboardWrite(_: *anyopaque, bytes: []const u8) !void {
 fn setTextInput(raw: *anyopaque, value: ?platform.TextSnapshot) void {
     const s = state(raw);
     if (value == null and s.input == null and s.text_requests.items.len == 0 and s.marked == null) return;
+    const unchanged = !s.awaiting_snapshot and sameTextSnapshot(s.input, value);
     const pool = objc.Pool.init();
     defer pool.deinit();
     s.input = value;
@@ -454,8 +513,16 @@ fn setTextInput(raw: *anyopaque, value: ?platform.TextSnapshot) void {
         objc.release(s.marked);
         s.marked = null;
     }
+    if (unchanged) return;
     const context = objc.send(Id, s.view, "inputContext", .{});
     objc.send(void, context, "invalidateCharacterCoordinates", .{});
+}
+fn sameTextSnapshot(before: ?platform.TextSnapshot, after: ?platform.TextSnapshot) bool {
+    const a = before orelse return false;
+    const b = after orelse return false;
+    return a.revision == b.revision and a.base_byte == b.base_byte and a.base_utf16 == b.base_utf16 and
+        std.meta.eql(a.selection, b.selection) and std.meta.eql(a.marked, b.marked) and
+        std.meta.eql(a.caret, b.caret) and std.mem.eql(u8, a.text, b.text);
 }
 fn acceptClose(raw: *anyopaque) void {
     const s = state(raw);

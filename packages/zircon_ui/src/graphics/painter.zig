@@ -99,12 +99,20 @@ pub const Painter = struct {
         try painter.items.append(painter.allocator, .{ .kind = .line, .rect = bounds, .clip = painter.clip(), .color = color, .segment = .{ .start = start, .end = end, .width = width } });
     }
     pub fn drawText(painter: *Painter, options: Text) !void {
+        return paintText(painter, options, true);
+    }
+    /// The text must be valid UTF-8 and remain immutable for the scene's
+    /// lifetime, including any later presentation of the committed frame.
+    pub fn drawTextBorrowed(painter: *Painter, options: Text) !void {
+        return paintText(painter, options, false);
+    }
+    fn paintText(painter: *Painter, options: Text, comptime copy: bool) !void {
         try validateRect(options.bounds);
         try options.style.validate();
-        if (!std.unicode.utf8ValidateSlice(options.text)) return error.InvalidUtf8;
+        if (copy and !std.unicode.utf8ValidateSlice(options.text)) return error.InvalidUtf8;
         const clipped = options.bounds.intersection(painter.clip());
         if (clipped.width == 0 or clipped.height == 0 or options.text.len == 0) return;
-        const text = try painter.allocator.dupe(u8, options.text);
+        const text = if (copy) try painter.allocator.dupe(u8, options.text) else options.text;
         var color = options.style.color;
         color.a *= painter.opacity;
         try painter.items.append(painter.allocator, .{ .kind = .text, .rect = options.bounds, .clip = clipped, .color = color, .font_size = options.style.size, .mono = options.style.mono, .text = text });

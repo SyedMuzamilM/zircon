@@ -139,10 +139,10 @@ pub const Repository = struct {
         if (staged) try args.append(a, "--cached");
         var empty_tree: ?[]u8 = null;
         defer if (empty_tree) |value| a.free(value);
+        var status_value = if (against_head) try self.readStatus(a) else null;
+        defer if (status_value) |*state| state.deinit();
         if (against_head) {
-            var state = try self.readStatus(a);
-            defer state.deinit();
-            if (state.unborn) {
+            if (status_value.?.unborn) {
                 empty_tree = try self.command(a, &.{ "hash-object", "-t", "tree", "-w", "--stdin" });
                 try args.append(a, std.mem.trim(u8, empty_tree.?, "\r\n"));
             } else try args.append(a, "HEAD");
@@ -152,11 +152,10 @@ pub const Repository = struct {
         const bytes = try self.command(a, args.items);
         defer a.free(bytes);
         if (staged) return diff_module.parse(a, bytes);
-        var current = try self.readStatus(a);
-        defer current.deinit();
+        if (status_value == null) status_value = try self.readStatus(a);
         var combined: std.ArrayList(u8) = .empty;
         defer combined.deinit(a);
-        for (current.entries) |entry| {
+        for (status_value.?.entries) |entry| {
             if (entry.index != .untracked) continue;
             if (path) |selected| if (!std.mem.eql(u8, selected, entry.path)) continue;
             // Ordinary git diff omits untracked files. No-index emits Git's

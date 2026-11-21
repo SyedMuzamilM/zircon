@@ -131,10 +131,11 @@ pub const Shell = struct {
     git: services_git.Model = .{},
     recovery: ?services_recovery.Model = null,
     search: services_search.Model = .{},
-    multibuffer_history: multibuffer.Transactions = .init(std.heap.page_allocator),
+    multibuffer_history: multibuffer.Transactions,
     find: buffer_find.Model = .{},
     catalog: services_catalog.Model = .{},
     extension_host_path: ?[]const u8 = null,
+    extension_host_cached: ?[]const u8 = null,
     highlight_session: ?*extension_host.HighlightSession = null,
     language: services_language.Model = .{},
     symbol_hover: symbol_hover.Model = .{},
@@ -154,7 +155,7 @@ pub const Shell = struct {
     dragging: enum { none, sidebar, split } = .none,
     tab_drag: ?panes.Session = null,
     pub fn init(a: std.mem.Allocator, io: std.Io, root_path: []const u8, initial: ?[]const u8) !Shell {
-        var self: Shell = .{ .allocator = a, .workspace = try workspace.Workspace.init(a, io, root_path) };
+        var self: Shell = .{ .allocator = a, .workspace = try workspace.Workspace.init(a, io, root_path), .multibuffer_history = .init(a) };
         errdefer self.deinit(a);
         try actions.loadTree(&self);
         if (initial) |path| try self.openPath(path) else try self.newFile();
@@ -195,6 +196,7 @@ pub const Shell = struct {
         self.agents.deinit(self.allocator);
         self.language.deinit(self.allocator);
         if (self.highlight_session) |session| session.release();
+        if (self.extension_host_cached) |path| self.allocator.free(path);
         if (self.image) |*asset| asset.deinit(self.allocator);
         if (self.preview) |*preview| preview.view.deinit();
         if (self.extension_snapshot) |*snapshot| snapshot.deinit();
@@ -217,7 +219,9 @@ pub const Shell = struct {
         return if (self.document_changes.get(index)) |change| change.origin else null;
     }
     pub fn documentChangeSince(self: *const Shell, id: workspace.DocumentId, before: u64, after: u64) ?*const workspace.DocumentChange {
-        for (0..self.document_changes.len) |index| {
+        var index = self.document_changes.len;
+        while (index > 0) {
+            index -= 1;
             const change = self.document_changes.get(index).?;
             if (std.meta.eql(change.document, id) and change.before == before and change.after == after) return change;
         }
@@ -656,10 +660,10 @@ pub const Shell = struct {
     pub fn onGitFile(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
         self.git.showWorking();
         if (self.git.status) |status| if (index < status.entries.len) {
-            const path = try std.heap.page_allocator.dupe(u8, status.entries[index].path);
-            std.heap.page_allocator.free(self.git.selected_path);
+            const path = try services_git.selection_allocator.dupe(u8, status.entries[index].path);
+            services_git.selection_allocator.free(self.git.selected_path);
             self.git.selected_path = path;
-            std.heap.page_allocator.free(self.git.selected_commit);
+            services_git.selection_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
             self.showTool(.git_diff);
             self.rememberPanel();
@@ -671,8 +675,9 @@ pub const Shell = struct {
                 }
             };
             services_git.start(self, cx, if (self.git.combined) blk: {
-                std.heap.page_allocator.free(self.git.reveal_path);
-                self.git.reveal_path = try std.heap.page_allocator.dupe(u8, path);
+                const reveal = try services_git.selection_allocator.dupe(u8, path);
+                services_git.selection_allocator.free(self.git.reveal_path);
+                self.git.reveal_path = reveal;
                 break :blk .all_diff;
             } else .{ .diff = .{ .path = path, .staged = status.entries[index].staged and !status.entries[index].unstaged } }) catch |err| try self.reportError(err);
         };
@@ -681,8 +686,8 @@ pub const Shell = struct {
     pub fn onGitCommit(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), index: u32) !void {
         self.git.stash_view = false;
         if (index >= self.git.commits.len) return;
-        const oid = try std.heap.page_allocator.dupe(u8, self.git.commits[index].oid);
-        defer std.heap.page_allocator.free(oid);
+        const oid = try self.allocator.dupe(u8, self.git.commits[index].oid);
+        defer self.allocator.free(oid);
         try self.git.openHistoryTab(oid, if (self.active_pane == .secondary) 1 else 0);
         self.showTool(.git_diff);
         self.rememberPanel();
@@ -748,10 +753,12 @@ pub const Shell = struct {
         if (!self.git.busy) {
             const current: ?workspace.DocumentId = if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else if (self.tabs.items.len > 0) self.tabs.items[self.active].document else null;
             const now = try cx.app.currentTime();
-            if (!std.meta.eql(current, self.git.active_document) or now >= (self.git.edit_refresh_at orelse self.git.next_refresh)) {
+            const document_changed = !std.meta.eql(current, self.git.active_document);
+            if (document_changed or self.git.pending_refresh == .full or now >= (self.git.edit_refresh_at orelse self.git.next_refresh)) {
+                const mode: services_git.Refresh = if (document_changed or self.git.pending_refresh == .full or self.git.edit_refresh_at == null) .full else .edit;
                 self.git.edit_refresh_at = null;
-                self.git.needs_refresh = false;
-                try services_git.start(self, cx, .refresh);
+                self.git.pending_refresh = null;
+                try services_git.startRefresh(self, cx, mode);
             }
         }
     }

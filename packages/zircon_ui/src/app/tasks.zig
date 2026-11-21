@@ -28,6 +28,8 @@ pub const Queue = struct {
     allocator: std.mem.Allocator,
     owner: std.Thread.Id,
     identity: u64,
+    /// Optional thread-safe wakeup. Runs after the worker publishes its result.
+    on_complete: ?*const fn () void = null,
     slots: std.ArrayList(Slot) = .empty,
     draining: bool = false,
     shutting_down: bool = false,
@@ -82,9 +84,12 @@ pub const Queue = struct {
             entry: Entry = .{ .finish = finish },
             job: Job,
             result: anyerror!Job.Output = undefined,
+            on_complete: ?*const fn () void,
             fn work(self: *@This()) void {
                 self.result = self.job.run(&self.entry.cancellation);
+                const notify = self.on_complete;
                 self.entry.done.store(true, .release);
+                if (notify) |wake| wake();
             }
             fn finish(entry: *Entry, allocator: std.mem.Allocator, deliver: bool) !void {
                 const self: *@This() = @fieldParentPtr("entry", entry);
@@ -101,7 +106,7 @@ pub const Queue = struct {
         };
         const box = try queue.allocator.create(Box);
         errdefer queue.allocator.destroy(box);
-        box.* = .{ .job = job };
+        box.* = .{ .job = job, .on_complete = queue.on_complete };
         box.entry.thread = try std.Thread.spawn(.{}, Box.work, .{box});
         queue.slots.items[index.?].entry = &box.entry;
         return .{ .queue = queue.identity, .slot = index.?, .generation = queue.slots.items[index.?].generation };

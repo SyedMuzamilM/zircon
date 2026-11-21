@@ -278,6 +278,63 @@ const View = struct {
         self.document.deinit();
     }
 };
+test "code painting joins punctuation, skips spaces, and keeps committed text alive" {
+    const Painted = struct {
+        document: text.Document,
+        state: editor.Editor,
+
+        pub fn render(self: *const @This(), b: *ui.Ui) !ui.Element {
+            var snapshot = self.document.snapshot();
+            defer snapshot.deinit();
+            const bytes = try snapshot.copy(b.allocator(), .{ .start = 0, .end = snapshot.byteLen() });
+            return b.column(.{}, &.{
+                try editor.code_line.element(b, bytes, "test.zig", 14, 22, self.state.theme, &.{}, .{}),
+                try self.state.render(&self.document, b),
+            });
+        }
+
+        fn replace(self: *@This(), cx: *ui.Context(@This())) !void {
+            const next = try text.Document.init(self.state.allocator, "replacement");
+            self.document.deinit();
+            self.document = next;
+            cx.notify();
+        }
+
+        pub fn deinit(self: *@This(), _: std.mem.Allocator) void {
+            self.state.deinit();
+            self.document.deinit();
+        }
+    };
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    var document = try text.Document.init(t.allocator, "    const x = 日 == y;");
+    var state = editor.Editor.init(t.allocator) catch |err| {
+        document.deinit();
+        return err;
+    };
+    state.language = .zig;
+    state.show_line_numbers = false;
+    {
+        var snapshot = document.snapshot();
+        defer snapshot.deinit();
+        state.synchronize(snapshot);
+    }
+    const window = app.openWindow(Painted, .{ .visible = false, .width = 600, .height = 300 }, .{ .document = document, .state = state }) catch |err| {
+        state.deinit();
+        document.deinit();
+        return err;
+    };
+    _ = try app.step(0);
+    const owner = try app.windowEntity(Painted, window);
+    try app.update(owner, Painted.replace, .{});
+    var operators: usize = 0;
+    for ((try app.window(window)).frames.committed.scene.items) |item| {
+        if (item.kind != .text) continue;
+        try t.expect(!std.mem.allEqual(u8, item.text, ' '));
+        if (std.mem.eql(u8, item.text, "==")) operators += 1;
+    }
+    try t.expectEqual(@as(usize, 2), operators);
+}
 test "custom canvas paints visible lines and owns a bounded committed IME excerpt" {
     var app = try ui.App.init(.{ .allocator = t.allocator });
     defer app.deinit();
@@ -363,6 +420,55 @@ test "lexical cache invalidates undo and converges after changed comment state" 
     snapshot = document.snapshot();
     defer snapshot.deinit();
     try t.expectEqual(@as(usize, 0), state.syntax_cache.state(snapshot, 2).?.comment_depth);
+}
+test "incremental syntax line states match a full scan after splits and joins" {
+    var document = try text.Document.init(t.allocator, "let a = 1;\r\n/* opening\n  /* nested */\nx\n*/\nlet z = 2;");
+    defer document.deinit();
+    var cache = editor.syntax.Cache.init(t.allocator);
+    defer cache.deinit();
+    var fresh = editor.syntax.Cache.init(t.allocator);
+    defer fresh.deinit();
+    var before = document.snapshot();
+    defer before.deinit();
+    try cache.refresh(before, .rust);
+
+    const edits: []const text.Edit = &.{
+        .{ .range = .{ .start = 4, .end = 4 }, .text = "\n// \"/*\"\r\n" },
+        .{ .range = .{ .start = 4, .end = 14 }, .text = "" },
+        .{ .range = .{ .start = 12, .end = 15 }, .text = "\"/*\"\n" },
+        .{ .range = .{ .start = 12, .end = 19 }, .text = "/*\n/**/\n" },
+    };
+    for (edits) |edit| {
+        var change = try document.apply(before.revision(), &.{edit}, 0);
+        defer change.deinit();
+        var after = document.snapshot();
+        defer after.deinit();
+        try cache.update(before, after, .rust, &change);
+        try fresh.refresh(after, .rust);
+        for (0..after.lineCount() + 1) |row| {
+            try t.expectEqual(fresh.state(after, row), cache.state(after, row));
+        }
+        before.deinit();
+        before = after.clone();
+    }
+}
+test "changing a custom block comment profile rebuilds line states at the same revision" {
+    var document = try text.Document.init(t.allocator, "/* open\ninside\n*/");
+    defer document.deinit();
+    var snapshot = document.snapshot();
+    defer snapshot.deinit();
+    var state = try editor.Editor.init(t.allocator);
+    defer state.deinit();
+    state.language = .custom;
+    state.language_profile = .{ .keywords = &.{} };
+    state.synchronize(snapshot);
+    try t.expectEqual(@as(usize, 0), state.syntax_cache.state(snapshot, 1).?.comment_depth);
+    state.language_profile.?.block_comment = .{ .start = "/*", .end = "*/" };
+    state.synchronize(snapshot);
+    try t.expectEqual(@as(usize, 1), state.syntax_cache.state(snapshot, 1).?.comment_depth);
+    state.language_profile.?.block_comment = .{ .start = "<!--", .end = "-->" };
+    state.synchronize(snapshot);
+    try t.expectEqual(@as(usize, 0), state.syntax_cache.state(snapshot, 1).?.comment_depth);
 }
 test "long lines are preserved and canvas reports its explicit rendering limit" {
     const bytes = try t.allocator.alloc(u8, 70 * 1024);

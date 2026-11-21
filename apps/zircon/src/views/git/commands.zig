@@ -20,9 +20,9 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: catalogue.Command) !
                 return true;
             }
             self.git.stash_view = false;
-            std.heap.page_allocator.free(self.git.selected_commit);
+            services_git.selection_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
-            std.heap.page_allocator.free(self.git.selected_path);
+            services_git.selection_allocator.free(self.git.selected_path);
             self.git.selected_path = &.{};
             self.git.combined = true;
             self.showTool(.git_diff);
@@ -51,7 +51,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: catalogue.Command) !
             self.git.needs_metadata = true;
             self.git.picker_index = 0;
             self.git.picker_scroll.offset = 0;
-            std.heap.page_allocator.free(self.git.stash_oid);
+            services_git.selection_allocator.free(self.git.stash_oid);
             self.git.stash_oid = &.{};
             self.git.menu = .stashes;
             self.git.stash_selected = null;
@@ -86,8 +86,8 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: catalogue.Command) !
             self.git.showWorking();
             self.git.stash_view = false;
             self.git.combined = true;
-            std.heap.page_allocator.free(self.git.selected_path);
-            std.heap.page_allocator.free(self.git.selected_commit);
+            services_git.selection_allocator.free(self.git.selected_path);
+            services_git.selection_allocator.free(self.git.selected_commit);
             self.git.selected_path = &.{};
             self.git.selected_commit = &.{};
             self.showTool(.git_diff);
@@ -107,7 +107,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: catalogue.Command) !
         .git_working_diff, .git_staged_diff => {
             self.git.showWorking();
             self.git.combined = false;
-            std.heap.page_allocator.free(self.git.selected_commit);
+            services_git.selection_allocator.free(self.git.selected_commit);
             self.git.selected_commit = &.{};
             self.showTool(.git_diff);
             try services_git.start(self, cx, .{ .diff = .{ .path = self.git.selected_path, .staged = which == .git_staged_diff } });

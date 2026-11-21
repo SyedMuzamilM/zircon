@@ -19,12 +19,17 @@ pub fn element(b: *ui.Ui, source: []const u8, path: []const u8, font: f32, line_
         var mapped = part;
         mapped.start = expanded.displayOffset(part.start);
         mapped.end = expanded.displayOffset(part.end);
+        if (mapped.start > mapped.end or !isBoundary(expanded.bytes, mapped.start) or !isBoundary(expanded.bytes, mapped.end)) return error.InvalidTextSegment;
         try segments.append(b.allocator(), mapped);
     }
     if (segments.items.len == 0) try segments.append(b.allocator(), .{ .line = 0, .start = 0, .end = expanded.bytes.len, .x = 0, .first = true });
     const underline = if (options.underline != null and safe.ptr == source.ptr) options.underline else null;
     return b.custom(Code, .{ .text = expanded.bytes, .spans = lexed.spans, .theme = theme, .font = font, .line_height = line_height, .highlights = highlights.items, .horizontal = options.horizontal, .segments = segments.items, .indent_cells = if (options.indent_guides) options.indent_cells orelse editor.indent_guides.cells(safe, options.tab_width) else 0, .tab_width = options.tab_width, .underline_start = if (underline) |mark| expanded.displayOffset(mark.range.start) else null, .underline_end = if (underline) |mark| expanded.displayOffset(mark.range.end) else 0, .underline_color = if (underline) |mark| editor.element.color(theme, mark.severity) else ui.Color.rgb(0) }, .{ .flex_grow = 1, .min_width = .{ .px = 0 }, .overflow = .hidden });
 }
+fn isBoundary(bytes: []const u8, at: usize) bool {
+    return at == bytes.len or bytes[at] & 0xc0 != 0x80;
+}
+
 const Code = struct {
     text: []const u8,
     spans: []const editor.syntax.Span,
@@ -49,7 +54,10 @@ const Code = struct {
         try cx.painter.pushClip(bounds);
         defer cx.painter.popClip();
         const style: ui.TextStyle = .{ .size = self.font, .mono = true };
-        const size = try cx.measurer.text(cx.measurer.context, "M", style);
+        const size = try cx.measurer.text(cx.measurer.context, self.text, style);
+        const advance = @max(1, cx.measurer.caret(" ", style, 1));
+        const step = @as(f32, @floatFromInt(self.tab_width));
+        const carets = cx.measurer.lineCarets(self.text, style);
         for (self.segments, 0..) |part, index| {
             const top = bounds.y + @as(f32, @floatFromInt(index)) * self.line_height;
             const y = top + @max(0, self.line_height - size.height) / 2;
@@ -59,12 +67,10 @@ const Code = struct {
                 const start = @max(part.start, highlight.start);
                 const end = @min(part.end, highlight.end);
                 if (start > end or (start == end and !highlight.newline)) continue;
-                const left = cx.measurer.caret(self.text, style, start);
-                const right = cx.measurer.caret(self.text, style, end) + (if (highlight.newline and index + 1 == self.segments.len) self.font * 0.6 else @as(f32, 0));
+                const left = carets.at(start);
+                const right = carets.at(end) + (if (highlight.newline and index + 1 == self.segments.len) self.font * 0.6 else @as(f32, 0));
                 try cx.painter.fillRect(.{ .bounds = .{ .x = x + left, .y = top, .width = @max(0, right - left), .height = self.line_height }, .color = highlight.color });
             }
-            const advance = @max(1, cx.measurer.caret(" ", style, 1));
-            const step = @as(f32, @floatFromInt(self.tab_width));
             var guide: usize = @as(usize, @intFromFloat(@floor(self.horizontal / advance / step))) * self.tab_width;
             const last_guide = @min(self.indent_cells, @as(usize, @intFromFloat(@ceil((self.horizontal + bounds.width) / advance))));
             var tint = self.theme.line_number;
@@ -72,37 +78,32 @@ const Code = struct {
             while (guide < last_guide) : (guide += self.tab_width) {
                 try cx.painter.fillRect(.{ .bounds = .{ .x = bounds.x - self.horizontal + @as(f32, @floatFromInt(guide)) * advance, .y = top, .width = 1, .height = self.line_height }, .color = tint });
             }
-            var cursor = part.start;
-            for (self.spans) |span| {
-                if (span.end <= part.start) continue;
-                if (span.start >= part.end) break;
-                const start = @max(span.start, part.start);
-                const end = @min(span.end, part.end);
-                if (start > cursor) _ = try self.run(cx, self.text[cursor..start], self.theme.foreground, x + cx.measurer.caret(self.text, style, cursor), y, bounds);
-                _ = try self.run(cx, self.text[start..end], self.theme.tokens[@backingInt(span.kind)], x + cx.measurer.caret(self.text, style, start), y, bounds);
-                cursor = end;
+            var runs = editor.syntax.Runs.init(self.spans, part.start, part.end);
+            while (runs.next()) |run| {
+                const bytes = self.text[run.start..run.end];
+                if (std.mem.allEqual(u8, bytes, ' ')) continue;
+                const color = if (run.kind == .plain) self.theme.foreground else self.theme.tokens[@backingInt(run.kind)];
+                const origin = x + carets.at(run.start);
+                try cx.painter.drawTextBorrowed(.{
+                    .bounds = .{ .x = origin, .y = y, .width = @max(0, bounds.x + bounds.width - origin), .height = size.height },
+                    .text = bytes,
+                    .style = .{ .size = self.font, .mono = true, .color = color },
+                });
             }
-            if (cursor < part.end) _ = try self.run(cx, self.text[cursor..part.end], self.theme.foreground, x + cx.measurer.caret(self.text, style, cursor), y, bounds);
             if (self.underline_start) |origin| if (self.underline_end >= origin) {
                 const start = @max(part.start, origin);
                 const end = @min(part.end, @max(self.underline_end, origin));
                 const point = origin == self.underline_end;
                 if (point and editor.element.containsPoint(origin, part.start, part.end, self.text.len)) {
-                    const left = cx.measurer.caret(self.text, style, origin);
+                    const left = carets.at(origin);
                     try editor.element.paint(cx, x + left, @max(6, self.font * 0.55), top, self.line_height, self.underline_color);
                 } else if (!point and start < end) {
-                    const left = cx.measurer.caret(self.text, style, start);
-                    const right = cx.measurer.caret(self.text, style, end);
+                    const left = carets.at(start);
+                    const right = carets.at(end);
                     try editor.element.paint(cx, x + left, @max(0, right - left), top, self.line_height, self.underline_color);
                 }
             };
             cx.painter.popClip();
         }
-    }
-    fn run(self: *Code, cx: *ui.PaintCx, bytes: []const u8, color: ui.Color, x: f32, y: f32, bounds: ui.Rect) !f32 {
-        const style: ui.TextStyle = .{ .size = self.font, .mono = true, .color = color };
-        const measured = try cx.measurer.text(cx.measurer.context, bytes, style);
-        try cx.painter.drawText(.{ .bounds = .{ .x = x, .y = y, .width = @max(0, bounds.x + bounds.width - x), .height = measured.height }, .text = bytes, .style = style });
-        return measured.width;
     }
 };

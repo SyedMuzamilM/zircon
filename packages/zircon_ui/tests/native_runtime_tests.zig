@@ -39,6 +39,99 @@ test "worker wake interrupts the native idle wait" {
     while (!sent.load(.acquire)) try native.window.pump(0.5);
     try std.testing.expect(native.window.now() - start < 0.3);
 }
+test "owned task completion wakes a native window waiting for input" {
+    const t = std.testing;
+    const Job = struct {
+        const Self = @This();
+        pub const Output = u32;
+        pub fn run(_: *Self, _: *ui.tasks.Cancellation) !u32 {
+            try std.Io.sleep(t.io, .fromMilliseconds(50), .awake);
+            return 42;
+        }
+        pub fn discard(_: *Self, _: u32) void {}
+        fn complete(value: *Counter, _: *ui.Context(Counter), result: anyerror!u32) !void {
+            value.count = try result;
+        }
+    };
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const window = try app.openWindow(Counter, .{ .visible = false }, .{});
+    const owner = try app.windowEntity(Counter, window);
+    _ = try app.step(0);
+    for (0..64) |_| try native.window.pump(0);
+    _ = try app.spawn(owner, Job, .{}, Job.complete);
+    const start = native.window.now();
+    while (try app.read(owner, Counter.value, .{}) == 0 and native.window.now() - start < 0.9) {
+        try native.window.pump(1);
+        _ = try app.step(native.window.now());
+    }
+    try t.expectEqual(@as(u32, 42), try app.read(owner, Counter.value, .{}));
+    try t.expect(native.window.now() - start < 0.9);
+}
+test "native run loop advances a scene-only animation while idle" {
+    const t = std.testing;
+    const Animated = struct {
+        image: ui.graphics.images.Image,
+        window: ?ui.WindowHandle = null,
+        timed_out: *const std.atomic.Value(bool),
+        animated: *bool,
+
+        const Canvas = struct {
+            image: ui.graphics.images.Image,
+            pub const LayoutState = void;
+            pub const PrepaintState = void;
+            pub fn requestLayout(_: *@This(), _: *ui.LayoutCx) !ui.LayoutResult(void) {
+                return .{ .size = .{ .width = 40, .height = 40 }, .state = {} };
+            }
+            pub fn prepaint(_: *@This(), _: *ui.PrepaintCx, _: ui.Rect, _: *void) !void {}
+            pub fn paint(self: *@This(), cx: *ui.PaintCx, bounds: ui.Rect, _: *void, _: *void) !void {
+                try cx.painter.drawAnimatedImage(self.image, bounds, .stretch, .{
+                    .from = .{},
+                    .to = .{ .translate_x = 20 },
+                    .duration = 0.2,
+                });
+            }
+        };
+        pub fn render(self: *const @This(), b: *ui.Ui) !ui.Element {
+            return b.custom(Canvas, .{ .image = self.image }, .{});
+        }
+        fn attach(self: *@This(), _: *ui.Context(@This()), handle: ui.WindowHandle) void {
+            self.window = handle;
+        }
+        fn observe(self: *@This(), cx: *ui.Context(@This())) !void {
+            const window = try cx.app.window(self.window.?);
+            const scene = window.frames.committed.scene;
+            if (scene.items.len != 0) {
+                const x = scene.items[0].transform.translate_x;
+                if (x > 3 and x < 20) self.animated.* = true;
+            }
+            if (self.animated.* or self.timed_out.load(.acquire)) try cx.app.requestCloseWindow(self.window.?);
+        }
+    };
+
+    var image = try ui.graphics.images.Image.fromRgba(t.allocator, 1, 1, &.{ 255, 0, 0, 255 });
+    defer image.deinit();
+    var timed_out = std.atomic.Value(bool).init(false);
+    var animated = false;
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const window = try app.openWindow(Animated, .{ .visible = false }, .{ .image = image, .timed_out = &timed_out, .animated = &animated });
+    const owner = try app.windowEntity(Animated, window);
+    try app.update(owner, Animated.attach, .{window});
+    try app.watchExternal(owner, Animated.observe);
+    for (0..64) |_| try native.window.pump(0);
+    const Watchdog = struct {
+        fn run(timeout: *std.atomic.Value(bool)) void {
+            std.Io.sleep(t.io, .fromMilliseconds(500), .awake) catch {};
+            timeout.store(true, .release);
+            ui.App.wake();
+        }
+    };
+    const watchdog = try std.Thread.spawn(.{}, Watchdog.run, .{&timed_out});
+    defer watchdog.join();
+    try app.run();
+    try t.expect(animated);
+}
 test "public App native window handles queued click resize snapshot and close" {
     const pool = objc.Pool.init();
     defer pool.deinit();

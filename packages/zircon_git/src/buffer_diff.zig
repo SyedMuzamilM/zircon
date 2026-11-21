@@ -7,12 +7,20 @@ pub const Buffer = struct { path: []const u8, before: []const u8, after: []const
 pub fn fromText(a: std.mem.Allocator, input: Buffer) !diff.Diff {
     var arena = std.heap.ArenaAllocator.init(a);
     errdefer arena.deinit();
-    const aa = arena.allocator();
-    const path = try aa.dupe(u8, input.path);
+    var hunks: std.ArrayList(diff.Hunk) = .empty;
+    try appendBufferHunks(a, arena.allocator(), &hunks, input);
+    return .{ .arena = arena, .text = if (hunks.items.len == 0) "" else "Unsaved source changes", .hunks = hunks.items };
+}
+
+fn appendBufferHunks(allocator: std.mem.Allocator, output: std.mem.Allocator, hunks: *std.ArrayList(diff.Hunk), input: Buffer) !void {
+    var scratch = std.heap.ArenaAllocator.init(allocator);
+    defer scratch.deinit();
+    const aa = scratch.allocator();
+    const changes = try diff.diffLines(aa, input.before, input.after);
+    if (changes.len == 0) return;
     const before = try lines(aa, input.before);
     const after = try lines(aa, input.after);
-    const changes = try diff.diffLines(aa, input.before, input.after);
-    var hunks: std.ArrayList(diff.Hunk) = .empty;
+    const path = try output.dupe(u8, input.path);
     var i: usize = 0;
     while (i < changes.len) {
         const first = i;
@@ -30,23 +38,22 @@ pub fn fromText(a: std.mem.Allocator, input: Buffer) !diff.Diff {
         var new = new_start;
         for (changes[first..i]) |change| {
             while (old < change.old_start and new < change.start) {
-                try rows.append(aa, .{ .kind = .context, .text = before[old], .old_line = old + 1, .new_line = new + 1 });
+                try rows.append(output, .{ .kind = .context, .text = try output.dupe(u8, before[old]), .old_line = old + 1, .new_line = new + 1 });
                 old += 1;
                 new += 1;
             }
-            while (old < change.old_end) : (old += 1) try rows.append(aa, .{ .kind = .deletion, .text = before[old], .old_line = old + 1 });
-            while (new < change.end) : (new += 1) try rows.append(aa, .{ .kind = .addition, .text = after[new], .new_line = new + 1 });
+            while (old < change.old_end) : (old += 1) try rows.append(output, .{ .kind = .deletion, .text = try output.dupe(u8, before[old]), .old_line = old + 1 });
+            while (new < change.end) : (new += 1) try rows.append(output, .{ .kind = .addition, .text = try output.dupe(u8, after[new]), .new_line = new + 1 });
         }
         while (old < old_end and new < new_end) {
-            try rows.append(aa, .{ .kind = .context, .text = before[old], .old_line = old + 1, .new_line = new + 1 });
+            try rows.append(output, .{ .kind = .context, .text = try output.dupe(u8, before[old]), .old_line = old + 1, .new_line = new + 1 });
             old += 1;
             new += 1;
         }
         const old_count = old_end - old_start;
         const new_count = new_end - new_start;
-        try hunks.append(aa, .{ .path = path, .old_start = if (old_count == 0) old_start else old_start + 1, .old_count = old_count, .new_start = if (new_count == 0) new_start else new_start + 1, .new_count = new_count, .header = try std.fmt.allocPrint(aa, "@@ -{d},{d} +{d},{d} @@", .{ if (old_count == 0) old_start else old_start + 1, old_count, if (new_count == 0) new_start else new_start + 1, new_count }), .lines = rows.items });
+        try hunks.append(output, .{ .path = path, .old_start = if (old_count == 0) old_start else old_start + 1, .old_count = old_count, .new_start = if (new_count == 0) new_start else new_start + 1, .new_count = new_count, .header = try std.fmt.allocPrint(output, "@@ -{d},{d} +{d},{d} @@", .{ if (old_count == 0) old_start else old_start + 1, old_count, if (new_count == 0) new_start else new_start + 1, new_count }), .lines = rows.items });
     }
-    return .{ .arena = arena, .text = if (hunks.items.len == 0) "" else "Unsaved source changes", .hunks = hunks.items };
 }
 
 pub fn replace(a: std.mem.Allocator, original: diff.Diff, replacements: []const Buffer) !diff.Diff {
@@ -62,11 +69,7 @@ pub fn replace(a: std.mem.Allocator, original: diff.Diff, replacements: []const 
         };
         if (!overridden) try append(aa, &hunks, hunk);
     }
-    for (replacements) |input| {
-        var replacement = try fromText(a, input);
-        defer replacement.deinit();
-        for (replacement.hunks) |hunk| try append(aa, &hunks, hunk);
-    }
+    for (replacements) |input| try appendBufferHunks(a, aa, &hunks, input);
     // Path ordering is independent of tab order and worker completion order.
     std.mem.sort(diff.Hunk, hunks.items, {}, struct {
         fn less(_: void, left: diff.Hunk, right: diff.Hunk) bool {
@@ -88,10 +91,11 @@ fn append(a: std.mem.Allocator, out: *std.ArrayList(diff.Hunk), input: diff.Hunk
 fn lines(a: std.mem.Allocator, bytes: []const u8) ![]const []const u8 {
     var result: std.ArrayList([]const u8) = .empty;
     var from: usize = 0;
-    for (bytes, 0..) |byte, index| if (byte == '\n') {
-        try result.append(a, try a.dupe(u8, bytes[from..if (index > from and bytes[index - 1] == '\r') index - 1 else index]));
-        from = index + 1;
-    };
-    if (from < bytes.len) try result.append(a, try a.dupe(u8, bytes[from..]));
+    while (std.mem.indexOfScalarPos(u8, bytes, from, '\n')) |end| {
+        const content_end = if (end > from and bytes[end - 1] == '\r') end - 1 else end;
+        try result.append(a, bytes[from..content_end]);
+        from = end + 1;
+    }
+    if (from < bytes.len) try result.append(a, bytes[from..]);
     return result.items;
 }

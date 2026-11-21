@@ -187,6 +187,65 @@ test "actual fragmented stdio server initializes publishes versioned diagnostics
     try t.expectError(error.StaleDocumentVersion, client.didChange(uri, next));
     try client.didClose(uri);
 }
+test "a failed LSP drain allocation leaves the queued message available" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try fixturePath(tmp);
+    defer t.allocator.free(path);
+    const client = try language.Client.start(t.allocator, t.io, .{ .command = "python3", .args = &.{path}, .cwd = "/tmp" });
+    defer client.deinit();
+    try waitReady(client);
+
+    var failing = t.FailingAllocator.init(t.allocator, .{ .fail_index = 0 });
+    const allocator = failing.allocator();
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(3));
+    while (std.Io.Clock.awake.now(t.io).compare(.lt, deadline)) {
+        const messages = client.drain(allocator) catch |err| {
+            try t.expectEqual(error.OutOfMemory, err);
+            const retried = try client.drain(t.allocator);
+            defer language.deinitMessages(t.allocator, retried);
+            for (retried) |message| if (message.data == .initialized) return;
+            return error.InitializedMessageLost;
+        };
+        defer language.deinitMessages(allocator, messages);
+        try t.expectEqual(@as(usize, 0), messages.len);
+        try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
+    }
+    return error.FixtureTimeout;
+}
+test "large LSP diagnostics keep only the data needed by the editor" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try fixturePath(tmp);
+    defer t.allocator.free(path);
+    const client = try language.Client.start(t.allocator, t.io, .{ .command = "python3", .args = &.{ path, "large-diagnostics" }, .cwd = "/tmp" });
+    defer client.deinit();
+    try waitReady(client);
+    var doc = try text.Document.init(t.allocator, "A");
+    defer doc.deinit();
+    var snapshot = doc.snapshot();
+    defer snapshot.deinit();
+    const uri = "file:///tmp/large-diagnostics.zig";
+    try client.didOpen(uri, "zig", snapshot);
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (std.Io.Clock.awake.now(t.io).compare(.lt, deadline)) {
+        const messages = try client.drain(t.allocator);
+        defer language.deinitMessages(t.allocator, messages);
+        for (messages) |message| if (message.data == .diagnostics) {
+            const diagnostics = message.data.diagnostics;
+            try t.expectEqualStrings(uri, diagnostics.uri);
+            try t.expectEqual(@as(usize, 1), diagnostics.items.len);
+            try t.expectEqualStrings("large response → compact diagnostic", diagnostics.items[0].message);
+            try t.expectEqualStrings("fixture", diagnostics.items[0].source.?);
+            try t.expect(message.arena.queryCapacity() < 64 * 1024);
+            try t.expectEqual(.ready, client.status());
+            return;
+        };
+        try t.expectEqual(.ready, client.status());
+        try std.Io.sleep(t.io, .fromMilliseconds(5), .awake);
+    }
+    return error.FixtureTimeout;
+}
 test "malformed and unresponsive owned servers terminate without blocked reader joins" {
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();

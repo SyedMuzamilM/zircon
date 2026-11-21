@@ -544,7 +544,7 @@ test "recovery retains dirty Git buffers without creating source tabs" {
             var snapshot = record.doc.snapshot();
             defer snapshot.deinit();
             editor.synchronize(snapshot);
-            try self.git.editing.views.append(std.heap.page_allocator, .{ .document = id, .editor = editor });
+            try self.git.editing.append(.{ .document = id, .editor = editor });
             cx.notify();
         }
         fn check(self: *const Shell) !void {

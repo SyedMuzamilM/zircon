@@ -31,6 +31,8 @@ pub const Store = struct {
     destroying: bool = false,
     next_lease: u64 = 1,
     destruction_version: u64 = 0,
+    notifications_pending: bool = false,
+    destruction_pending: bool = false,
     pub fn init(a: Allocator, app_id: u32) Store {
         return .{ .allocator = a, .app_id = app_id };
     }
@@ -145,8 +147,11 @@ pub const Store = struct {
     pub fn notify(s: *Store, token: entity.Token, lease: u64) void {
         std.debug.assert(s.contextValid(token, lease));
         s.slots.items[token.slot].pending_notify = true;
+        s.notifications_pending = true;
     }
     pub fn flushNotifications(s: *Store) bool {
+        if (!s.notifications_pending) return false;
+        s.notifications_pending = false;
         var changed = false;
         for (s.slots.items) |*slot| if (slot.pointer != null and slot.pending_notify) {
             std.debug.assert(!slot.borrow.active());
@@ -173,6 +178,7 @@ pub const Store = struct {
     pub fn requestDestroy(s: *Store, handle: anytype) !void {
         const slot = try s.resolve(handle.token(), entity.typeTag(@TypeOf(handle).State));
         slot.pending_destroy = true;
+        s.destruction_pending = true;
     }
     pub fn destroy(s: *Store, handle: anytype) !void {
         _ = try s.resolve(handle.token(), entity.typeTag(@TypeOf(handle).State));
@@ -216,6 +222,8 @@ pub const Store = struct {
         vtable.destroy(pointer, s.allocator);
     }
     pub fn flushDestruction(s: *Store) void {
+        if (!s.destruction_pending) return;
+        s.destruction_pending = false;
         s.destroying = true;
         defer s.destroying = false;
         for (0..s.slots.items.len) |i| if (s.slots.items[i].pointer != null and s.slots.items[i].pending_destroy) {

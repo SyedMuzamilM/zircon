@@ -1,6 +1,7 @@
 //! Captured buffers override disk search. Results carry source revisions and
 //! generations; navigation refuses stale offsets instead of editing old text.
 const std = @import("std");
+const builtin = @import("builtin");
 const search = @import("zircon_search");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
@@ -11,7 +12,7 @@ const search_editing = @import("../search_editing.zig");
 const shell = @import("../shell.zig");
 const handoff = @import("handoff.zig");
 const Shell = shell.Shell;
-const a = std.heap.page_allocator;
+const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 pub const Model = struct {
     query: []u8 = &.{},
     editing: search_editing.Model = .{},
@@ -36,9 +37,10 @@ const Job = struct {
     pub const Output = *Box;
     io: std.Io,
     generation: u64,
-    query: []u8,
-    buffers: []search.Buffer,
-    files: [][]const u8,
+    arena: std.heap.ArenaAllocator = .init(a),
+    query: []const u8 = "",
+    buffers: []search.Buffer = &.{},
+    files: []const []const u8 = &.{},
     pub fn run(self: *Job, cancel: *ui.tasks.Cancellation) !*Box {
         var result = try search.search(a, self.io, .{ .generation = self.generation, .query = .{ .text = self.query }, .open_buffers = self.buffers, .files = self.files }, .{ .context = cancel, .is_canceled = struct {
             fn check(raw: ?*anyopaque) bool {
@@ -53,22 +55,15 @@ const Job = struct {
         result.destroy();
     }
     pub fn deinit(self: *Job, _: std.mem.Allocator) void {
-        a.free(self.query);
-        for (self.buffers) |*buffer| {
-            var snapshot = buffer.snapshot;
-            snapshot.deinit();
-            if (buffer.path) |path| a.free(path);
-            a.free(buffer.title);
-        }
-        a.free(self.buffers);
-        for (self.files) |path| a.free(path);
-        a.free(self.files);
+        for (self.buffers) |*buffer| buffer.snapshot.deinit();
+        self.arena.deinit();
     }
 };
 pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
     var query: []u8 = undefined;
     try cx.read(self.fields.?.project_search.query, ui.controls.TextInput.copy, .{ a, &query });
-    errdefer a.free(query);
+    defer a.free(query);
+    const generation = std.math.add(u64, self.search.generation, 1) catch return error.SearchGenerationExhausted;
     if (query.len == 0) {
         if (self.search.task) |task| cx.app.cancelTask(task) catch {};
         if (self.search.results) |*results| results.deinit();
@@ -76,64 +71,33 @@ pub fn start(self: *Shell, cx: *ui.Context(Shell)) !void {
         search_editing.clear(self);
         a.free(self.search.query);
         self.search.query = &.{};
-        self.search.generation = std.math.add(u64, self.search.generation, 1) catch return error.SearchGenerationExhausted;
+        self.search.generation = generation;
         self.search.task = null;
         self.search.busy = false;
-        a.free(query);
         cx.notify();
         return;
     }
-    var buffers: std.ArrayList(search.Buffer) = .empty;
-    errdefer {
-        for (buffers.items) |*buffer| {
-            var snap = buffer.snapshot;
-            snap.deinit();
-            if (buffer.path) |path| a.free(path);
-            a.free(buffer.title);
-        }
-        buffers.deinit(a);
-    }
-    for (self.tabs.items) |tab| {
+    var job: Job = .{ .io = self.workspace.io, .generation = generation };
+    errdefer job.deinit(a);
+    const inputs = job.arena.allocator();
+    job.query = try inputs.dupe(u8, query);
+    const buffers = try inputs.alloc(search.Buffer, self.tabs.items.len);
+    for (self.tabs.items, buffers, 1..) |tab, *buffer, count| {
         const record = try self.workspace.getConst(tab.document);
-        var snapshot = record.doc.snapshot();
-        errdefer snapshot.deinit();
-        const path = if (record.path) |p| try a.dupe(u8, p) else null;
-        errdefer if (path) |p| a.free(p);
-        const title = try a.dupe(u8, record.title());
-        errdefer a.free(title);
-        try buffers.append(a, .{ .document_id = id(tab.document), .path = path, .title = title, .snapshot = snapshot });
+        const path = if (record.path) |p| try inputs.dupe(u8, p) else null;
+        const title = try inputs.dupe(u8, record.title());
+        buffer.* = .{ .document_id = id(tab.document), .path = path, .title = title, .snapshot = record.doc.snapshot() };
+        job.buffers = buffers[0..count];
     }
-    const files = try a.alloc([]const u8, self.file_index.items.len);
-    var owned: usize = 0;
-    errdefer {
-        for (files[0..owned]) |path| a.free(path);
-        a.free(files);
-    }
-    for (self.file_index.items, 0..) |entry, i| {
-        files[i] = try a.dupe(u8, entry.path);
-        owned += 1;
-    }
-    const buffer_slice = try buffers.toOwnedSlice(a);
-    errdefer {
-        for (buffer_slice) |*buffer| {
-            var snapshot = buffer.snapshot;
-            snapshot.deinit();
-            if (buffer.path) |path| a.free(path);
-            a.free(buffer.title);
-        }
-        a.free(buffer_slice);
-    }
-    if (self.search.task) |task| cx.app.cancelTask(task) catch {};
-    self.search.generation = std.math.add(u64, self.search.generation, 1) catch return error.SearchGenerationExhausted;
-    errdefer {
-        self.search.busy = false;
-        self.search.task = null;
-    }
-    const owned_query = try a.dupe(u8, query);
-    errdefer a.free(owned_query);
-    const task = try cx.spawn(Job, .{ .io = self.workspace.io, .generation = self.search.generation, .query = query, .buffers = buffer_slice, .files = files }, complete);
+    const files = try inputs.alloc([]const u8, self.file_index.items.len);
+    for (self.file_index.items, files) |entry, *file| file.* = try inputs.dupe(u8, entry.path);
+    job.files = files;
+    const task = try cx.spawn(Job, job, complete);
+    if (self.search.task) |previous| cx.app.cancelTask(previous) catch {};
     a.free(self.search.query);
-    self.search.query = owned_query;
+    self.search.query = query;
+    query = &.{};
+    self.search.generation = generation;
     self.search.task = task;
     self.search.busy = true;
     self.showTool(.search);

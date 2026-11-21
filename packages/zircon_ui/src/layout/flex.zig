@@ -39,10 +39,7 @@ pub fn calculateWithCache(a: std.mem.Allocator, frame: *const tree.Frame, root: 
     defer arena.deinit();
     const intrinsic = try arena.allocator().alloc(geometry.Size, frame.nodes.items.len);
     @memset(intrinsic, .{ .width = 0, .height = 0 });
-    const fingerprints = try arena.allocator().alloc(u64, frame.nodes.items.len);
-    @memset(fingerprints, 0);
-    if (cache != null) _ = fingerprintNode(frame, root.index, cache_key.hash(0, .{ constraints, measurer.generation }), fingerprints, 0);
-    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a, .cache = cache, .fingerprints = fingerprints };
+    var engine: Engine = .{ .frame = frame, .constraints = constraints, .measure = measurer, .bounds = bounds, .intrinsic = intrinsic, .scratch = arena.allocator(), .frame_allocator = a, .cache = cache, .environment = cache_key.hash(0, .{ constraints, measurer.generation }) };
     try engine.measureNode(root.index, constraints.viewport, 0);
     const style = frame.nodes.items[root.index].style;
     const size = try engine.resolveSize(style, constraints.viewport, .{ .width = @max(0, constraints.viewport.width - style.margin.horizontal()), .height = @max(0, constraints.viewport.height - style.margin.vertical()) });
@@ -58,7 +55,16 @@ const Engine = struct {
     scratch: std.mem.Allocator,
     frame_allocator: std.mem.Allocator,
     cache: ?*layout_cache.LayoutCache,
-    fingerprints: []const u64,
+    fingerprints: ?[]?u64 = null,
+    environment: u64,
+    fn nodeFingerprint(e: *Engine, index: u32, depth: usize) !u64 {
+        if (e.fingerprints == null) {
+            const memo = try e.scratch.alloc(?u64, e.frame.nodes.items.len);
+            @memset(memo, null);
+            e.fingerprints = memo;
+        }
+        return fingerprintNode(e.frame, index, e.environment, e.fingerprints.?, depth);
+    }
     fn length(e: *Engine, value: styles.Length, parent: f32) ?f32 {
         return switch (value) {
             .auto => null,
@@ -88,8 +94,8 @@ const Engine = struct {
         const style = node.style;
         const declared = try e.resolveSize(style, available, available);
         const content: geometry.Size = .{ .width = @max(0, declared.width - style.padding.horizontal()), .height = @max(0, declared.height - style.padding.vertical()) };
-        const key = if (node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
-        const fingerprint = e.fingerprints[index];
+        const key = if (e.cache != null and node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
+        const fingerprint = if (key != null) try e.nodeFingerprint(index, depth) else 0;
         if (key) |id| if (e.cache) |store| if (fingerprint != 0) if (store.lookup(id, fingerprint, available)) |cached| {
             var cursor: usize = 0;
             e.restoreSizes(index, cached, &cursor);
@@ -146,17 +152,18 @@ const Engine = struct {
     }
     fn arrange(e: *Engine, index: u32, rect: geometry.Rect, depth: usize) anyerror!void {
         const node = e.frame.nodes.items[index];
-        const key = if (node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
-        if (key) |id| if (e.cache) |store| if (e.fingerprints[index] != 0) if (store.arranged(id, e.fingerprints[index], rect)) |cached| {
+        const key = if (e.cache != null and node.cache and node.key != null) cache_key.scoped(e.frame, index) else null;
+        const fingerprint = if (key != null) try e.nodeFingerprint(index, depth) else 0;
+        if (key) |id| if (e.cache) |store| if (fingerprint != 0) if (store.arranged(id, fingerprint, rect)) |cached| {
             var cursor: usize = 0;
             e.restoreBounds(index, cached, &cursor);
             return;
         };
         try e.arrangeFresh(index, rect, depth);
-        if (key) |id| if (e.cache) |store| if (e.fingerprints[index] != 0) {
+        if (key) |id| if (e.cache) |store| if (fingerprint != 0) {
             var bounds: std.ArrayList(geometry.Rect) = .empty;
             try e.collectBounds(index, &bounds);
-            try store.putArrangement(id, e.fingerprints[index], rect, bounds.items);
+            try store.putArrangement(id, fingerprint, rect, bounds.items);
         };
     }
     fn restoreSizes(e: *Engine, index: u32, sizes: []const geometry.Size, cursor: *usize) void {
@@ -206,18 +213,17 @@ const Engine = struct {
             }
             return;
         }
-        const bases = try e.scratch.alloc(f32, node.children.len);
-        const sizes = try e.scratch.alloc(f32, node.children.len);
-        const frozen = try e.scratch.alloc(bool, node.children.len);
-        @memset(frozen, false);
+        const FlexChild = struct { base: f32, size: f32, cross: f32, frozen: bool = false };
+        var stack: [16]FlexChild = undefined;
+        const children = if (node.children.len <= stack.len) stack[0..node.children.len] else try e.scratch.alloc(FlexChild, node.children.len);
         var total: f32 = 0;
         var margin_total: f32 = 0;
-        for (node.children, 0..) |child, i| {
+        for (node.children, children) |child, *resolved| {
             const child_style = e.frame.nodes.items[child].style;
             const measured = try e.resolveSize(child_style, available, e.intrinsic[child]);
-            bases[i] = if (horizontal) measured.width else measured.height;
-            sizes[i] = bases[i];
-            total += bases[i];
+            const base = if (horizontal) measured.width else measured.height;
+            resolved.* = .{ .base = base, .size = base, .cross = if (horizontal) measured.height else measured.width };
+            total += base;
             margin_total += if (horizontal) child_style.margin.horizontal() else child_style.margin.vertical();
         }
         const gap_total = style.gap * @as(f32, @floatFromInt(node.children.len - 1));
@@ -226,22 +232,22 @@ const Engine = struct {
         var iterations: usize = 0;
         while (@abs(remaining) > 0.001 and iterations <= node.children.len) : (iterations += 1) {
             var weight: f32 = 0;
-            for (node.children, 0..) |child, i| if (!frozen[i]) {
+            for (node.children, children) |child, resolved| if (!resolved.frozen) {
                 const cs = e.frame.nodes.items[child].style;
-                weight += if (growing) cs.flex_grow else cs.flex_shrink * bases[i];
+                weight += if (growing) cs.flex_grow else cs.flex_shrink * resolved.base;
             };
             if (weight <= 0) break;
             var consumed: f32 = 0;
-            for (node.children, 0..) |child, i| if (!frozen[i]) {
+            for (node.children, children) |child, *resolved| if (!resolved.frozen) {
                 const cs = e.frame.nodes.items[child].style;
-                const w = if (growing) cs.flex_grow else cs.flex_shrink * bases[i];
+                const w = if (growing) cs.flex_grow else cs.flex_shrink * resolved.base;
                 if (w == 0) continue;
                 const limit = e.limits(cs, available, horizontal);
-                const proposed = sizes[i] + remaining * w / weight;
+                const proposed = resolved.size + remaining * w / weight;
                 const next = std.math.clamp(proposed, limit.min, limit.max);
-                consumed += next - sizes[i];
-                sizes[i] = next;
-                if (next != proposed) frozen[i] = true;
+                consumed += next - resolved.size;
+                resolved.size = next;
+                if (next != proposed) resolved.frozen = true;
             };
             if (@abs(consumed) < 0.001) break;
             remaining -= consumed;
@@ -253,15 +259,13 @@ const Engine = struct {
             else => 0,
         };
         const gap = style.gap + if (style.justify_content == .space_between and node.children.len > 1) free / @as(f32, @floatFromInt(node.children.len - 1)) else @as(f32, 0);
-        for (node.children, 0..) |child, i| {
+        for (node.children, children) |child, resolved| {
             const cs = e.frame.nodes.items[child].style;
-            const measured = try e.resolveSize(cs, available, e.intrinsic[child]);
             const cross_margin = if (horizontal) cs.margin.vertical() else cs.margin.horizontal();
             const cross_available = @max(0, (if (horizontal) content.height else content.width) - cross_margin);
             const cross_length = if (horizontal) cs.height else cs.width;
             const limits_cross = e.limits(cs, available, !horizontal);
-            const natural_cross = if (horizontal) measured.height else measured.width;
-            const cross_size = std.math.clamp(if (style.align_items == .stretch and cross_length == .auto) cross_available else natural_cross, limits_cross.min, limits_cross.max);
+            const cross_size = std.math.clamp(if (style.align_items == .stretch and cross_length == .auto) cross_available else resolved.cross, limits_cross.min, limits_cross.max);
             const cross_offset = switch (style.align_items) {
                 .center => (cross_available - cross_size) / 2,
                 .end => cross_available - cross_size,
@@ -271,14 +275,15 @@ const Engine = struct {
             const after = if (horizontal) cs.margin.right else cs.margin.bottom;
             const cross_before = if (horizontal) cs.margin.top else cs.margin.left;
             position += before;
-            const child_rect: geometry.Rect = if (horizontal) .{ .x = content.x + position, .y = content.y + cross_before + cross_offset, .width = sizes[i], .height = cross_size } else .{ .x = content.x + cross_before + cross_offset, .y = content.y + position, .width = cross_size, .height = sizes[i] };
+            const child_rect: geometry.Rect = if (horizontal) .{ .x = content.x + position, .y = content.y + cross_before + cross_offset, .width = resolved.size, .height = cross_size } else .{ .x = content.x + cross_before + cross_offset, .y = content.y + position, .width = cross_size, .height = resolved.size };
             try e.arrange(child, child_rect, depth + 1);
-            position += sizes[i] + after + gap;
+            position += resolved.size + after + gap;
         }
     }
 };
-fn fingerprintNode(frame: *const tree.Frame, index: u32, environment: u64, fingerprints: []u64, depth: usize) u64 {
+fn fingerprintNode(frame: *const tree.Frame, index: u32, environment: u64, fingerprints: []?u64, depth: usize) u64 {
     if (depth > 128) return 0;
+    if (fingerprints[index]) |known| return known;
     const node = frame.nodes.items[index];
     var hash = cache_key.hash(environment, node.style);
     hash = cache_key.hash(hash, std.meta.activeTag(node.kind));
@@ -300,7 +305,7 @@ fn fingerprintNode(frame: *const tree.Frame, index: u32, environment: u64, finge
         hash = cache_key.hash(hash, child_hash);
     }
     fingerprints[index] = if (cacheable) hash else 0;
-    return fingerprints[index];
+    return fingerprints[index].?;
 }
 fn valid(n: f32) bool {
     return std.math.isFinite(n) and n >= 0;

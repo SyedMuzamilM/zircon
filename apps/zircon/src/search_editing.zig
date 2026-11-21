@@ -1,5 +1,6 @@
 //! Project-search excerpts retain live source identities and independent pane editors.
 const std = @import("std");
+const builtin = @import("builtin");
 const editing = @import("zircon_editor");
 const multibuffer = @import("zircon_multibuffer");
 const search = @import("zircon_search");
@@ -20,12 +21,31 @@ const shell = @import("shell.zig");
 const context_menu = @import("views/editor_context_menu.zig");
 const overlays = @import("views/overlays.zig");
 const Shell = shell.Shell;
-const a = std.heap.page_allocator;
+const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 const Sources = editing.SourceEditors(ws.DocumentId);
-const File = struct { document: ?ws.DocumentId = null, excerpts: []Excerpt = &.{}, matches: []text.Range = &.{}, revision: u64 = 0, rows: usize = 0 };
+pub const header_height = 36;
+const Position = struct {
+    rows: usize = 0,
+    padding: usize = 0,
+
+    fn pixels(self: Position, line_height: f32) f32 {
+        return @as(f32, @floatFromInt(self.rows)) * line_height + @as(f32, @floatFromInt(self.padding));
+    }
+};
+const File = struct {
+    document: ?ws.DocumentId = null,
+    excerpts: []Excerpt = &.{},
+    matches: []text.Range = &.{},
+    revision: u64 = 0,
+    rows: usize = 0,
+    fallback_excerpts: usize = 0,
+    stale: bool = false,
+    top: Position = .{},
+};
 pub const Model = struct {
     projection: multibuffer.MultiBuffer = .init(a),
     files: std.ArrayList(File) = .empty,
+    extent: Position = .{},
     panes: [2]Sources = @splat(.{}),
     active_excerpt: [2]?multibuffer.ExcerptId = @splat(null),
     scroll: [2]ui.controls.Scroll = @splat(.{}),
@@ -51,9 +71,49 @@ pub const Model = struct {
         self.autoscroll = @splat(null);
         self.projection.removeSource(id) catch {};
         for (&self.panes) |*pane| pane.remove(id);
+        var removed = false;
         for (self.files.items) |*file| if (file.document != null and std.meta.eql(file.document.?, id)) {
             file.document = null;
+            removed = true;
         };
+        if (removed) self.updateLayout();
+    }
+
+    fn updateLayout(self: *Model) void {
+        self.extent = .{};
+        for (self.files.items) |*file| {
+            file.top = self.extent;
+            self.extent.padding += header_height;
+            if (file.document != null and !file.stale) {
+                self.extent.rows += file.rows;
+                self.extent.padding += file.excerpts.len * 12;
+            } else {
+                self.extent.padding += file.fallback_excerpts * 40;
+            }
+        }
+    }
+
+    fn markStale(self: *Model, id: ws.DocumentId) void {
+        for (self.files.items) |*file| if (std.meta.eql(file.document, @as(?ws.DocumentId, id))) {
+            file.stale = true;
+        };
+        self.updateLayout();
+    }
+
+    pub fn contentHeight(self: *const Model, line_height: f32) f32 {
+        return self.extent.pixels(line_height);
+    }
+
+    pub fn firstVisible(self: *const Model, top: f32, line_height: f32) struct { group: usize, y: f32 } {
+        if (self.files.items.len == 0) return .{ .group = 0, .y = 0 };
+        var lo: usize = 0;
+        var hi = self.files.items.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (self.files.items[mid].top.pixels(line_height) <= top) lo = mid + 1 else hi = mid;
+        }
+        const group = lo -| 1;
+        return .{ .group = group, .y = self.files.items[group].top.pixels(line_height) };
     }
 };
 pub const Target = struct { group: u32, excerpt: u32, generation: u64, revision: u64, first_row: usize, pane: u8 };
@@ -65,6 +125,7 @@ pub fn install(self: *Shell, results: search.Results) !void {
     try next.files.resize(a, results.groups.len);
     @memset(next.files.items, .{});
     for (results.groups, next.files.items) |group, *file| {
+        file.fallback_excerpts = group.excerpts.len;
         const id = resolve(self, group) catch |err| switch (err) {
             error.OutOfMemory => return err,
             else => continue,
@@ -99,9 +160,10 @@ pub fn install(self: *Shell, results: search.Results) !void {
             editor.search_visible = true;
             editor.search_query = try a.dupe(u8, self.search.query);
             editor.synchronize(snapshot);
-            try pane.views.append(a, .{ .document = id, .editor = editor });
+            try pane.append(.{ .document = id, .editor = editor });
         }
     }
+    next.updateLayout();
     releaseUnusedSources(self, &self.search.editing, &next);
     self.search.editing.deinit();
     self.search.editing = next;
@@ -140,6 +202,7 @@ fn describe(snapshot: text.Snapshot, document: ws.DocumentId, id: multibuffer.Ex
 pub fn currentFile(self: *const Shell, group: usize) bool {
     if (group >= self.search.editing.files.items.len) return false;
     const file = self.search.editing.files.items[group];
+    if (file.stale) return false;
     const record = self.workspace.getConst(file.document orelse return false) catch return false;
     return file.revision == record.doc.revision();
 }
@@ -260,6 +323,7 @@ pub fn changed(self: *Shell, id: ws.DocumentId, change: ?*const text.Change, ori
     var snapshot = try self.workspace.snapshot(id);
     defer snapshot.deinit();
     if (revision == snapshot.revision()) return;
+    errdefer model.markStale(id);
     var fallback: text.Change = undefined;
     const actual = change orelse blk: {
         var before: ?text.Snapshot = null;
@@ -271,7 +335,10 @@ pub fn changed(self: *Shell, id: ws.DocumentId, change: ?*const text.Change, ori
         break :blk &fallback;
     };
     defer if (change == null) fallback.deinit();
-    if (actual.before != revision) return;
+    if (actual.before != revision) {
+        model.markStale(id);
+        return;
+    }
     for (&model.selection) |*selected| if (selected.*) |*value| {
         for (model.projection.excerpts.items) |item| if (std.meta.eql(item.value.source, id)) {
             if (std.meta.eql(value.anchor.excerpt, item.value.id)) value.anchor.offset = actual.map(value.anchor.offset, .before);
@@ -287,7 +354,9 @@ pub fn changed(self: *Shell, id: ws.DocumentId, change: ?*const text.Change, ori
             file.rows += item.rows;
         }
         file.revision = snapshot.revision();
+        file.stale = false;
     };
+    model.updateLayout();
     for (model.files.items) |*file| if (file.document != null and std.meta.eql(file.document.?, id)) for (file.matches) |*range| {
         range.start = actual.map(range.start, .before);
         range.end = actual.map(range.end, .after);
@@ -400,7 +469,7 @@ pub fn reveal(self: *Shell, cx: *ui.Context(Shell), target: Target, cursor: usiz
     const lh = self.editor_options.font_size * self.editor_options.line_height;
     var y: f32 = 0;
     for (results.groups, 0..) |group, group_index| {
-        y += 36;
+        y += header_height;
         for (group.excerpts, 0..) |_, index| {
             const source = try excerpt(self, group_index, index) orelse {
                 y += 40;

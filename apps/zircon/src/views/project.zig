@@ -1,6 +1,7 @@
 //! Project tree with independent disclosure/icon/label layout and real source
 //! identities. Visible rows are composed into the frame tree only as needed.
 const std = @import("std");
+const extensions = @import("zircon_extensions");
 const ui = @import("zircon_ui");
 const shell = @import("../shell.zig");
 const v = @import("components.zig");
@@ -12,6 +13,7 @@ const ProjectRows = struct {
     colors: v.Palette,
     active_path: ?[]const u8,
     row_height: f32,
+    icon_theme: ?*const extensions.IconTheme,
 };
 
 pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui.Element {
@@ -37,7 +39,8 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, window_height: f32) !ui
         }).build();
     const available = @max(0, window_height - v.metrics.titlebar - v.metrics.status - 32);
     const active_path = if (self.panel == .image and self.image != null) self.image.?.path else if (self.tabs.items.len > 0) (try self.workspace.getConst(if (self.active_pane == .secondary and self.secondary != null) self.secondary.?.document else self.tabs.items[self.active].document)).path else null;
-    var context: ProjectRows = .{ .shell = self, .colors = c, .active_path = active_path, .row_height = tree_row };
+    const icon_theme = if (self.extension_snapshot) |snapshot| snapshot.resolveIconTheme(self.active_icon_theme) else null;
+    var context: ProjectRows = .{ .shell = self, .colors = c, .active_path = active_path, .row_height = tree_row, .icon_theme = icon_theme };
     var list: ui.Element = undefined;
     if (self.tree.items.len == 0) {
         list = try b.fluent().adopt(try v.text(b, "This folder is empty.", c.muted, 12)).style(.{ .padding = ui.Insets.all(12) }).build();
@@ -72,8 +75,8 @@ fn buildProjectRow(context: *ProjectRows, index: usize, b: *ui.Ui) !ui.Element {
         .shrink_0()
         .children(.{})
         .build());
-    const contribution = if (self.extension_snapshot) |snapshot| if (snapshot.resolveIconTheme(self.active_icon_theme)) |icons| icons.resolve(entry.path, entry.directory) else null else null;
-    if (if (entry.directory) self.project_folder_icons else self.project_file_icons) try children.append(b.allocator(), try v.fileGlyph(self, b, entry.path, entry.directory, entry.expanded, 16));
+    const contribution = if (context.icon_theme) |icons| icons.resolve(entry.path, entry.directory) else null;
+    if (if (entry.directory) self.project_folder_icons else self.project_file_icons) try children.append(b.allocator(), try v.fileGlyphWithIcon(self, b, entry.path, entry.directory, entry.expanded, 16, contribution));
     const color = if (entry.directory) c.folder else if (self.git.entryForPath(entry.path)) |status| v.gitFileColor(c, status) else c.text;
     try children.append(b.allocator(), try v.text(b, entry.name, color, 13));
     const accessible = if (contribution != null and contribution.? == .symbol) try std.fmt.allocPrint(b.allocator(), "{s} {s}", .{ contribution.?.symbol, entry.name }) else entry.name;
@@ -85,6 +88,5 @@ fn buildProjectRow(context: *ProjectRows, index: usize, b: *ui.Ui) !ui.Element {
         .on_click(b.onClickWith(Shell.onTree, @as(u32, @intCast(index))))
         .on_input(b.onInputWith(Shell.onTreeDrag, @intCast(index)))
         .children(children.items)
-        .cache()
         .build();
 }

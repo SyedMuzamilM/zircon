@@ -68,8 +68,8 @@ fn resolve(self: *const Shell, target: Target) ?layout.File {
 }
 
 pub fn selectFile(self: *Shell, file: layout.File) !void {
-    const owned = try a.dupe(u8, file.path);
-    a.free(self.git.selected_path);
+    const owned = try services_git.selection_allocator.dupe(u8, file.path);
+    services_git.selection_allocator.free(self.git.selected_path);
     self.git.selected_path = owned;
     if (self.git.diff_view.active_hunk == null or self.git.diff_view.active_hunk.? < file.first_hunk or self.git.diff_view.active_hunk.? >= file.end_hunk) self.git.diff_view.active_hunk = file.first_hunk;
 }

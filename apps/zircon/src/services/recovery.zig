@@ -1,6 +1,7 @@
 //! One checkpoint writer owns the session store at a time. Snapshots are
 //! retained and released on the UI thread; workers only read their contents.
 const std = @import("std");
+const builtin = @import("builtin");
 const editing = @import("zircon_editor");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
@@ -12,7 +13,7 @@ const shell = @import("../shell.zig");
 const handoff = @import("handoff.zig");
 const storage = ws.recovery;
 const Shell = shell.Shell;
-const a = std.heap.page_allocator;
+const a = if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator;
 const debounce = 0.25;
 const max_delay = 1.0;
 
@@ -130,7 +131,11 @@ pub fn init(self: *Shell, home: []const u8) !void {
 }
 
 fn restore(self: *Shell, model: *Model, loaded: *storage.Loaded) !void {
-    var restored: Shell = .{ .allocator = self.allocator, .workspace = try ws.Workspace.init(self.allocator, self.workspace.io, self.workspace.root_path) };
+    var restored: Shell = .{
+        .allocator = self.allocator,
+        .workspace = try ws.Workspace.init(self.allocator, self.workspace.io, self.workspace.root_path),
+        .multibuffer_history = .init(self.allocator),
+    };
     defer restored.deinit(self.allocator);
     const initial_path = if (self.tabs.items.len == 1) (try self.workspace.getConst(self.tabs.items[0].document)).path else null;
     const requested = if (initial_path) |path| try self.allocator.dupe(u8, path) else null;

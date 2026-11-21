@@ -87,8 +87,10 @@ pub fn typeText(self: *model.Editor, document: *text.Document, bytes: []const u8
     self.selections.normalize();
     var snapshot = document.snapshot();
     defer snapshot.deinit();
-    self.syntax_cache.profile = self.language_profile;
-    if (self.language != .plain and self.syntax_cache.revision != snapshot.revision()) try self.syntax_cache.refresh(snapshot, self.language, 0);
+    self.syntax_cache.setProfile(self.language_profile);
+    if (self.language != .plain and (self.syntax_cache.revision != snapshot.revision() or self.syntax_cache.language != self.language)) {
+        try self.syntax_cache.refresh(snapshot, self.language);
+    }
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
     const a = arena.allocator();

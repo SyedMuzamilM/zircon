@@ -52,8 +52,8 @@ pub fn stashAction(self: *Shell, cx: *ui.Context(Shell), action: Command) !void 
     if (action == .git_stash_show) {
         self.git.combined = false;
         self.git.stash_view = true;
-        const oid = try std.heap.page_allocator.dupe(u8, stash.oid);
-        std.heap.page_allocator.free(self.git.selected_commit);
+        const oid = try service.selection_allocator.dupe(u8, stash.oid);
+        service.selection_allocator.free(self.git.selected_commit);
         self.git.selected_commit = oid;
         self.showTool(.git_diff);
         try service.start(self, cx, .{ .stash_show = stash.oid });
@@ -78,8 +78,8 @@ fn chooseStash(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), tar
     if (target.generation != self.git.status_generation) return;
     const refs = self.git.references orelse return;
     if (target.index >= refs.stashes.len) return;
-    const oid = try std.heap.page_allocator.dupe(u8, refs.stashes[target.index].oid);
-    std.heap.page_allocator.free(self.git.stash_oid);
+    const oid = try service.selection_allocator.dupe(u8, refs.stashes[target.index].oid);
+    service.selection_allocator.free(self.git.stash_oid);
     self.git.stash_oid = oid;
     self.git.stash_selected = target.index;
     try stashAction(self, cx, .git_stash_show);
@@ -219,7 +219,7 @@ fn switchMode(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), stas
     self.git.picker_index = 0;
     self.git.picker_scroll.offset = 0;
     self.git.stash_selected = null;
-    std.heap.page_allocator.free(self.git.stash_oid);
+    service.selection_allocator.free(self.git.stash_oid);
     self.git.stash_oid = &.{};
     cx.notify();
 }

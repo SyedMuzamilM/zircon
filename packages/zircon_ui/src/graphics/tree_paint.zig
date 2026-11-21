@@ -18,21 +18,26 @@ pub fn paint(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, 
 pub fn paintWithCache(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, measurer: measure.Measurer, cache: ?*cache_module.SceneCache) !void {
     const root = frame.root orelse return error.NoFrameRoot;
     if (layout.frame_epoch != frame.epoch) return error.InvalidFrame;
+    var hover_nodes: [129]u32 = undefined;
+    var hover_count: usize = 0;
+    var hovered = frame.hovered_node;
+    while (hovered) |index| : (hovered = frame.nodes.items[index].parent) {
+        if (hover_count == hover_nodes.len) return error.PaintDepthExceeded;
+        hover_nodes[hover_count] = index;
+        hover_count += 1;
+    }
+    const hover_path = hover_nodes[0..hover_count];
+    std.mem.reverse(u32, hover_path);
     var fingerprints: ?[]?u64 = null;
-    try node(frame, layout, painter, root.index, 1, 0, measurer, cache, &fingerprints);
+    try node(frame, layout, painter, root.index, 1, 0, measurer, cache, &fingerprints, hover_path);
     try tooltip(frame, layout, painter, measurer);
 }
-fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer, cache: ?*cache_module.SceneCache, fingerprints: *?[]?u64) anyerror!void {
+fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index: u32, inherited_opacity: f32, depth: usize, measurer: measure.Measurer, cache: ?*cache_module.SceneCache, fingerprints: *?[]?u64, hover_path: []const u32) anyerror!void {
     if (depth > 128) return error.PaintDepthExceeded;
     const value = frame.nodes.items[index];
     const bounds = layout.bounds[index];
     const opacity = inherited_opacity * value.style.opacity;
-    var hovered = frame.hovered_node;
-    var within_hover = false;
-    while (hovered) |current| : (hovered = frame.nodes.items[current].parent) if (current == index) {
-        within_hover = true;
-        break;
-    };
+    const within_hover = depth < hover_path.len and hover_path[depth] == index;
     const background_value = if (within_hover) value.style.hover_background orelse value.style.background else value.style.background;
     const cache_key = if (cache != null and value.cache and value.key != null) cache_key_module.scoped(frame, index) else null;
     const own_fingerprint = if (cache_key != null) blk: {
@@ -41,17 +46,18 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             @memset(memo, null);
             fingerprints.* = memo;
         }
-        break :blk fingerprintNode(frame, layout, index, measurer.generation, fingerprints.*.?, depth);
+        break :blk fingerprintNode(frame, layout, index, measurer.generation, fingerprints.*.?, depth, hover_path);
     } else 0;
     const cacheable = own_fingerprint != 0;
     const fingerprint = if (cacheable) cache_key_module.hash(own_fingerprint, inherited_opacity) else 0;
     const cache_clip = painter.clip();
     if (cache_key) |key| if (cache) |store| if (cacheable) if (store.lookup(key, fingerprint, bounds, cache_clip)) |items| {
         store.hits += 1;
+        try painter.items.ensureUnusedCapacity(painter.allocator, items.len);
         for (items) |item| {
             var copied = item;
             if (item.kind == .text) copied.text = try painter.allocator.dupe(u8, item.text);
-            try painter.items.append(painter.allocator, copied);
+            painter.items.appendAssumeCapacity(copied);
         }
         return;
     };
@@ -93,22 +99,17 @@ fn node(frame: *tree.Frame, layout: *const flex.Layout, painter: *Painter, index
             if (value.kind == .text or value.children.len == 0) try painter.drawText(.{ .bounds = content, .text = text, .style = style });
         },
     }
-    for (value.children) |child| try node(frame, layout, painter, child, opacity, depth + 1, measurer, cache, fingerprints);
+    for (value.children) |child| try node(frame, layout, painter, child, opacity, depth + 1, measurer, cache, fingerprints, hover_path);
     if (cache_key) |key| if (cache) |store| if (cacheable) {
         store.put(key, fingerprint, bounds, cache_clip, painter.items.items[start..]) catch |err| if (err != error.UncacheableScene) return err;
     };
 }
 
-fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: u32, generation: u64, fingerprints: []?u64, depth: usize) u64 {
+fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: u32, generation: u64, fingerprints: []?u64, depth: usize, hover_path: []const u32) u64 {
     if (depth > 128) return 0;
     if (fingerprints[index]) |known| return known;
     const value = frame.nodes.items[index];
-    var within_hover = false;
-    var hovered = frame.hovered_node;
-    while (hovered) |current| : (hovered = frame.nodes.items[current].parent) if (current == index) {
-        within_hover = true;
-        break;
-    };
+    const within_hover = depth < hover_path.len and hover_path[depth] == index;
     var hash = cache_key_module.hash(generation, value.style);
     hash = cache_key_module.hash(hash, layout.bounds[index]);
     hash = cache_key_module.hash(hash, within_hover);
@@ -127,7 +128,7 @@ fn fingerprintNode(frame: *const tree.Frame, layout: *const flex.Layout, index: 
     }
     hash = cache_key_module.hash(hash, value.children.len);
     for (value.children) |child| {
-        const child_hash = fingerprintNode(frame, layout, child, generation, fingerprints, depth + 1);
+        const child_hash = fingerprintNode(frame, layout, child, generation, fingerprints, depth + 1, hover_path);
         if (child_hash == 0) cacheable = false;
         hash = cache_key_module.hash(hash, child_hash);
     }
