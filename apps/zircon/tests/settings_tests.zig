@@ -263,6 +263,12 @@ test "separate settings child changes shared editor appearance and closes indepe
     _ = try app.step(3.1);
     try clickLabel(&app, child, "Menlo");
     _ = try app.step(3.2);
+    const search = try keyBounds(&app, child, "settings-search");
+    const search_point: ui.Point = .{ .x = search.x + search.width / 2, .y = search.y + search.height / 2 };
+    try app.dispatch(child, .{ .pointer_down = .{ .position = search_point } });
+    try app.dispatch(child, .{ .pointer_up = .{ .position = search_point } });
+    try app.dispatch(child, .{ .text = "Font size editor" });
+    _ = try app.step(3.3);
     try clickLabel(&app, child, "+");
     _ = try app.step(4);
     try t.expectEqual(@as(f32, 15), try app.read(owner, Ops.font, .{}));
