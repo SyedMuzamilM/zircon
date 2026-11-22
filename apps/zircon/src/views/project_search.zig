@@ -22,14 +22,12 @@ pub const Fields = struct {
 pub const Target = struct { group: u32, match: u32, generation: u64 };
 const header_height: f32 = search_editing.header_height;
 pub fn contentHeight(self: *const Shell) !f32 {
-    const line_height = self.editor_options.font_size * self.editor_options.line_height;
-    return self.search.editing.contentHeight(line_height);
+    return self.search.editing.contentHeight(self.editor_options.font_size);
 }
 
 pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
     if (self.search.editing.autoscroll[pane] != null) try b.requestFrameAfter(1.0 / 60.0);
     const c = self.colors;
-    const line_height = self.editor_options.font_size * self.editor_options.line_height;
     var content: std.ArrayList(ui.Element) = .empty;
     if (self.fields) |fields| {
         const query = try b.fluent().view(fields.project_search.query).style(.{
@@ -68,7 +66,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
     const total = try contentHeight(self);
     const top = @min(self.search.editing.scroll[pane].offset, @max(0, total - viewport));
     const bottom = top + viewport;
-    const start = self.search.editing.firstVisible(top, line_height);
+    const start = self.search.editing.firstVisible(top, self.editor_options.font_size);
     var y = start.y;
     var first: ?f32 = null;
     var sticky: ?ui.Element = null;
@@ -77,7 +75,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
     if (self.search.results) |results| {
         for (results.groups[start.group..], start.group..) |group, group_index| {
             if (y >= bottom) break;
-            const group_height = header_height + search_editing.groupHeight(self, group_index, line_height, group.excerpts.len);
+            const group_height = header_height + search_editing.groupHeight(self, group_index, group.excerpts.len);
             if (y + group_height <= top) {
                 y += group_height;
                 continue;
@@ -92,6 +90,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, pane: u8) !ui.Element {
                 try rows.append(b.allocator(), if (pinned != null) try b.fluent().div().h_px(header_height).shrink_0().build() else try fileHeader(self, b, group, group_index));
             }
             y += header_height;
+            const line_height = search_editing.groupLineHeight(self, group_index);
             for (group.excerpts, 0..) |_, excerpt_index| {
                 if (y >= bottom) break;
                 const source = try search_editing.excerpt(self, group_index, excerpt_index) orelse {

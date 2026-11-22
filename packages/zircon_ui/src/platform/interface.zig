@@ -24,7 +24,7 @@ pub const Modifiers = packed struct(u8) { shift: bool = false, control: bool = f
 /// Menus are copied by the platform during creation. A null action is a separator.
 pub const MenuItem = struct { label: []const u8 = "", action: ?u32 = null, key: []const u8 = "", modifiers: Modifiers = .{ .command = true } };
 pub const Menu = struct { label: []const u8, items: []const MenuItem };
-pub const Key = enum { slash, comma, left_bracket, right_bracket, unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z, period, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12 };
+pub const Key = enum { slash, comma, left_bracket, right_bracket, unknown, left, right, up, down, home, end, page_up, page_down, backspace, delete, enter, tab, escape, space, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z, period, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, digit_0, digit_1, digit_2, digit_3, digit_4, digit_5, digit_6, digit_7, digit_8, digit_9, minus, equal, semicolon, quote, backslash, grave };
 pub const Pointer = struct { position: g.Point, button: enum { primary, secondary, middle } = .primary, modifiers: Modifiers = .{}, clicks: u8 = 1 };
 /// Ordered UTF-8 byte range. Neither endpoint may split a code point.
 pub const TextRange = struct {

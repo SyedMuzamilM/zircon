@@ -288,6 +288,9 @@ pub const Client = struct {
         return self.formatting_supported.load(.acquire);
     }
     pub fn formatting(self: *Client, uri: []const u8, version: u64) !u64 {
+        return self.formattingWithTabSize(uri, version, 4);
+    }
+    pub fn formattingWithTabSize(self: *Client, uri: []const u8, version: u64, tab_size: u8) !u64 {
         try self.check();
         if (!self.supportsFormatting()) return error.FormattingNotSupported;
         if ((self.documents.get(uri) orelse return error.DocumentNotOpen).snapshot.revision() != version) return error.StaleDocumentVersion;
@@ -303,7 +306,7 @@ pub const Client = struct {
             _ = self.pending.remove(id);
             self.lock.unlock(self.io);
         }
-        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/formatting", .params = .{ .textDocument = .{ .uri = uri }, .options = .{ .tabSize = 4, .insertSpaces = true } } });
+        try self.enqueue(.{ .jsonrpc = "2.0", .id = id, .method = "textDocument/formatting", .params = .{ .textDocument = .{ .uri = uri }, .options = .{ .tabSize = tab_size, .insertSpaces = true } } });
         return id;
     }
     pub fn supportsSignature(self: *const Client) bool {

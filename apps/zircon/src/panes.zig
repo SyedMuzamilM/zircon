@@ -38,7 +38,7 @@ pub fn selectSecondary(self: *Shell, index: usize) !void {
         self.tabs.items[index].secondary_state = null;
         errdefer next.deinit();
         const record = try self.workspace.getConst(id);
-        self.configureEditor(&next, self.languagePath(id, record.path orelse ""));
+        self.configureDocumentEditor(&next, id, record.path orelse "");
         var snapshot = record.doc.snapshot();
         defer snapshot.deinit();
         next.synchronize(snapshot);

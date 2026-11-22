@@ -26,8 +26,27 @@ const Category = enum {
     version_control,
     languages,
     accessibility,
+    terminal,
 };
 const Change = enum {
+    terminal_bottom,
+    terminal_right,
+    terminal_font_auto,
+    terminal_font_down,
+    terminal_font_up,
+    terminal_history_down,
+    terminal_history_up,
+    terminal_option_as_meta,
+    terminal_copy_on_select,
+    format_on_save,
+    remove_trailing_whitespace_on_save,
+    ensure_final_newline_on_save,
+    autosave_off,
+    autosave_focus,
+    autosave_window,
+    autosave_delay,
+    autosave_delay_down,
+    autosave_delay_up,
     indent_guides,
     active_line,
     fold_controls,
@@ -109,6 +128,16 @@ const Row = enum {
     search_whole_word,
     keymap_json,
     languages_manager,
+    format_on_save,
+    remove_trailing_whitespace_on_save,
+    ensure_final_newline_on_save,
+    autosave,
+    autosave_delay_ms,
+    terminal_dock,
+    terminal_font_size,
+    terminal_max_scroll_history,
+    terminal_option_as_meta,
+    terminal_copy_on_select,
 };
 const row_height: f32 = 88;
 pub const View = struct {
@@ -123,6 +152,8 @@ pub const View = struct {
     choice_query: ?ui.Entity(ui.controls.TextInput) = null,
     choice_index: usize = 0,
     category: Category = .general,
+    scope: model.Scope = .user,
+    project_root: ?[]u8 = null,
     expanded: [std.meta.tags(Category).len]bool = @splat(true),
     scroll: ui.controls.Scroll = .{},
     nav_scroll: ui.controls.Scroll = .{},
@@ -134,6 +165,7 @@ pub const View = struct {
     error_value: ?anyerror = null,
     pub fn deinit(self: *View, _: std.mem.Allocator) void {
         self.allocator.free(self.font_families);
+        if (self.project_root) |root| self.allocator.free(root);
     }
     pub fn bootstrap(self: *View, cx: *ui.Context(View), window: ui.WindowHandle) !void {
         self.window = window;
@@ -200,7 +232,8 @@ pub const View = struct {
     }
     pub fn render(self: *const View, b: *ui.Ui) !ui.Element {
         var values: model.Values = undefined;
-        try b.watch(self.settings, model.Settings.copy, .{ b.allocator(), &values });
+        const root = if (self.scope == .project) self.project_root else null;
+        try b.watch(self.settings, model.Settings.copyResolved, .{ root, b.allocator(), &values });
         var generation: ?ext.Snapshot = null;
         if (self.workspace) |handle| try b.watch(handle, Shell.copyExtensions, .{&generation});
         defer if (generation) |*value| value.deinit();
@@ -209,8 +242,11 @@ pub const View = struct {
         b.frame.tooltip_delay = values.tooltip_delay / 1000;
         var query: []u8 = &.{};
         if (self.query) |handle| try b.watch(handle, ui.controls.TextInput.copy, .{ b.allocator(), &query });
-        var path: ?[]u8 = null;
-        try b.watch(self.settings, model.Settings.copyPath, .{ b.allocator(), &path });
+        var user_path: ?[]u8 = null;
+        try b.watch(self.settings, model.Settings.copyPath, .{ b.allocator(), &user_path });
+        var project_path: ?[]u8 = null;
+        if (self.project_root) |project| try b.watch(self.settings, model.Settings.copyProjectPath, .{ project, b.allocator(), &project_path });
+        const path = if (self.scope == .user) user_path else project_path;
         var nav: std.ArrayList(ui.Element) = .empty;
         try nav.append(b.allocator(), try b.fluent().div()
             .h(.{ .px = 36 })
@@ -230,7 +266,7 @@ pub const View = struct {
         var sections: std.ArrayList(ui.Element) = .empty;
         inline for (std.meta.tags(Category)) |category| {
             const parent = parentCategory(category);
-            if (parent == null or self.expanded[@backingInt(parent.?)]) {
+            if ((self.scope == .user or projectCategory(category)) and (parent == null or self.expanded[@backingInt(parent.?)])) {
                 const has_children = category == .appearance or category == .editor or category == .panels;
                 try sections.append(b.allocator(), try b.fluent().button(.{
                     .label = categoryName(category),
@@ -278,17 +314,9 @@ pub const View = struct {
             .children(nav.items)
             .build();
         var header_items: std.ArrayList(ui.Element) = .empty;
-        try header_items.appendSlice(b.allocator(), &.{ try b.fluent().adopt(try v.text(b, "User", c.accent, 13))
-            .style(.{
-                .padding = .{ .left = 7, .right = 7, .top = 4, .bottom = 4 },
-                .radius = v.metrics.control_radius,
-                .background = c.hover,
-                .text = .{ .size = 13, .color = c.accent },
-            })
-            .build(), try v.text(b, "Settings", c.text, 13), try b.fluent().div()
-            .grow()
-            .children(.{})
-            .build() });
+        try header_items.append(b.allocator(), try scopeButton(self, b, c, .user, "User"));
+        if (project_path != null) try header_items.append(b.allocator(), try scopeButton(self, b, c, .project, "Project"));
+        try header_items.append(b.allocator(), try b.fluent().div().grow().children(.{}).build());
         if (path != null and self.workspace != null) try header_items.append(b.allocator(), try b.fluent().button(.{
             .label = "Edit in settings.json",
         }).style(choiceStyle(c)).on_click(b.onClick(editJson)).build());
@@ -314,8 +342,10 @@ pub const View = struct {
             }).build());
         var row_count: usize = 0;
         inline for (std.meta.tags(Row)) |entry| {
-            if ((searching or contains(self.category, entry)) and overlays.matches(query, rowSearch(entry))) {
-                try rows.append(b.allocator(), try settingRow(self, b, c, values, generation, entry));
+            const project_key = projectKey(entry);
+            if ((self.scope == .user or project_key != null) and (searching or contains(self.category, entry)) and overlays.matches(query, rowSearch(entry))) {
+                const reset = self.scope == .project and try b.watch(self.settings, model.Settings.hasProjectOverride, .{ self.project_root.?, project_key.? });
+                try rows.append(b.allocator(), try settingRow(b, c, values, generation, entry, reset));
                 row_count += 1;
             }
         }
@@ -438,14 +468,35 @@ pub const View = struct {
             cx.notify();
         }
     }
+    fn selectScope(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), scope: model.Scope) void {
+        self.scope = scope;
+        if (scope == .project and !projectCategory(self.category)) self.category = .editor;
+        self.scroll.offset = 0;
+        self.nav_scroll.offset = 0;
+        self.picker = .none;
+        self.error_value = null;
+        cx.notify();
+    }
+
+    fn resetProject(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View), row: Row) void {
+        self.error_value = null;
+        cx.update(self.settings, model.Settings.clearProjectKey, .{ self.project_root.?, projectKey(row).? }) catch |err| {
+            self.error_value = err;
+        };
+        cx.notify();
+    }
+
     fn editJson(self: *View, _: *ui.Event(ui.Click), cx: *ui.Context(View)) !void {
-        cx.update(self.settings, model.Settings.prepareFile, .{}) catch |err| {
+        cx.update(self.settings, model.Settings.prepareScopeFile, .{ self.project_root, self.scope }) catch |err| {
             self.error_value = err;
             cx.notify();
             return;
         };
         var path: ?[]u8 = null;
-        try cx.read(self.settings, model.Settings.copyPath, .{ self.allocator, &path });
+        switch (self.scope) {
+            .user => try cx.read(self.settings, model.Settings.copyPath, .{ self.allocator, &path }),
+            .project => try cx.read(self.settings, model.Settings.copyProjectPath, .{ self.project_root.?, self.allocator, &path }),
+        }
         defer if (path) |owned| self.allocator.free(owned);
         const Open = struct {
             fn apply(shell: *Shell, context: *ui.Context(Shell), file: []const u8) !void {
@@ -459,7 +510,7 @@ pub const View = struct {
         if (self.window) |window| try cx.app.requestCloseWindow(window);
     }
     fn apply(self: *View, cx: *ui.Context(View), patch: model.Patch) !void {
-        cx.update(self.settings, model.Settings.apply, .{patch}) catch |err| {
+        cx.update(self.settings, model.Settings.applyScoped, .{ self.project_root, self.scope, patch }) catch |err| {
             self.error_value = err;
             cx.notify();
             return;
@@ -488,8 +539,27 @@ pub const View = struct {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         var values: model.Values = undefined;
-        try cx.read(self.settings, model.Settings.copy, .{ arena.allocator(), &values });
+        const root = if (self.scope == .project) self.project_root else null;
+        try cx.read(self.settings, model.Settings.copyResolved, .{ root, arena.allocator(), &values });
         try self.apply(cx, switch (which) {
+            .terminal_bottom => .{ .terminal_dock = .bottom },
+            .terminal_right => .{ .terminal_dock = .right },
+            .terminal_font_auto => .{ .terminal_font_size = 0 },
+            .terminal_font_down => .{ .terminal_font_size = @max(10, (if (values.terminal_font_size == 0) values.font_size else values.terminal_font_size) - 1) },
+            .terminal_font_up => .{ .terminal_font_size = @min(32, (if (values.terminal_font_size == 0) values.font_size else values.terminal_font_size) + 1) },
+            .terminal_history_down => .{ .terminal_max_scroll_history = values.terminal_max_scroll_history -| 1000 },
+            .terminal_history_up => .{ .terminal_max_scroll_history = @min(100_000, values.terminal_max_scroll_history + 1000) },
+            .terminal_option_as_meta => .{ .terminal_option_as_meta = !values.terminal_option_as_meta },
+            .terminal_copy_on_select => .{ .terminal_copy_on_select = !values.terminal_copy_on_select },
+            .format_on_save => .{ .format_on_save = if (values.format_on_save == .on) .off else .on },
+            .remove_trailing_whitespace_on_save => .{ .remove_trailing_whitespace_on_save = !values.remove_trailing_whitespace_on_save },
+            .ensure_final_newline_on_save => .{ .ensure_final_newline_on_save = !values.ensure_final_newline_on_save },
+            .autosave_off => .{ .autosave = .off },
+            .autosave_focus => .{ .autosave = .on_focus_change },
+            .autosave_window => .{ .autosave = .on_window_change },
+            .autosave_delay => .{ .autosave = .after_delay },
+            .autosave_delay_down => .{ .autosave_delay_ms = @max(200, values.autosave_delay_ms - 200) },
+            .autosave_delay_up => .{ .autosave_delay_ms = @min(60_000, values.autosave_delay_ms + 200) },
             .indent_guides => .{ .indent_guides = !values.indent_guides },
             .active_line => .{ .active_line = !values.active_line },
             .fold_controls => .{ .fold_controls = !values.fold_controls },
@@ -541,6 +611,7 @@ pub const View = struct {
 };
 fn categoryName(category: Category) []const u8 {
     return switch (category) {
+        .terminal => "Terminal",
         .general => "General",
         .appearance => "Appearance",
         .editor => "Editor",
@@ -565,12 +636,35 @@ fn parentCategory(category: Category) ?Category {
     };
 }
 
+fn projectCategory(category: Category) bool {
+    return category == .general or category == .editor or category == .gutter;
+}
+
+fn projectKey(row: Row) ?[]const u8 {
+    return switch (row) {
+        .tabs => "tab_width",
+        .wrap => "soft_wrap",
+        .numbers => "line_numbers",
+        .indent_guides, .fold_controls, .format_on_save, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save, .autosave, .autosave_delay_ms => @tagName(row),
+        else => null,
+    };
+}
+
+fn scopeButton(self: *const View, b: *ui.Ui, c: v.Palette, scope: model.Scope, label: []const u8) !ui.Element {
+    return b.fluent().button(.{ .label = label })
+        .style(choiceStyle(c))
+        .background(if (self.scope == scope) c.selected else c.sidebar)
+        .on_click(b.onClickWith(View.selectScope, scope))
+        .build();
+}
+
 fn contains(category: Category, row: Row) bool {
     if (category == .general) return true;
     return switch (row) {
+        .terminal_dock, .terminal_font_size, .terminal_max_scroll_history, .terminal_option_as_meta, .terminal_copy_on_select => category == .terminal,
         .theme, .icons => category == .appearance,
         .font_family, .font, .ui_font_family, .ui_font_size, .line_height, .ligatures => category == .appearance or category == .typography or category == .editor,
-        .wrap, .tabs, .cursor_shape, .cursor_blink, .smooth_cursor => category == .editor,
+        .wrap, .tabs, .cursor_shape, .cursor_blink, .smooth_cursor, .format_on_save, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save, .autosave, .autosave_delay_ms => category == .editor,
         .vim, .keymap_json => category == .keymap or category == .editor,
         .numbers, .indent_guides, .active_line, .fold_controls => category == .editor or category == .gutter,
         .gutters, .blame => category == .version_control or category == .gutter or category == .panels,
@@ -583,6 +677,16 @@ fn contains(category: Category, row: Row) bool {
 
 fn rowSearch(row: Row) []const u8 {
     return switch (row) {
+        .terminal_dock => "Terminal dock",
+        .terminal_font_size => "Terminal font size",
+        .terminal_max_scroll_history => "Terminal scrollback",
+        .terminal_option_as_meta => "Option as Meta",
+        .terminal_copy_on_select => "Copy terminal selection",
+        .format_on_save => "Format on save language server",
+        .remove_trailing_whitespace_on_save => "Remove trailing whitespace on save",
+        .ensure_final_newline_on_save => "Ensure final newline on save",
+        .autosave => "Autosave automatic file saving",
+        .autosave_delay_ms => "Autosave delay milliseconds",
         .theme => "Color theme appearance colors",
         .icons => "File icon theme appearance",
         .vim => "Vim modal editing normal visual insert key bindings",
@@ -631,9 +735,18 @@ fn changeButton(b: *ui.Ui, c: v.Palette, change: Change, label: []const u8) !ui.
     }).build();
 }
 
-fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snapshot, row: Row) !ui.Element {
-    _ = self;
+fn settingRow(b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snapshot, row: Row, reset: bool) !ui.Element {
     const title: []const u8 = switch (row) {
+        .terminal_dock => "Terminal dock",
+        .terminal_font_size => "Terminal font size",
+        .terminal_max_scroll_history => "Terminal scrollback",
+        .terminal_option_as_meta => "Option as Meta",
+        .terminal_copy_on_select => "Copy terminal selection",
+        .format_on_save => "Format on save",
+        .remove_trailing_whitespace_on_save => "Remove trailing whitespace",
+        .ensure_final_newline_on_save => "Ensure final newline",
+        .autosave => "Autosave",
+        .autosave_delay_ms => "Autosave delay",
         .theme => "Color theme",
         .icons => "File icon theme",
         .vim => "Vim mode",
@@ -667,6 +780,16 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
         .languages_manager => "Language support",
     };
     const help: []const u8 = switch (row) {
+        .terminal_dock => "Choose where the terminal opens.",
+        .terminal_font_size => "Use the editor font size or set a separate size.",
+        .terminal_max_scroll_history => "Set the number of lines kept in new terminal sessions.",
+        .terminal_option_as_meta => "Send Meta shortcuts when holding Option.",
+        .terminal_copy_on_select => "Copy text to the clipboard when you finish selecting it.",
+        .format_on_save => "Use the language server formatter when saving.",
+        .remove_trailing_whitespace_on_save => "Remove trailing spaces and tabs when saving.",
+        .ensure_final_newline_on_save => "End non-empty files with a newline when saving.",
+        .autosave => "Choose when to save edits in named files.",
+        .autosave_delay_ms => "Time after the last edit when autosave is set to After delay.",
         .wrap => "Wrap long lines at the editor width without changing the file.",
         .cursor_shape => "Choose the text cursor shape. Vim mode sets its own shape.",
         .cursor_blink => "Blink the text cursor after you stop typing or moving it.",
@@ -701,6 +824,58 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
     };
     var controls: std.ArrayList(ui.Element) = .empty;
     switch (row) {
+        .terminal_dock => {
+            inline for (.{ .{ Change.terminal_bottom, "Bottom", @as(model.TerminalDock, .bottom) }, .{ Change.terminal_right, "Right", @as(model.TerminalDock, .right) } }) |item| {
+                try controls.append(b.allocator(), try b.fluent().button(.{ .label = item[1] })
+                    .style(choiceStyle(c))
+                    .background(if (values.terminal_dock == item[2]) c.selected else c.sidebar)
+                    .on_click(b.onClickWith(View.change, item[0]))
+                    .build());
+            }
+        },
+        .terminal_font_size => {
+            const effective_size = if (values.terminal_font_size == 0) values.font_size else values.terminal_font_size;
+            const size = try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{effective_size});
+            try controls.appendSlice(b.allocator(), &.{
+                try b.fluent().button(.{ .label = "Auto" })
+                    .style(choiceStyle(c))
+                    .background(if (values.terminal_font_size == 0) c.selected else c.sidebar)
+                    .on_click(b.onClickWith(View.change, Change.terminal_font_auto))
+                    .build(),
+                try changeButton(b, c, .terminal_font_down, "−"),
+                try v.text(b, size, c.text, 13),
+                try changeButton(b, c, .terminal_font_up, "+"),
+            });
+        },
+        .terminal_max_scroll_history => {
+            try controls.appendSlice(b.allocator(), &.{
+                try changeButton(b, c, .terminal_history_down, "−"),
+                try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d}", .{values.terminal_max_scroll_history}), c.text, 13),
+                try changeButton(b, c, .terminal_history_up, "+"),
+            });
+        },
+        .autosave => {
+            const modes = .{
+                .{ model.Autosave.off, Change.autosave_off, "Off" },
+                .{ model.Autosave.on_focus_change, Change.autosave_focus, "Focus change" },
+                .{ model.Autosave.on_window_change, Change.autosave_window, "Window change" },
+                .{ model.Autosave.after_delay, Change.autosave_delay, "After delay" },
+            };
+            inline for (modes) |mode| {
+                try controls.append(b.allocator(), try b.fluent().button(.{ .label = mode[2] })
+                    .style(choiceStyle(c))
+                    .background(if (values.autosave == mode[0]) c.selected else c.sidebar)
+                    .on_click(b.onClickWith(View.change, mode[1]))
+                    .build());
+            }
+        },
+        .autosave_delay_ms => {
+            try controls.appendSlice(b.allocator(), &.{
+                try changeButton(b, c, .autosave_delay_down, "−"),
+                try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d} ms", .{values.autosave_delay_ms}), c.text, 13),
+                try changeButton(b, c, .autosave_delay_up, "+"),
+            });
+        },
         .project_panel_width, .project_entry_spacing, .tooltip_delay => {
             const n = switch (row) {
                 .project_panel_width => values.project_panel_width,
@@ -812,8 +987,13 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 }).style(style).on_click(b.onClickWith(View.change, choice[0])).build());
             }
         },
-        .wrap, .vim, .cursor_blink, .smooth_cursor, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word => {
+        .wrap, .vim, .cursor_blink, .smooth_cursor, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .format_on_save, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save, .terminal_option_as_meta, .terminal_copy_on_select => {
             const enabled = switch (row) {
+                .terminal_option_as_meta => values.terminal_option_as_meta,
+                .terminal_copy_on_select => values.terminal_copy_on_select,
+                .format_on_save => values.format_on_save == .on,
+                .remove_trailing_whitespace_on_save => values.remove_trailing_whitespace_on_save,
+                .ensure_final_newline_on_save => values.ensure_final_newline_on_save,
                 .indent_guides => values.indent_guides,
                 .active_line => values.active_line,
                 .fold_controls => values.fold_controls,
@@ -833,6 +1013,11 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 else => values.reduced_motion,
             };
             const change: Change = switch (row) {
+                .terminal_option_as_meta => .terminal_option_as_meta,
+                .terminal_copy_on_select => .terminal_copy_on_select,
+                .format_on_save => .format_on_save,
+                .remove_trailing_whitespace_on_save => .remove_trailing_whitespace_on_save,
+                .ensure_final_newline_on_save => .ensure_final_newline_on_save,
                 .indent_guides => .indent_guides,
                 .active_line => .active_line,
                 .fold_controls => .fold_controls,
@@ -867,6 +1052,7 @@ fn settingRow(self: *const View, b: *ui.Ui, c: v.Palette, values: model.Values, 
                 }).build());
         },
     }
+    if (reset) try controls.append(b.allocator(), try b.fluent().button(.{ .label = "Reset" }).style(choiceStyle(c)).on_click(b.onClickWith(View.resetProject, row)).build());
     return b.fluent().div().h(.{ .px = row_height }).shrink_0().flex_col().children(&.{
         try b.fluent().div().grow().gap_px(18).items_center().flex().children(&.{
             try b.fluent().div()

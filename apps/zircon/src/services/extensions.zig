@@ -6,6 +6,7 @@ const ext = @import("zircon_extensions");
 const ui = @import("zircon_ui");
 const shell = @import("../shell.zig");
 const catalog = @import("catalog.zig");
+const services_language = @import("language.zig");
 const Shell = shell.Shell;
 pub fn refresh(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.extensions) |*registry| {
@@ -17,7 +18,7 @@ pub fn refresh(self: *Shell, cx: *ui.Context(Shell)) !void {
             next.deinit();
             return err;
         };
-        self.language.deinit(self.allocator);
+        try services_language.reset(self, cx);
         if (previous) |*snapshot| snapshot.deinit();
     }
     cx.notify();

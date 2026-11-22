@@ -541,7 +541,9 @@ test "native terminal executes a command in a PTY and paints its output" {
     try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
     const Read = struct {
         fn output(self: *const zircon.Shell) bool {
-            for (self.terminal.sessions.items[0].lines.items) |line| {
+            const screen = self.terminal.sessions.items[0].terminal.activeScreenConst();
+            for (0..screen.len) |row| {
+                const line = screen.rowConst(row);
                 for (0..line.cells.len -| 4) |i| if (line.cells[i].code == 'P' and line.cells[i + 1].code == 'T' and line.cells[i + 2].code == 'Y' and line.cells[i + 3].code == 'O' and line.cells[i + 4].code == 'K') return true;
             }
             return false;
@@ -564,7 +566,9 @@ test "native terminal executes a command in a PTY and paints its output" {
     const Check = struct {
         fn interrupted(self: *const zircon.Shell) bool {
             const marker = "INTERRUPTED";
-            for (self.terminal.sessions.items[0].lines.items) |line| {
+            const screen = self.terminal.sessions.items[0].terminal.activeScreenConst();
+            for (0..screen.len) |row| {
+                const line = screen.rowConst(row);
                 for (0..line.cells.len -| (marker.len - 1)) |i| {
                     var matches = true;
                     for (marker, 0..) |c, j| if (line.cells[i + j].code != c) {
@@ -835,4 +839,223 @@ fn statusHas(app: *ui.App, h: ui.WindowHandle, label: []const u8) bool {
     const window = app.window(h) catch return false;
     for (window.frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, label)) return true;
     return false;
+}
+
+test "terminal dock paints text runs and supports fractional scrolling and smart copy" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Setup = struct {
+        fn configure(self: *zircon.Shell, _: *ui.Context(zircon.Shell)) void {
+            self.terminal.options = .{ .command = "/bin/sh", .args = &.{ "-c", ":" } };
+        }
+        fn output(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            const session = &self.terminal.sessions.items[0];
+            for (0..40) |_| try session.feed(self.allocator, "scrollback\r\n");
+            try session.feed(self.allocator, "one  two three");
+            cx.notify();
+        }
+        fn scrollPx(self: *const zircon.Shell) f32 {
+            return self.terminal.sessions.items[0].scroll_px;
+        }
+    };
+    try app.update(owner, Setup.configure, .{});
+    try app.update(owner, Ops.command, .{.toggle_terminal});
+    _ = try app.step(0);
+    _ = try app.step(0.01);
+    try app.update(owner, Setup.output, .{});
+    _ = try app.step(0.02);
+
+    const window = try app.window(h);
+    var batched = false;
+    for (window.frames.committed.scene.items) |item| {
+        if (item.kind == .text and std.mem.eql(u8, item.text, "one  two three")) batched = true;
+    }
+    try t.expect(batched);
+
+    const terminal = try bounds(&app, h, "terminal-canvas");
+    const position: ui.Point = .{ .x = terminal.x + 16, .y = terminal.y + 14 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = position } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = position } });
+    try app.dispatch(h, .{ .scroll = .{ .position = position, .x = 0, .y = 2.5 } });
+    try t.expectEqual(@as(f32, 2.5), try app.read(owner, Setup.scrollPx, .{}));
+
+    try app.dispatch(h, .{ .key_down = .{ .key = .a, .modifiers = .{ .command = true } } });
+    try app.dispatch(h, .{ .key_down = .{ .key = .c, .modifiers = .{ .command = true } } });
+    const surface = window.surface.?;
+    const text = try surface.ops.clipboard_read(surface.context, t.allocator);
+    defer t.allocator.free(text);
+    try t.expect(std.mem.startsWith(u8, text, "scrollback\n"));
+    try t.expect(std.mem.endsWith(u8, text, "\none  two three"));
+
+    try app.dispatch(h, .{ .key_down = .{ .key = .k, .modifiers = .{ .command = true } } });
+    try t.expectEqual(@as(f32, 0), try app.read(owner, Setup.scrollPx, .{}));
+    _ = try app.step(0.03);
+    for (window.frames.committed.scene.items) |item| {
+        if (item.kind == .text) try t.expect(!std.mem.eql(u8, item.text, "one  two three"));
+    }
+}
+
+test "terminal Cmd-click jumps to a diagnostic and Cmd-F searches scrollback" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "sample.zig", .data = "first\nsecond\n" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, null));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+
+    const Setup = struct {
+        fn configure(self: *zircon.Shell, _: *ui.Context(zircon.Shell)) void {
+            self.terminal.options = .{ .command = "/bin/sh", .args = &.{ "-c", ":" } };
+        }
+        fn output(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            try self.terminal.sessions.items[0].feed(self.allocator, "sample.zig:2:3\r\nneedle old\r\nneedle new");
+            cx.notify();
+        }
+        fn position(self: *const zircon.Shell) usize {
+            return self.tabs.items[self.active].editor.primary().head;
+        }
+        fn matches(self: *const zircon.Shell) usize {
+            return self.terminal.sessions.items[0].search_results.count();
+        }
+        fn active(self: *const zircon.Shell) usize {
+            return self.terminal.sessions.items[0].search_results.active;
+        }
+    };
+    try app.update(owner, Setup.configure, .{});
+    try app.update(owner, Ops.command, .{.toggle_terminal});
+    _ = try app.step(0);
+    _ = try app.step(0.01);
+    try app.update(owner, Setup.output, .{});
+    _ = try app.step(0.02);
+
+    const canvas = try bounds(&app, h, "terminal-canvas");
+    const position: ui.Point = .{ .x = canvas.x + 20, .y = canvas.y + 10 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = position, .modifiers = .{ .command = true } } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = position, .modifiers = .{ .command = true } } });
+    try t.expectEqual(@as(usize, 8), try app.read(owner, Setup.position, .{}));
+
+    _ = try app.step(0.03);
+    try app.dispatch(h, .{ .pointer_down = .{ .position = position } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = position } });
+    try app.dispatch(h, .{ .key_down = .{ .key = .f, .modifiers = .{ .command = true } } });
+    _ = try app.step(0.04);
+    _ = try bounds(&app, h, "terminal-search");
+    try app.dispatch(h, .{ .text = "needle" });
+    _ = try app.step(0.05);
+    try t.expectEqual(2, try app.read(owner, Setup.matches, .{}));
+    try t.expectEqual(1, try app.read(owner, Setup.active, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
+    try t.expectEqual(0, try app.read(owner, Setup.active, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .enter, .modifiers = .{ .shift = true } } });
+    try t.expectEqual(1, try app.read(owner, Setup.active, .{}));
+    try app.dispatch(h, .{ .key_down = .{ .key = .escape } });
+    _ = try app.step(0.06);
+    try t.expectError(error.MissingElement, bounds(&app, h, "terminal-search"));
+}
+
+test "terminal task picker loads JSONC tasks and reruns them with project variables" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(t.io, ".zircon");
+    try tmp.dir.createDirPath(t.io, "build");
+    try tmp.dir.createDirPath(t.io, "prefs");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "file with space.zig", .data = "const test_value = 1;\n" });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = ".zircon/tasks.json", .data =
+        \\[
+        \\  // Resolve the command through PATH and run it in a project subfolder.
+        \\  {"label":"Show current file","command":"sh","args":["-c","printf '%s\\n' \"$TASK_FILE\"; if [ \"${PWD##*/}\" = build ]; then printf 'CWD_OK\\n'; fi"],
+        \\   "cwd":"build","env":{"TASK_FILE":"$ZIRCON_RELATIVE_FILE"}},
+        \\]
+    });
+    try tmp.dir.writeFile(t.io, .{ .sub_path = "prefs/tasks.json", .data =
+        \\[{"label":"Show global fallback","command":"printf 'GLOBAL=%s\\n' \"${ZIRCON_TASK_UNSET:two words}\""}]
+    });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const settings_path = try std.fs.path.resolve(t.allocator, &.{ root, "prefs/settings.json" });
+    defer t.allocator.free(settings_path);
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try app.openWindow(zircon.Shell, .{ .visible = false, .width = 1000, .height = 700 }, try zircon.Shell.init(t.allocator, t.io, root, "file with space.zig"));
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.loadSettings, .{settings_path});
+    try app.update(owner, zircon.Shell.bootstrap, .{h});
+
+    const Read = struct {
+        fn output(self: *const zircon.Shell, marker: []const u8) bool {
+            if (self.terminal.sessions.items.len == 0) return false;
+            const session = &self.terminal.sessions.items[self.terminal.active];
+            const screen = session.terminal.activeScreenConst();
+            for (0..screen.len) |row| {
+                const cells = screen.rowConst(row).cells;
+                for (0..(cells.len + 1 -| marker.len)) |start| {
+                    var matches = true;
+                    for (marker, 0..) |value, i| if (cells[start + i].code != value) {
+                        matches = false;
+                        break;
+                    };
+                    if (matches) return true;
+                }
+            }
+            return false;
+        }
+        fn count(self: *const zircon.Shell) usize {
+            return self.terminal.sessions.items.len;
+        }
+        fn wait(app_state: *ui.App, shell: ui.Entity(zircon.Shell), marker: []const u8) !void {
+            const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+            while (!try app_state.read(shell, output, .{marker})) {
+                _ = try app_state.step(0);
+                if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.TerminalTaskTimeout;
+                try std.Io.sleep(t.io, .fromMilliseconds(5), .awake);
+            }
+        }
+    };
+
+    _ = try app.step(0);
+    try app.update(owner, Ops.command, .{.run_task});
+    _ = try app.step(0);
+    try clickLabel(&app, h, "Show current file");
+    try Read.wait(&app, owner, "file with space.zig");
+    try Read.wait(&app, owner, "CWD_OK");
+    try app.update(owner, Ops.command, .{.rerun_last_task});
+    try Read.wait(&app, owner, "file with space.zig");
+    try t.expectEqual(@as(usize, 2), try app.read(owner, Read.count, .{}));
+    try app.update(owner, Ops.command, .{.run_task});
+    _ = try app.step(0);
+    try clickLabel(&app, h, "Show global fallback");
+    try Read.wait(&app, owner, "GLOBAL=two words");
+}
+
+test "native terminal login capture loads PATH asynchronously" {
+    if (comptime ui.testing.native == void) return error.SkipZigTest;
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    try app.update(owner, zircon.Shell.captureTerminalEnvironment, .{});
+    const Read = struct {
+        fn done(self: *const zircon.Shell) bool {
+            return self.shell_env.loaded;
+        }
+        fn path(self: *const zircon.Shell) bool {
+            for (self.shell_env.entries) |pair| {
+                if (std.mem.eql(u8, pair[0], "PATH") and pair[1].len > 0) return true;
+            }
+            return false;
+        }
+    };
+    const deadline = std.Io.Clock.awake.now(t.io).addDuration(.fromSeconds(5));
+    while (!try app.read(owner, Read.done, .{})) {
+        _ = try app.step(0);
+        if (std.Io.Clock.awake.now(t.io).compare(.gte, deadline)) return error.LoginShellTimeout;
+        try std.Io.sleep(t.io, .fromMilliseconds(10), .awake);
+    }
+    try t.expect(try app.read(owner, Read.path, .{}));
 }

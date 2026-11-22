@@ -717,6 +717,22 @@ fn keyDown(object: Id, _: Sel, event: Id) callconv(.c) void {
 }
 fn key(code: u16) platform.Key {
     return switch (code) {
+        29 => .digit_0,
+        18 => .digit_1,
+        19 => .digit_2,
+        20 => .digit_3,
+        21 => .digit_4,
+        23 => .digit_5,
+        22 => .digit_6,
+        26 => .digit_7,
+        28 => .digit_8,
+        25 => .digit_9,
+        27 => .minus,
+        24 => .equal,
+        41 => .semicolon,
+        39 => .quote,
+        42 => .backslash,
+        50 => .grave,
         33 => .left_bracket,
         30 => .right_bracket,
         0 => .a,

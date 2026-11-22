@@ -17,6 +17,7 @@ const git_tree = @import("../models/git_tree.zig");
 const shell = @import("../shell.zig");
 const commit_form = @import("../views/git/commit.zig");
 const handoff = @import("handoff.zig");
+const save = @import("save.zig");
 const diff_layout = zircon_git_ui.layout;
 const Shell = shell.Shell;
 // Git model strings are also allocated by view and command handlers.
@@ -860,7 +861,7 @@ fn complete(self: *Shell, cx: *ui.Context(Shell), result: anyerror!*Box) !void {
         }
         for (value.save_documents) |source| {
             if (!(try self.workspace.getConst(source.document)).dirty()) continue;
-            self.workspace.save(source.document, null) catch |err| return failPreparation(self, cx, err);
+            save.saveNow(self, cx, source.document, null, .{ .quiet = true }) catch |err| return failPreparation(self, cx, err);
         }
         try startOperation(self, cx, operation, false, .full);
         return;

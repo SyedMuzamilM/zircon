@@ -2,7 +2,7 @@
 const std = @import("std");
 const ui = @import("zircon_ui");
 const actions = @import("../../actions.zig");
-const services_extensions = @import("../../services/extensions.zig");
+const search_editing = @import("../../search_editing.zig");
 const services_language = @import("../../services/language.zig");
 const shell = @import("../../shell.zig");
 const v = @import("../components.zig");
@@ -74,29 +74,38 @@ pub fn choose(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), choi
         if (tab.language_name) |old| self.allocator.free(old);
         tab.language_path = path;
         tab.language_name = name;
-        services_extensions.applyLanguage(self, &tab.editor, path);
+        self.configureEditorForLanguage(&tab.editor, path, name);
         tab.editor.syntax_cache.clear();
         tab.editor.grammar_revision = null;
         if (tab.secondary_state) |*state| {
-            services_extensions.applyLanguage(self, state, path);
+            self.configureEditorForLanguage(state, path, name);
             state.syntax_cache.clear();
             state.grammar_revision = null;
         }
         if (self.secondary) |*pane| if (std.meta.eql(pane.document, current.id)) {
-            services_extensions.applyLanguage(self, &pane.editor, path);
+            self.configureEditorForLanguage(&pane.editor, path, name);
             pane.editor.syntax_cache.clear();
             pane.editor.grammar_revision = null;
         };
         break;
     };
+    for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, current.id)) {
+        self.configureEditorForLanguage(&view.editor, path, name);
+        view.editor.show_fold_controls = false;
+        view.editor.show_git_gutters = false;
+        view.editor.syntax_cache.clear();
+        view.editor.grammar_revision = null;
+    };
     for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| if (std.meta.eql(view.document, current.id)) {
-        services_extensions.applyLanguage(self, &view.editor, path);
+        self.configureEditorForLanguage(&view.editor, path, name);
+        search_editing.configureProjection(&view.editor);
         view.editor.syntax_cache.clear();
         view.editor.grammar_revision = null;
         var snapshot = try self.workspace.snapshot(current.id);
         defer snapshot.deinit();
         view.editor.synchronize(snapshot);
     };
+    search_editing.refreshMetrics(self);
     self.popup = .none;
     self.editor_focus_request +%= 1;
     cx.notify();

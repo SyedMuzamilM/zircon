@@ -1,6 +1,7 @@
 //! Application commands and file policy. Editing is delegated to zircon_editor;
 //! persistence is delegated to zircon_workspace. Errors leave the view usable.
 const std = @import("std");
+const builtin = @import("builtin");
 const editing = @import("zircon_editor");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
@@ -20,8 +21,10 @@ const services_extensions = @import("services/extensions.zig");
 const services_git = @import("services/git.zig");
 const services_language = @import("services/language.zig");
 const services_recovery = @import("services/recovery.zig");
+const services_save = @import("services/save.zig");
 const services_search = @import("services/search.zig");
 const symbol_hover = @import("services/symbol_hover.zig");
+const terminal_tasks = @import("services/tasks.zig");
 const settings_model = @import("settings/model.zig");
 const settings_view = @import("settings/view.zig");
 const model = @import("shell.zig");
@@ -53,12 +56,17 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
     self.window = window;
     if ((try cx.app.window(window)).surface) |surface| self.system_dark = surface.systemDark();
     if (self.settings == null) try self.loadSettings(cx, null);
+    self.settings_app = cx.app;
+    cx.update(self.settings.?, settings_model.Settings.loadProject, .{self.workspace.root_path}) catch |err| try self.reportError(err);
+    const ignored = try cx.read(self.settings.?, settings_model.Settings.ignoredProjectKeys, .{self.workspace.root_path});
+    if (ignored > 0) try services_save.reportIgnored(self, ignored);
     _ = try cx.observe(self.settings.?, Shell.onSettings);
     try self.onSettings(cx, self.settings.?);
     if (self.fields == null) self.fields = try model.Fields.init(cx, self.allocator);
     try self.styleInputs(cx);
     try project_index.start(self, cx);
     try services_git.start(self, cx, .refresh);
+    if (!builtin.is_test) self.captureTerminalEnvironment(cx) catch {};
     try cx.app.watchExternal(cx.owner, Shell.pollLanguage);
     cx.notify();
 }
@@ -254,6 +262,10 @@ pub fn newFile(self: *Shell) !void {
     self.editor_focus_request +%= 1;
 }
 
+pub fn activeDocument(self: *Shell) ?ws.DocumentId {
+    return (active(self) catch return null).id;
+}
+
 pub fn active(self: *Shell) !struct { id: ws.DocumentId, editor: *editing.Editor } {
     const pane_index: usize = if (self.active_pane == .secondary) 1 else 0;
     if (self.currentTool(@intCast(pane_index)) == .search) {
@@ -317,6 +329,8 @@ fn closeTab(self: *Shell, cx: *ui.Context(Shell), index: usize, decision: ws.Clo
 pub fn finishCloseTab(self: *Shell, index: usize) !void {
     const id = self.tabs.items[index].document;
     if (!try self.workspace.close(id, .discard)) return;
+    services_save.cancelDelay(self, id);
+    _ = services_language.cancelFormatting(self, id);
     self.git.editing.remove(id);
     self.search.editing.remove(id);
     if (self.git.editable) |*projection| projection.removeSource(id) catch {};
@@ -350,7 +364,7 @@ pub fn finishCloseTab(self: *Shell, index: usize) !void {
     self.pending = null;
 }
 
-fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
+pub fn finishPending(self: *Shell, cx: *ui.Context(Shell)) !void {
     if (self.pending) |pending| switch (pending) {
         .tab => |i| try closeTab(self, cx, i, .if_clean),
         .window => {
@@ -377,6 +391,7 @@ fn applyEditorOutcome(self: *Shell, cx: *ui.Context(Shell), id: ws.DocumentId, p
     } else if (outcome.history_reset) |reset| self.publishDocumentReset(id, if (reset.action == .undo) .undo else .redo, reset.before);
     if (outcome.change == null and !outcome.reset) return;
     defer cx.notify();
+    if (origin != .external_reload and !std.meta.eql(self.saving_document, @as(?ws.DocumentId, id))) try services_save.changed(self, cx, id);
     if (origin == .external_reload) {
         services_language.cancelCompletion(self, id);
     } else if (!refreshing_completion) self.language.clearCompletion();
@@ -456,6 +471,8 @@ pub fn editorInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell),
 }
 
 pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui.Event(ui.Input)) !void {
+    const previous = activeDocument(self);
+    defer services_save.focusChanged(self, cx, previous) catch |err| self.reportError(err) catch {};
     if (which != .complete) self.language.clearCompletion();
     if (try search_editing.command(self, cx, which)) return;
     if (try git_editing.command(self, cx, which)) return;
@@ -547,7 +564,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .recent_projects, .language_picker, .language_servers, .editor_options => try workspace_controls.open(self, cx, which),
         .stop_language_servers => {
             self.language_stopped = true;
-            self.language.deinit(self.allocator);
+            try services_language.reset(self, cx);
         },
         .layout_classic => {
             self.agent_mode = false;
@@ -620,7 +637,11 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
                 if (cx.app.raiseWindow(handle)) |_| return else |err| if (err != error.WindowNotFound) return err;
             }
             const View = settings_view.View;
-            const handle = try cx.app.openChildWindow(self.window.?, View, .{ .title = "Zircon Settings", .chrome = .integrated, .width = 1000, .height = 700 }, .{ .allocator = self.allocator, .settings = self.settings.?, .workspace = cx.owner, .initial_colors = self.colors, .initial_follows_system = self.follows_system });
+            const root = try self.allocator.dupe(u8, self.workspace.root_path);
+            const handle = cx.app.openChildWindow(self.window.?, View, .{ .title = "Zircon Settings", .chrome = .integrated, .width = 1000, .height = 700 }, .{ .allocator = self.allocator, .settings = self.settings.?, .workspace = cx.owner, .project_root = root, .initial_colors = self.colors, .initial_follows_system = self.follows_system }) catch |err| {
+                self.allocator.free(root);
+                return err;
+            };
             self.settings_window = handle;
             try cx.app.update(try cx.app.windowEntity(View, handle), View.bootstrap, .{handle});
         },
@@ -628,13 +649,17 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .open_path => try overlays.show(self, cx, .open_path),
         .quick_open => try overlays.show(self, cx, .quick_open),
         .palette => try overlays.show(self, cx, .palette),
-        .find => try buffer_find.open(self, cx, false),
+        .run_task => try terminal_tasks.show(self, cx),
+        .rerun_last_task => try terminal_tasks.rerunLast(self, cx),
+        .find => if (terminal_module.hasFocus(self, cx)) {
+            try terminal_module.openSearch(self, cx);
+        } else try buffer_find.open(self, cx, false),
         .replace => try buffer_find.open(self, cx, true),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
         .split_menu => self.split_menu_open = !self.split_menu_open,
         .restart_language_servers => {
             self.language_stopped = false;
-            self.language.deinit(self.allocator);
+            try services_language.reset(self, cx);
         },
         .extension_search => try catalog.search(self, cx),
         .install_language_support => try catalog.recommend(self, cx),
@@ -721,12 +746,9 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         },
         .save => {
             const index = try saveTarget(self);
-            const record = try self.workspace.getConst(self.tabs.items[index].document);
-            if (record.path == null) try overlays.show(self, cx, .save_as) else {
-                try self.workspace.save(self.tabs.items[index].document, null);
-                historyBoundary(self, self.tabs.items[index].document);
-                try self.setStatus(try self.allocator.dupe(u8, "Saved"));
-            }
+            const id = self.tabs.items[index].document;
+            const record = try self.workspace.getConst(id);
+            if (record.path == null) try overlays.show(self, cx, .save_as) else try services_save.saveDocument(self, cx, id, .{});
         },
         .save_as => try overlays.show(self, cx, .save_as),
         .close_tab => {
@@ -775,7 +797,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             if (self.pending != null and self.pending.? == .window) {
                 for (self.git.editing.views.items) |view| {
                     const record = try self.workspace.getConst(view.document);
-                    if (record.path != null and record.dirty()) try self.workspace.save(view.document, null);
+                    if (record.path != null and record.dirty()) try services_save.saveNow(self, cx, view.document, null, .{ .quiet = true });
                 }
                 if (firstDirtyDocument(self) == null) {
                     try finishPending(self, cx);
@@ -785,11 +807,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             const index = try saveTarget(self);
             const id = self.tabs.items[index].document;
             const record = try self.workspace.getConst(id);
-            if (record.path == null) try overlays.show(self, cx, .save_as) else {
-                try self.workspace.save(id, null);
-                historyBoundary(self, id);
-                try finishPending(self, cx);
-            }
+            if (record.path == null) try overlays.show(self, cx, .save_as) else try services_save.saveDocument(self, cx, id, .{ .finish_pending = true });
         },
         .submit_path => {
             const bytes = try field_input.read(cx, self.fields.?.workspace.path, self.allocator);
@@ -804,27 +822,34 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
             } else {
                 const index = try saveTarget(self);
                 const id = self.tabs.items[index].document;
-                try self.workspace.save(id, path);
-                historyBoundary(self, id);
+                try services_save.saveNow(self, cx, id, path, .{});
                 const record = try self.workspace.getConst(id);
                 var snapshot = record.doc.snapshot();
                 defer snapshot.deinit();
                 for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {
-                    self.configureEditor(&tab.editor, record.path.?);
+                    self.configureDocumentEditor(&tab.editor, id, record.path.?);
                     tab.editor.synchronize(snapshot);
                     if (tab.secondary_state) |*state| {
-                        self.configureEditor(state, record.path.?);
+                        self.configureDocumentEditor(state, id, record.path.?);
                         state.synchronize(snapshot);
                     }
                 };
                 if (self.secondary) |*pane| if (std.meta.eql(pane.document, id)) {
-                    self.configureEditor(&pane.editor, record.path.?);
+                    self.configureDocumentEditor(&pane.editor, id, record.path.?);
                     pane.editor.synchronize(snapshot);
                 };
                 for (self.git.editing.views.items) |*view| if (std.meta.eql(view.document, id)) {
-                    self.configureEditor(&view.editor, record.path.?);
+                    self.configureDocumentEditor(&view.editor, id, record.path.?);
+                    view.editor.show_fold_controls = false;
+                    view.editor.show_git_gutters = false;
                     view.editor.synchronize(snapshot);
                 };
+                for (&self.search.editing.panes) |*pane| for (pane.views.items) |*view| if (std.meta.eql(view.document, id)) {
+                    self.configureDocumentEditor(&view.editor, id, record.path.?);
+                    search_editing.configureProjection(&view.editor);
+                    view.editor.synchronize(snapshot);
+                };
+                search_editing.refreshMetrics(self);
                 try services_language.invalidateDocument(self, id);
                 self.overlay = .none;
                 try finishPending(self, cx);
@@ -853,7 +878,7 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .zoom_in, .zoom_out => {
             const current = try active(self);
             current.editor.font_size = std.math.clamp(current.editor.font_size + @as(f32, if (which == .zoom_in) 1 else -1), 10, 26);
-            current.editor.line_height = current.editor.font_size + 8;
+            current.editor.line_height = current.editor.font_size * self.bufferSettings(self.documentLanguage(current.id)).line_height;
         },
     }
     _ = event;
@@ -897,9 +922,15 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         }
     }
     if (try workspace_controls.input(self, e, cx)) return;
-    if (self.popup == .none and self.overlay == .none and self.terminal.visible and self.terminal.focused and e.data == .key_down) {
+    if (self.popup == .none and self.overlay == .none and e.data == .key_down and terminal_module.hasFocus(self, cx)) {
         const key = e.data.key_down;
-        if (!key.modifiers.command or key.key == .v or key.key == .c or key.key == .a) return;
+        if (key.modifiers.command and key.key == .f) {
+            try terminal_module.openSearch(self, cx);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+        if (!key.modifiers.command or key.key == .v or key.key == .c or key.key == .a or key.key == .k) return;
         if (key.modifiers.command and key.key == .w) {
             try terminal_module.closeActive(self, cx);
             e.preventDefault();
@@ -909,6 +940,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
     }
     editor_git.dismissOutside(self, cx, e);
     if (e.data == .focus and !e.data.focus) {
+        try services_save.windowBlurred(self, cx);
         self.dragging = .none;
         git_selection.cancel(self);
         search_selection.cancel(self);
@@ -984,7 +1016,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
                 .project_search => .run_project_search,
                 else => .dismiss,
             };
-            if (self.overlay == .palette or self.overlay == .quick_open) try overlays.activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
+            if (self.overlay == .palette or self.overlay == .quick_open or self.overlay == .task_picker) try overlays.activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
             if (self.vim_find_pending and self.overlay == .find) {
                 self.vim_find_pending = false;
                 self.overlay = .none;
@@ -995,7 +1027,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
             cx.notify();
             return;
         }
-        if ((key.key == .down or key.key == .up) and (self.overlay == .palette or self.overlay == .quick_open)) {
+        if ((key.key == .down or key.key == .up) and (self.overlay == .palette or self.overlay == .quick_open or self.overlay == .task_picker)) {
             const count = try overlays.filteredCount(self, cx);
             if (count > 0) self.overlay_index = if (key.key == .down) (self.overlay_index + 1) % count else (self.overlay_index + count - 1) % count;
             e.preventDefault();
@@ -1042,7 +1074,7 @@ pub fn drag(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell), kind: 
     cx.notify();
 }
 
-fn historyBoundary(self: *Shell, id: ws.DocumentId) void {
+pub fn historyBoundary(self: *Shell, id: ws.DocumentId) void {
     const record = self.workspace.get(id) catch return;
     record.doc.breakHistoryGroup();
     for (self.tabs.items) |*tab| if (std.meta.eql(tab.document, id)) {

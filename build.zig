@@ -24,8 +24,10 @@ pub fn build(b: *std.Build) void {
     const agent_verify_run = b.addRunArtifact(agent_verify);
 
     b.step("verify-agent-connections", "Initialize installed Codex/OpenCode without model prompts").dependOn(&agent_verify_run.step);
+    const terminal_module = b.dependency("zircon_terminal", .{ .target = target, .optimize = optimize }).module("zircon_terminal");
     const language_module = b.dependency("zircon_language", .{ .target = target, .optimize = optimize }).module("zircon_language");
     const markdown_module = b.dependency("zircon_markdown", .{ .target = target, .optimize = optimize }).module("zircon_markdown");
+    const smoke = b.step("test", "Test UI entities and the terminal engine");
     var feature_tests: std.ArrayList(*std.Build.Step.Compile) = .empty;
     var feature_runs: std.ArrayList(*std.Build.Step.Run) = .empty;
     for ([_]struct { name: []const u8, module: *std.Build.Module }{
@@ -35,6 +37,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zircon_extensions", .module = extension_module },
         .{ .name = "zircon_search", .module = search_module },
         .{ .name = "zircon_language", .module = language_module },
+        .{ .name = "zircon_terminal", .module = terminal_module },
         .{ .name = "zircon_agent", .module = agent_module },
         .{ .name = "zircon_markdown", .module = markdown_module },
     }) |feature| {
@@ -50,6 +53,7 @@ pub fn build(b: *std.Build) void {
         const artifact = b.addTest(.{ .root_module = test_module });
         const execute = b.addRunArtifact(artifact);
         b.step(b.fmt("test-{s}", .{feature.name[7..]}), b.fmt("Test {s} package", .{feature.name})).dependOn(&execute.step);
+        if (std.mem.eql(u8, feature.name, "zircon_terminal")) smoke.dependOn(&execute.step);
         feature_tests.append(b.allocator, artifact) catch @panic("OOM");
         feature_runs.append(b.allocator, execute) catch @panic("OOM");
     }
@@ -65,7 +69,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("apps/zircon/src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{ .{ .name = "zircon_widgets", .module = widgets_module }, .{ .name = "zircon_git_ui", .module = git_ui_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
+        .imports = &.{ .{ .name = "zircon_widgets", .module = widgets_module }, .{ .name = "zircon_git_ui", .module = git_ui_module }, .{ .name = "zircon_ui", .module = module }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = editor_module }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_terminal", .module = terminal_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
     });
     const app_tests = b.addTest(.{ .filters = test_filters, .root_module = b.createModule(.{
         .root_source_file = b.path("apps/zircon/tests/all.zig"),
@@ -116,7 +120,7 @@ pub fn build(b: *std.Build) void {
     portable_compile.dependOn(&editor_tests.step);
     portable_compile.dependOn(&app_tests.step);
     const run = b.addRunArtifact(tests);
-    b.step("test", "Test entity lifetimes and borrowing without native dependencies").dependOn(&run.step);
+    smoke.dependOn(&run.step);
     const example = b.addExecutable(.{ .name = "counter-tree", .root_module = b.createModule(.{
         .root_source_file = b.path("examples/counter/main.zig"),
         .target = target,
@@ -160,7 +164,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("apps/zircon/src/root.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{ .{ .name = "zircon_widgets", .module = native_widgets }, .{ .name = "zircon_git_ui", .module = native_git_ui }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
+            .imports = &.{ .{ .name = "zircon_widgets", .module = native_widgets }, .{ .name = "zircon_git_ui", .module = native_git_ui }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_text", .module = text_module }, .{ .name = "zircon_workspace", .module = workspace_module }, .{ .name = "zircon_multibuffer", .module = multibuffer_module }, .{ .name = "zircon_editor", .module = native_editor }, .{ .name = "zircon_git", .module = git_module }, .{ .name = "zircon_extensions", .module = extension_module }, .{ .name = "zircon_search", .module = search_module }, .{ .name = "zircon_language", .module = language_module }, .{ .name = "zircon_terminal", .module = terminal_module }, .{ .name = "zircon_markdown", .module = markdown_module }, .{ .name = "zircon_agent", .module = agent_module } },
         });
         const editor_bench = b.addExecutable(.{ .name = "zircon-editor-bench", .root_module = b.createModule(.{ .root_source_file = b.path("tools/bench_editor.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui }, .{ .name = "zircon_git", .module = git_module } } }) });
         const recovery_journey = b.addExecutable(.{ .name = "zircon-recovery-journey", .root_module = b.createModule(.{ .root_source_file = b.path("tools/verify_recovery.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "zircon", .module = native_app }, .{ .name = "zircon_ui", .module = native_ui } } }) });
