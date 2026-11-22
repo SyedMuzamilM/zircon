@@ -29,6 +29,11 @@ pub const BufferSettings = struct {
 
 pub const Values = struct {
     terminal_dock: TerminalDock = .bottom,
+    terminal_font_size: f32 = 0,
+    terminal_max_scroll_history: u32 = 10_000,
+    terminal_option_as_meta: bool = false,
+    terminal_copy_on_select: bool = false,
+    terminal_shell: []const u8 = "",
     panel_layout: PanelLayout = .classic,
     key_bindings: key_bindings_module.Overrides = .{},
     vim_mode: bool = false,
@@ -72,6 +77,11 @@ pub const Values = struct {
 };
 pub const Patch = union(enum) {
     terminal_dock: TerminalDock,
+    terminal_font_size: f32,
+    terminal_max_scroll_history: u32,
+    terminal_option_as_meta: bool,
+    terminal_copy_on_select: bool,
+    terminal_shell: []const u8,
     panel_layout: PanelLayout,
     indent_guides: bool,
     active_line: bool,
@@ -254,9 +264,9 @@ pub const Store = struct {
         };
         const value: std.json.Value = switch (patch) {
             .editor_font_name, .interface_font_name => |font| .{ .string = try arena.dupe(u8, font.slice()) },
-            .font_size, .ui_font_size, .line_height, .project_panel_width, .project_entry_spacing, .tooltip_delay => |n| .{ .float = n },
-            .tab_width, .autosave_delay_ms => |n| .{ .integer = n },
-            .vim_mode, .cursor_blink, .smooth_cursor, .reduced_motion, .line_numbers, .git_gutters, .git_inline_blame, .font_ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save => |b| .{ .bool = b },
+            .font_size, .ui_font_size, .line_height, .terminal_font_size, .project_panel_width, .project_entry_spacing, .tooltip_delay => |n| .{ .float = n },
+            .tab_width, .autosave_delay_ms, .terminal_max_scroll_history => |n| .{ .integer = n },
+            .vim_mode, .cursor_blink, .smooth_cursor, .reduced_motion, .line_numbers, .git_gutters, .git_inline_blame, .font_ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .agent_editor, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save, .terminal_option_as_meta, .terminal_copy_on_select => |b| .{ .bool = b },
             .terminal_dock => |mode| .{ .string = @tagName(mode) },
             .panel_layout => |mode| .{ .string = @tagName(mode) },
             .soft_wrap => |mode| .{ .string = @tagName(mode) },
@@ -265,7 +275,7 @@ pub const Store = struct {
             .cursor_shape => |shape| .{ .string = @tagName(shape) },
             .font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
             .ui_font_family => |font| .{ .string = try arena.dupe(u8, @tagName(font)) },
-            .theme, .icon_theme => |s| .{ .string = try arena.dupe(u8, s) },
+            .theme, .icon_theme, .terminal_shell => |s| .{ .string = try arena.dupe(u8, s) },
         };
         try next.value.object.put(arena, key, value);
         try self.publish(scope, next);
@@ -414,7 +424,8 @@ fn parseFile(a: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, path: []const u8
 fn read(value: std.json.Value) Values {
     var result: Values = .{};
     if (value != .object) return result;
-    inline for (.{ "font_size", "ui_font_size", "project_panel_width", "project_entry_spacing", "tooltip_delay" }) |key| if (value.object.get(key)) |v| {
+    if (value.object.get("terminal_max_scroll_history")) |v| result.terminal_max_scroll_history = @intCast(v.integer);
+    inline for (.{ "font_size", "ui_font_size", "terminal_font_size", "project_panel_width", "project_entry_spacing", "tooltip_delay" }) |key| if (value.object.get(key)) |v| {
         @field(result, key) = number(v) orelse @field(result, key);
     };
     if (value.object.get("font_family")) |v| {
@@ -429,10 +440,10 @@ fn read(value: std.json.Value) Values {
     if (value.object.get("panel_layout")) |v| result.panel_layout = parseEnum(PanelLayout, v) orelse .classic;
     readBufferFields(&result, value.object, .user);
     if (value.object.get("cursor_shape")) |v| result.cursor_shape = parseEnum(zircon_editor.cursor.Shape, v) orelse .bar;
-    inline for (.{ "vim_mode", "cursor_blink", "smooth_cursor", "reduced_motion", "git_gutters", "git_inline_blame", "font_ligatures", "active_line", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| {
+    inline for (.{ "vim_mode", "cursor_blink", "smooth_cursor", "reduced_motion", "git_gutters", "git_inline_blame", "font_ligatures", "active_line", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor", "terminal_option_as_meta", "terminal_copy_on_select" }) |key| if (value.object.get(key)) |v| {
         if (v == .bool) @field(result, key) = v.bool;
     };
-    inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
+    inline for (.{ "theme", "icon_theme", "terminal_shell" }) |key| if (value.object.get(key)) |v| {
         if (v == .string) @field(result, key) = v.string;
     };
     if (value.object.get("key_bindings")) |v| result.key_bindings = key_bindings_module.parse(v) catch unreachable;
@@ -490,10 +501,20 @@ fn validate(value: std.json.Value) !void {
         _ = try typography.FontName.init(v.string);
     } else return error.InvalidSettings;
     if (value.object.get("cursor_shape")) |v| if (parseEnum(zircon_editor.cursor.Shape, v) == null) return error.InvalidSettings;
-    inline for (.{ "vim_mode", "cursor_blink", "smooth_cursor", "reduced_motion", "git_gutters", "git_inline_blame", "font_ligatures", "active_line", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
+    inline for (.{ "vim_mode", "cursor_blink", "smooth_cursor", "reduced_motion", "git_gutters", "git_inline_blame", "font_ligatures", "active_line", "project_file_icons", "project_folder_icons", "tooltips", "search_case_sensitive", "search_whole_word", "agent_editor", "terminal_option_as_meta", "terminal_copy_on_select" }) |key| if (value.object.get(key)) |v| if (v != .bool) return error.InvalidSettings;
     inline for (.{ "theme", "icon_theme" }) |key| if (value.object.get(key)) |v| {
         if (v != .string or v.string.len == 0 or v.string.len > 256 or !std.unicode.utf8ValidateSlice(v.string)) return error.InvalidSettings;
     };
+    if (value.object.get("terminal_font_size")) |v| {
+        const size = number(v) orelse return error.InvalidSettings;
+        if (size != 0 and (size < 10 or size > 32)) return error.InvalidSettings;
+    }
+    if (value.object.get("terminal_max_scroll_history")) |v| {
+        if (v != .integer or v.integer < 0 or v.integer > 100_000) return error.InvalidSettings;
+    }
+    if (value.object.get("terminal_shell")) |v| {
+        if (v != .string or v.string.len > 256 or !std.unicode.utf8ValidateSlice(v.string) or std.mem.indexOfScalar(u8, v.string, 0) != null) return error.InvalidSettings;
+    }
     try validateBufferFields(value.object, .user);
     _ = try validateLanguages(value.object, .user);
 }

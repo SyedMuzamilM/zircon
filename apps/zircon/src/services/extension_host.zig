@@ -144,6 +144,7 @@ const Job = struct {
     argv: [][]const u8 = &.{},
     input: ?Input = null,
     stamp: Stamp,
+    environment: [][2][]const u8 = &.{},
     highlight_session: ?*HighlightSession = null,
     pub fn run(self: *Job, cancel: *ui.tasks.Cancellation) !*Box {
         try cancel.check();
@@ -178,7 +179,10 @@ const Job = struct {
     fn perform(self: *Job, cancel: *ui.tasks.Cancellation) !Result {
         if (self.highlight_session) |session| return session.run(self.argv[0], self.argv[2..], self.input.?, cancel);
         if (self.input) |input| return runInput(self.io, self.argv, input, cancel);
-        const output = try std.process.run(a, self.io, .{ .argv = self.argv, .stdout_limit = .limited(64 * 1024 * 1024), .stderr_limit = .limited(64 * 1024), .timeout = .{ .duration = .{ .raw = .fromSeconds(120), .clock = .awake } } });
+        var environment = std.process.Environ.Map.init(a);
+        defer environment.deinit();
+        for (self.environment) |pair| try environment.put(pair[0], pair[1]);
+        const output = try std.process.run(a, self.io, .{ .argv = self.argv, .environ_map = if (self.environment.len != 0) &environment else null, .stdout_limit = .limited(64 * 1024 * 1024), .stderr_limit = .limited(64 * 1024), .timeout = .{ .duration = .{ .raw = .fromSeconds(120), .clock = .awake } } });
         return .{ .stamp = self.stamp, .success = output.term.success(), .stdout = output.stdout, .stderr = output.stderr };
     }
     pub fn discard(_: *Job, result: *Box) void {
@@ -250,6 +254,15 @@ fn spawn(self: *Shell, cx: *ui.Context(Shell), args: []const []const u8, input: 
     job.argv = try owned.alloc([]const u8, args.len + 1);
     job.argv[0] = try owned.dupe(u8, try executable(self));
     for (args, job.argv[1..]) |arg, *dest| dest.* = try owned.dupe(u8, arg);
+    if (args.len > 0 and self.shell_env.entries.len != 0 and
+        (std.mem.eql(u8, args[0], "resolve") or std.mem.eql(u8, args[0], "resolve-builtin")))
+    {
+        job.environment = try owned.alloc([2][]const u8, self.shell_env.entries.len);
+        for (self.shell_env.entries, job.environment) |pair, *target| {
+            target.* = .{ try owned.dupe(u8, pair[0]), try owned.dupe(u8, pair[1]) };
+        }
+    }
+
     if (input) |source| {
         job.input = switch (source) {
             .bytes => |bytes| .{ .bytes = try owned.dupe(u8, bytes) },

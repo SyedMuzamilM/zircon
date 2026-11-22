@@ -12,6 +12,7 @@ const model = @import("../settings/model.zig");
 const shell = @import("../shell.zig");
 const host = @import("extension_host.zig");
 const save = @import("save.zig");
+const shell_env = @import("shell_env.zig");
 const symbol_hover = @import("symbol_hover.zig");
 const workspace_edits = @import("workspace_edits.zig");
 const Shell = shell.Shell;
@@ -248,7 +249,7 @@ fn sessionFor(self: *Shell, cx: *ui.Context(Shell), server: *const zircon_extens
         const argv: []const []const u8 = if (server.zed_wasm) |wasm| &.{ "resolve", wasm, server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" } else &.{ "resolve-builtin", server.zed_server.?, self.workspace.root_path, work, settings_path orelse "" };
         try host.start(self, cx, argv, null, .{ .generation = self.language.generation, .epoch = epoch, .index = index }, resolved);
         next.resolving = true;
-    } else next.client = lsp.Client.start(self.allocator, self.workspace.io, .{ .command = server.command, .args = server.args, .cwd = self.workspace.root_path, .wake = .{ .notify = wake } }) catch |err| blk: {
+    } else next.client = startClient(self, .{ .command = server.command, .args = server.args, .cwd = self.workspace.root_path, .wake = .{ .notify = wake } }) catch |err| blk: {
         try self.reportError(err);
         break :blk null;
     };
@@ -267,7 +268,7 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
         return;
     };
     try pollSyntax(self, cx);
-    if (self.language_stopped) {
+    if (self.language_stopped or self.shell_env.busy) {
         try expireFormatting(self, cx);
         if (try syncDiagnostics(self)) cx.notify();
         return;
@@ -1070,12 +1071,22 @@ fn resolved(self: *Shell, cx: *ui.Context(Shell), raw: anyerror!*host.Box) !void
     const Resolved = struct { command: []const u8, args: []const []const u8, cwd: []const u8, env: []const [2][]const u8 = &.{}, initialization_options: std.json.Value = .null, workspace_configuration: std.json.Value = .null };
     var parsed = try std.json.parseFromSlice(Resolved, self.allocator, result.stdout, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
-    session.client = lsp.Client.start(self.allocator, self.workspace.io, .{ .command = parsed.value.command, .args = parsed.value.args, .cwd = parsed.value.cwd, .root_path = self.workspace.root_path, .environment = parsed.value.env, .initialization_options = parsed.value.initialization_options, .workspace_configuration = parsed.value.workspace_configuration, .wake = .{ .notify = wake } }) catch |err| {
+    session.client = startClient(self, .{ .command = parsed.value.command, .args = parsed.value.args, .cwd = parsed.value.cwd, .root_path = self.workspace.root_path, .environment = parsed.value.env, .initialization_options = parsed.value.initialization_options, .workspace_configuration = parsed.value.workspace_configuration, .wake = .{ .notify = wake } }) catch |err| {
         try self.reportError(err);
         cx.notify();
         return;
     };
     cx.notify();
+}
+
+fn startClient(self: *Shell, requested: lsp.Config) !*lsp.Client {
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var config = requested;
+    config.environment = try std.mem.concat(a, [2][]const u8, &.{ self.shell_env.entries, requested.environment });
+    config.command = try shell_env.executable(a, self.workspace.io, config.cwd, config.command, config.environment);
+    return lsp.Client.start(self.allocator, self.workspace.io, config);
 }
 
 fn pollSyntax(self: *Shell, cx: *ui.Context(Shell)) !void {

@@ -6,6 +6,8 @@ const builtin = @import("builtin");
 pub const ShellOptions = struct {
     command: ?[]const u8 = null,
     args: []const []const u8 = &.{"-l"},
+    extra_env: []const [2][]const u8 = &.{},
+    max_history: usize = 10_000,
 };
 
 pub const WakeFn = *const fn () void;
@@ -105,24 +107,35 @@ pub const Pty = struct {
         const cwd = try temp.dupeSentinel(u8, root, 0);
         const fallback = if (builtin.os.tag == .macos) "/bin/zsh" else "/bin/sh";
         const command = options.command orelse if (c.getenv("SHELL")) |path| std.mem.span(path) else fallback;
-        const shell_path = try temp.dupeSentinel(u8, command, 0);
-        const argv = try temp.allocSentinel(?[*:0]const u8, options.args.len + 1, null);
-        argv[0] = shell_path;
-        for (options.args, argv[1..]) |arg, *slot| slot.* = try temp.dupeSentinel(u8, arg, 0);
-
-        var env: std.ArrayList(?[*:0]const u8) = .empty;
+        var vars: std.StringHashMapUnmanaged([]const u8) = .empty;
         const inherited = if (builtin.os.tag == .macos) _NSGetEnviron().* else c.environ;
         var i: usize = 0;
         while (inherited[i]) |entry| : (i += 1) {
-            const bytes = std.mem.span(entry);
-            if (!std.mem.startsWith(u8, bytes, "TERM=") and
-                !std.mem.startsWith(u8, bytes, "COLORTERM=") and
-                !std.mem.startsWith(u8, bytes, "TERM_PROGRAM="))
-            {
-                try env.append(temp, entry);
-            }
+            const pair = std.mem.span(entry);
+            const equal = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
+            try vars.put(temp, pair[0..equal], pair[equal + 1 ..]);
         }
-        try env.appendSlice(temp, &.{ "TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=Zircon", null });
+        for (options.extra_env) |pair| {
+            if (pair[0].len == 0 or std.mem.indexOfAny(u8, pair[0], "=\x00") != null or std.mem.indexOfScalar(u8, pair[1], 0) != null) return error.InvalidTerminalEnvironment;
+            try vars.put(temp, pair[0], pair[1]);
+        }
+        try vars.put(temp, "TERM", "xterm-256color");
+        try vars.put(temp, "COLORTERM", "truecolor");
+        try vars.put(temp, "TERM_PROGRAM", "Zircon");
+        try vars.put(temp, "PWD", root);
+        const shell_path = try resolveProgram(temp, root, command, vars.get("PATH") orelse "/usr/bin:/bin");
+        const argv = try temp.allocSentinel(?[*:0]const u8, options.args.len + 1, null);
+        argv[0] = shell_path;
+        for (options.args, argv[1..]) |arg, *slot| {
+            if (std.mem.indexOfScalar(u8, arg, 0) != null) return error.InvalidTerminalCommand;
+            slot.* = try temp.dupeSentinel(u8, arg, 0);
+        }
+        const env = try temp.allocSentinel(?[*:0]const u8, vars.count(), null);
+        var entries = vars.iterator();
+        var index: usize = 0;
+        while (entries.next()) |entry| : (index += 1) {
+            env[index] = try std.fmt.allocPrintSentinel(temp, "{s}={s}", .{ entry.key_ptr.*, entry.value_ptr.* }, 0);
+        }
 
         var control: [2]c_int = undefined;
         if (c.pipe(&control) != 0) return error.TerminalOpenFailed;
@@ -148,13 +161,13 @@ pub const Pty = struct {
             _ = c.close(master);
             for (control) |fd| _ = c.close(fd);
             if (c.setsid() < 0 or ioctl(slave, set_controlling_tty, @as(c_int, 0)) < 0) c._exit(126);
-            for (0..3) |index| {
-                const fd: c_int = @intCast(index);
+            for (0..3) |stdio_index| {
+                const fd: c_int = @intCast(stdio_index);
                 if (c.dup2(slave, fd) < 0 or c.fcntl(fd, c.F.SETFD, @as(c_int, 0)) < 0) c._exit(126);
             }
             if (slave > 2) _ = c.close(slave);
             if (c.chdir(cwd) != 0) c._exit(126);
-            _ = c.execve(shell_path, argv.ptr, @ptrCast(env.items.ptr));
+            _ = c.execve(shell_path, argv.ptr, env.ptr);
             c._exit(127);
         }
         errdefer terminate(pid);
@@ -287,6 +300,25 @@ pub const Pty = struct {
         }
     }
 };
+
+fn resolveProgram(a: std.mem.Allocator, root: []const u8, command: []const u8, path: []const u8) ![:0]const u8 {
+    if (command.len == 0 or std.mem.indexOfScalar(u8, command, 0) != null) return error.InvalidTerminalCommand;
+    if (std.fs.path.isAbsolute(command)) return a.dupeSentinel(u8, command, 0);
+    if (std.mem.indexOfScalar(u8, command, '/') != null) {
+        const resolved = try std.fs.path.resolve(a, &.{ root, command });
+        return a.dupeSentinel(u8, resolved, 0);
+    }
+    var dirs = std.mem.splitScalar(u8, path, ':');
+    while (dirs.next()) |dir| {
+        const resolved = if (std.fs.path.isAbsolute(dir))
+            try std.fs.path.resolve(a, &.{ dir, command })
+        else
+            try std.fs.path.resolve(a, &.{ root, dir, command });
+        const candidate = try a.dupeSentinel(u8, resolved, 0);
+        if (c.access(candidate, c.X_OK) == 0) return candidate;
+    }
+    return error.TerminalCommandNotFound;
+}
 
 fn windowSize(cols: usize, rows: usize) Winsize {
     return .{ .row = @intCast(std.math.clamp(rows, 1, std.math.maxInt(u16))), .col = @intCast(std.math.clamp(cols, 1, std.math.maxInt(u16))) };

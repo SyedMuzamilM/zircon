@@ -26,8 +26,18 @@ const Category = enum {
     version_control,
     languages,
     accessibility,
+    terminal,
 };
 const Change = enum {
+    terminal_bottom,
+    terminal_right,
+    terminal_font_auto,
+    terminal_font_down,
+    terminal_font_up,
+    terminal_history_down,
+    terminal_history_up,
+    terminal_option_as_meta,
+    terminal_copy_on_select,
     format_on_save,
     remove_trailing_whitespace_on_save,
     ensure_final_newline_on_save,
@@ -123,6 +133,11 @@ const Row = enum {
     ensure_final_newline_on_save,
     autosave,
     autosave_delay_ms,
+    terminal_dock,
+    terminal_font_size,
+    terminal_max_scroll_history,
+    terminal_option_as_meta,
+    terminal_copy_on_select,
 };
 const row_height: f32 = 88;
 pub const View = struct {
@@ -527,6 +542,15 @@ pub const View = struct {
         const root = if (self.scope == .project) self.project_root else null;
         try cx.read(self.settings, model.Settings.copyResolved, .{ root, arena.allocator(), &values });
         try self.apply(cx, switch (which) {
+            .terminal_bottom => .{ .terminal_dock = .bottom },
+            .terminal_right => .{ .terminal_dock = .right },
+            .terminal_font_auto => .{ .terminal_font_size = 0 },
+            .terminal_font_down => .{ .terminal_font_size = @max(10, (if (values.terminal_font_size == 0) values.font_size else values.terminal_font_size) - 1) },
+            .terminal_font_up => .{ .terminal_font_size = @min(32, (if (values.terminal_font_size == 0) values.font_size else values.terminal_font_size) + 1) },
+            .terminal_history_down => .{ .terminal_max_scroll_history = values.terminal_max_scroll_history -| 1000 },
+            .terminal_history_up => .{ .terminal_max_scroll_history = @min(100_000, values.terminal_max_scroll_history + 1000) },
+            .terminal_option_as_meta => .{ .terminal_option_as_meta = !values.terminal_option_as_meta },
+            .terminal_copy_on_select => .{ .terminal_copy_on_select = !values.terminal_copy_on_select },
             .format_on_save => .{ .format_on_save = if (values.format_on_save == .on) .off else .on },
             .remove_trailing_whitespace_on_save => .{ .remove_trailing_whitespace_on_save = !values.remove_trailing_whitespace_on_save },
             .ensure_final_newline_on_save => .{ .ensure_final_newline_on_save = !values.ensure_final_newline_on_save },
@@ -587,6 +611,7 @@ pub const View = struct {
 };
 fn categoryName(category: Category) []const u8 {
     return switch (category) {
+        .terminal => "Terminal",
         .general => "General",
         .appearance => "Appearance",
         .editor => "Editor",
@@ -636,6 +661,7 @@ fn scopeButton(self: *const View, b: *ui.Ui, c: v.Palette, scope: model.Scope, l
 fn contains(category: Category, row: Row) bool {
     if (category == .general) return true;
     return switch (row) {
+        .terminal_dock, .terminal_font_size, .terminal_max_scroll_history, .terminal_option_as_meta, .terminal_copy_on_select => category == .terminal,
         .theme, .icons => category == .appearance,
         .font_family, .font, .ui_font_family, .ui_font_size, .line_height, .ligatures => category == .appearance or category == .typography or category == .editor,
         .wrap, .tabs, .cursor_shape, .cursor_blink, .smooth_cursor, .format_on_save, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save, .autosave, .autosave_delay_ms => category == .editor,
@@ -651,6 +677,11 @@ fn contains(category: Category, row: Row) bool {
 
 fn rowSearch(row: Row) []const u8 {
     return switch (row) {
+        .terminal_dock => "Terminal dock",
+        .terminal_font_size => "Terminal font size",
+        .terminal_max_scroll_history => "Terminal scrollback",
+        .terminal_option_as_meta => "Option as Meta",
+        .terminal_copy_on_select => "Copy terminal selection",
         .format_on_save => "Format on save language server",
         .remove_trailing_whitespace_on_save => "Remove trailing whitespace on save",
         .ensure_final_newline_on_save => "Ensure final newline on save",
@@ -706,6 +737,11 @@ fn changeButton(b: *ui.Ui, c: v.Palette, change: Change, label: []const u8) !ui.
 
 fn settingRow(b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snapshot, row: Row, reset: bool) !ui.Element {
     const title: []const u8 = switch (row) {
+        .terminal_dock => "Terminal dock",
+        .terminal_font_size => "Terminal font size",
+        .terminal_max_scroll_history => "Terminal scrollback",
+        .terminal_option_as_meta => "Option as Meta",
+        .terminal_copy_on_select => "Copy terminal selection",
         .format_on_save => "Format on save",
         .remove_trailing_whitespace_on_save => "Remove trailing whitespace",
         .ensure_final_newline_on_save => "Ensure final newline",
@@ -744,6 +780,11 @@ fn settingRow(b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snap
         .languages_manager => "Language support",
     };
     const help: []const u8 = switch (row) {
+        .terminal_dock => "Choose where the terminal opens.",
+        .terminal_font_size => "Use the editor font size or set a separate size.",
+        .terminal_max_scroll_history => "Set the number of lines kept in new terminal sessions.",
+        .terminal_option_as_meta => "Send Meta shortcuts when holding Option.",
+        .terminal_copy_on_select => "Copy text to the clipboard when you finish selecting it.",
         .format_on_save => "Use the language server formatter when saving.",
         .remove_trailing_whitespace_on_save => "Remove trailing spaces and tabs when saving.",
         .ensure_final_newline_on_save => "End non-empty files with a newline when saving.",
@@ -783,6 +824,36 @@ fn settingRow(b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snap
     };
     var controls: std.ArrayList(ui.Element) = .empty;
     switch (row) {
+        .terminal_dock => {
+            inline for (.{ .{ Change.terminal_bottom, "Bottom", @as(model.TerminalDock, .bottom) }, .{ Change.terminal_right, "Right", @as(model.TerminalDock, .right) } }) |item| {
+                try controls.append(b.allocator(), try b.fluent().button(.{ .label = item[1] })
+                    .style(choiceStyle(c))
+                    .background(if (values.terminal_dock == item[2]) c.selected else c.sidebar)
+                    .on_click(b.onClickWith(View.change, item[0]))
+                    .build());
+            }
+        },
+        .terminal_font_size => {
+            const effective_size = if (values.terminal_font_size == 0) values.font_size else values.terminal_font_size;
+            const size = try std.fmt.allocPrint(b.allocator(), "{d:.0}", .{effective_size});
+            try controls.appendSlice(b.allocator(), &.{
+                try b.fluent().button(.{ .label = "Auto" })
+                    .style(choiceStyle(c))
+                    .background(if (values.terminal_font_size == 0) c.selected else c.sidebar)
+                    .on_click(b.onClickWith(View.change, Change.terminal_font_auto))
+                    .build(),
+                try changeButton(b, c, .terminal_font_down, "−"),
+                try v.text(b, size, c.text, 13),
+                try changeButton(b, c, .terminal_font_up, "+"),
+            });
+        },
+        .terminal_max_scroll_history => {
+            try controls.appendSlice(b.allocator(), &.{
+                try changeButton(b, c, .terminal_history_down, "−"),
+                try v.text(b, try std.fmt.allocPrint(b.allocator(), "{d}", .{values.terminal_max_scroll_history}), c.text, 13),
+                try changeButton(b, c, .terminal_history_up, "+"),
+            });
+        },
         .autosave => {
             const modes = .{
                 .{ model.Autosave.off, Change.autosave_off, "Off" },
@@ -916,8 +987,10 @@ fn settingRow(b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snap
                 }).style(style).on_click(b.onClickWith(View.change, choice[0])).build());
             }
         },
-        .wrap, .vim, .cursor_blink, .smooth_cursor, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .format_on_save, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save => {
+        .wrap, .vim, .cursor_blink, .smooth_cursor, .numbers, .gutters, .blame, .motion, .ligatures, .indent_guides, .active_line, .fold_controls, .project_file_icons, .project_folder_icons, .tooltips, .search_case_sensitive, .search_whole_word, .format_on_save, .remove_trailing_whitespace_on_save, .ensure_final_newline_on_save, .terminal_option_as_meta, .terminal_copy_on_select => {
             const enabled = switch (row) {
+                .terminal_option_as_meta => values.terminal_option_as_meta,
+                .terminal_copy_on_select => values.terminal_copy_on_select,
                 .format_on_save => values.format_on_save == .on,
                 .remove_trailing_whitespace_on_save => values.remove_trailing_whitespace_on_save,
                 .ensure_final_newline_on_save => values.ensure_final_newline_on_save,
@@ -940,6 +1013,8 @@ fn settingRow(b: *ui.Ui, c: v.Palette, values: model.Values, snapshot: ?ext.Snap
                 else => values.reduced_motion,
             };
             const change: Change = switch (row) {
+                .terminal_option_as_meta => .terminal_option_as_meta,
+                .terminal_copy_on_select => .terminal_copy_on_select,
                 .format_on_save => .format_on_save,
                 .remove_trailing_whitespace_on_save => .remove_trailing_whitespace_on_save,
                 .ensure_final_newline_on_save => .ensure_final_newline_on_save,

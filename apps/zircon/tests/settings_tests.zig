@@ -764,3 +764,33 @@ test "settings project scope cannot follow links outside the workspace" {
     try t.expectError(error.NotRegularFile, store.ensureScopeFile(.project));
     try t.expectEqual(4, store.values().tab_width);
 }
+
+test "terminal settings persist in User scope and reject project overrides" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(t.io, ".zircon");
+    try tmp.dir.writeFile(t.io, .{ .sub_path = ".zircon/settings.json", .data = "{\"terminal_shell\":\"/other/sh\",\"terminal_option_as_meta\":true}" });
+    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
+    defer t.allocator.free(root);
+    const path = try std.fs.path.resolve(t.allocator, &.{ root, "settings.json" });
+    defer t.allocator.free(path);
+    var store = try zircon.SettingsStore.init(t.allocator, t.io, path);
+    defer store.deinit();
+    try store.setProjectRoot(root);
+    try t.expectEqual(2, store.ignored_project_keys);
+    try t.expect(!store.values().terminal_option_as_meta);
+    try t.expectError(error.DisallowedProjectSetting, store.updateScope(.project, .{ .terminal_font_size = 13 }));
+    try t.expectError(error.InvalidSettings, store.update(.{ .terminal_font_size = 9 }));
+    try t.expectError(error.InvalidSettings, store.update(.{ .terminal_max_scroll_history = 100_001 }));
+    try t.expectError(error.InvalidSettings, store.update(.{ .terminal_shell = "/bin/sh\x00ignored" }));
+    try store.update(.{ .terminal_shell = "/bin/sh" });
+    try store.update(.{ .terminal_font_size = 18 });
+    try store.update(.{ .terminal_max_scroll_history = 0 });
+    try store.update(.{ .terminal_copy_on_select = true });
+    try store.reload();
+    const values = store.values();
+    try t.expectEqualStrings("/bin/sh", values.terminal_shell);
+    try t.expectEqual(@as(f32, 18), values.terminal_font_size);
+    try t.expectEqual(0, values.terminal_max_scroll_history);
+    try t.expect(values.terminal_copy_on_select);
+}

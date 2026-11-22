@@ -87,9 +87,12 @@ test "PTY wakes for real output and drains bursts larger than the ring" {
     defer testing.allocator.free(root);
 
     pty_wakes.store(0, .monotonic);
-    const process = try term.Pty.spawn(testing.allocator, root, 74, 19, .{ .command = "/bin/sh", .args = &.{
+    try tmp.dir.symLink(testing.io, "/bin/sh", "zircon-test-shell", .{});
+    const path = try std.fmt.allocPrint(testing.allocator, "{s}:/usr/bin:/bin", .{root});
+    defer testing.allocator.free(path);
+    const process = try term.Pty.spawn(testing.allocator, root, 74, 19, .{ .command = "zircon-test-shell", .extra_env = &.{ .{ "PATH", "/missing" }, .{ "PATH", path }, .{ "ZIRCON_PTY_TEST", "yes" } }, .args = &.{
         "-c",
-        \\test -t 0 && test "$TERM" = xterm-256color || exit 1
+        \\test -t 0 && test "$TERM" = xterm-256color && test "$ZIRCON_PTY_TEST" = yes || exit 1
         \\stty -echo
         \\printf 'READY\n'
         \\IFS= read -r value
@@ -206,4 +209,73 @@ test "VT handles split escape sequences and DEC line graphics" {
     try testing.expectEqual(@as(u21, 'Y'), screen.rowConst(1).cells[1].code);
     try terminal.feed(testing.allocator, "\x1b[18446744073709551615C");
     try testing.expectEqual(@as(usize, 15), terminal.col);
+}
+
+test "link detector parses URLs and file:line:col across wrapped rows" {
+    var t = try term.Terminal.init(std.testing.allocator, 14, 6, 100);
+    defer t.deinit(std.testing.allocator);
+    try t.feed(std.testing.allocator, "err apps/zircon/src/shell.zig:42:10 fail");
+    const s = t.activeScreenConst();
+    var link = (try term.links.detectAt(std.testing.allocator, s, 0, 8)).?;
+    defer link.deinit(std.testing.allocator);
+    try std.testing.expectEqual(term.links.Kind.file, link.kind);
+    try std.testing.expectEqualStrings("apps/zircon/src/shell.zig", link.target);
+    try std.testing.expectEqual(@as(?usize, 42), link.line);
+    try std.testing.expectEqual(@as(?usize, 10), link.column);
+}
+
+test "scrollback search finds wrapped matches and steps circularly" {
+    var t = try term.Terminal.init(std.testing.allocator, 6, 4, 100);
+    defer t.deinit(std.testing.allocator);
+    try t.feed(std.testing.allocator, "hello_world\r\nWORLD");
+    var results: term.search.Results = .{};
+    defer results.deinit(std.testing.allocator);
+    try term.search.findAll(std.testing.allocator, t.activeScreenConst(), "world", false, &results);
+    try std.testing.expectEqual(@as(usize, 2), results.count());
+    try std.testing.expectEqual(@as(usize, 1), results.active);
+    _ = results.step(true);
+    try std.testing.expectEqual(@as(usize, 0), results.active);
+}
+
+test "links detect Python tracebacks and decode local file URLs" {
+    var terminal = try term.Terminal.init(testing.allocator, 18, 8, 100);
+    defer terminal.deinit(testing.allocator);
+    const allocator = testing.allocator;
+    try terminal.feed(allocator, "  File \"src/path with space.py\", line 42, in run");
+    const screen = terminal.activeScreenConst();
+    var trace = (try term.links.detectAt(allocator, screen, screen.absLineForLogical(1), 2)).?;
+    defer trace.deinit(allocator);
+    try testing.expectEqualStrings("src/path with space.py", trace.target);
+    try testing.expectEqual(@as(?usize, 42), trace.line);
+    terminal.clear();
+    try terminal.feed(allocator, "file://localhost/tmp/path%20space.zig:4");
+    var file = (try term.links.detectAt(allocator, screen, screen.absLineForLogical(0), 3)).?;
+    defer file.deinit(allocator);
+    try testing.expectEqualStrings("/tmp/path space.zig", file.target);
+    try testing.expectEqual(@as(?usize, 4), file.line);
+}
+
+test "terminal search includes both columns of wide text across a wrap" {
+    var terminal = try term.Terminal.init(testing.allocator, 3, 3, 32);
+    defer terminal.deinit(testing.allocator);
+    try terminal.feed(testing.allocator, "ab界X");
+    var results: term.search.Results = .{};
+    defer results.deinit(testing.allocator);
+    try term.search.findAll(testing.allocator, terminal.activeScreenConst(), "b界", true, &results);
+    try testing.expectEqual(1, results.count());
+    try testing.expectEqual(2, results.spans.items.len);
+    try testing.expectEqual(2, results.spans.items[1].end_col);
+}
+
+test "terminal detects wrapped HTTP URLs with accurate click coordinates" {
+    var terminal = try term.Terminal.init(testing.allocator, 14, 6, 100);
+    defer terminal.deinit(testing.allocator);
+    try terminal.feed(testing.allocator, "see https://example.test/a?b=1.");
+    const screen = terminal.activeScreenConst();
+    var link = (try term.links.detectAt(testing.allocator, screen, screen.absLineForLogical(1), 2)).?;
+    defer link.deinit(testing.allocator);
+    try testing.expectEqual(.url, link.kind);
+    try testing.expectEqualStrings("https://example.test/a?b=1", link.target);
+    try testing.expect(link.lineRange(screen.absLineForLogical(0), screen.cols) != null);
+    try testing.expect(link.lineRange(screen.absLineForLogical(1), screen.cols) != null);
 }

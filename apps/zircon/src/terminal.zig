@@ -1,11 +1,14 @@
 //! Event-driven PTY sessions, smooth fractional scrolling, monotonic selection/copy,
 //! bracketed paste, and run-batched terminal rendering.
 const std = @import("std");
+const builtin = @import("builtin");
 const term = @import("zircon_terminal");
 const ui = @import("zircon_ui");
+const actions = @import("actions.zig");
 const store = @import("settings/store.zig");
 const shell_module = @import("shell.zig");
 const components = @import("views/components.zig");
+const field_input = @import("views/input.zig");
 const Shell = shell_module.Shell;
 const native = ui.testing.native != void;
 
@@ -29,6 +32,12 @@ pub const Session = struct {
     terminal: term.Terminal,
     pty: ?*term.Pty = null,
     exited: bool = false,
+    directory: []u8,
+    task_label: []u8 = &.{},
+    hovered_link: ?term.links.Link = null,
+    search_results: term.search.Results = .{},
+    search_dirty: bool = true,
+    max_history: usize,
     /// Pixels scrolled UP from the live bottom (0 = pinned to bottom).
     scroll_px: f32 = 0,
     selection: term.Selection = .{},
@@ -41,18 +50,31 @@ pub const Session = struct {
     alt_wheel_acc: f32 = 0,
 
     pub fn init(a: std.mem.Allocator, id: u32, root: []const u8, options: ShellOptions) !Session {
-        var terminal = try term.Terminal.init(a, 80, 24, term.Terminal.default_history);
+        return initSession(a, id, root, options, native);
+    }
+
+    fn initSession(a: std.mem.Allocator, id: u32, root: []const u8, options: ShellOptions, run_process: bool) !Session {
+        var terminal = try term.Terminal.init(a, 80, 24, 24 +| options.max_history);
         errdefer terminal.deinit(a);
-        const proc = if (comptime native)
-            try term.Pty.spawn(a, root, 80, 24, options, wakeUi)
-        else
-            null;
-        return .{ .id = id, .terminal = terminal, .pty = proc };
+        const directory = try a.dupe(u8, root);
+        errdefer a.free(directory);
+        const proc = if (run_process) try term.Pty.spawn(a, root, 80, 24, options, wakeUi) else null;
+        return .{ .id = id, .terminal = terminal, .pty = proc, .directory = directory, .max_history = options.max_history };
     }
 
     pub fn deinit(self: *Session, a: std.mem.Allocator) void {
         if (self.pty) |proc| proc.destroy();
         self.terminal.deinit(a);
+        a.free(self.directory);
+        a.free(self.task_label);
+        _ = self.clearHover(a);
+        self.search_results.deinit(a);
+    }
+
+    fn clearHover(self: *Session, a: std.mem.Allocator) bool {
+        if (self.hovered_link) |*link| link.deinit(a) else return false;
+        self.hovered_link = null;
+        return true;
     }
 
     pub fn feed(self: *Session, a: std.mem.Allocator, bytes: []const u8) !void {
@@ -60,6 +82,8 @@ pub const Session = struct {
         const before_len = self.terminal.primary.len;
         const before_evicted = self.terminal.primary.evicted;
         try self.terminal.feed(a, bytes);
+        self.search_dirty = true;
+        _ = self.clearHover(a);
         if (was_alt != self.terminal.in_alt_screen) {
             self.selection.clear();
             self.dragging = false;
@@ -99,7 +123,10 @@ pub const Session = struct {
         const s = self.terminal.activeScreenConst();
         if (c == s.cols and r == s.rows and c == self.terminal.primary.cols and r == self.terminal.primary.rows and
             c == self.terminal.alt.cols and r == self.terminal.alt.rows) return;
+        self.terminal.primary.history_limit = r +| self.max_history;
         try self.terminal.resize(a, c, r);
+        self.search_dirty = true;
+        _ = self.clearHover(a);
         self.selection.clear();
         self.dragging = false;
         if (self.pty) |proc| proc.resize(c, r);
@@ -141,11 +168,35 @@ pub const Model = struct {
     ratio: f32 = 0.35,
     focus: u64 = 0,
     focused: bool = false,
+    search_open: bool = false,
+    search_input: ?field_input.Handle = null,
+    search_query: []u8 = &.{},
+    search_focus: u64 = 0,
+    font_size: f32 = 0,
+    max_scroll_history: u32 = 10_000,
+    option_as_meta: bool = false,
+    copy_on_select: bool = false,
+    shell_program: []u8 = &.{},
     drag: ?struct { point: ui.Point, ratio: f32 } = null,
 
     pub fn deinit(self: *Model, a: std.mem.Allocator) void {
         for (self.sessions.items) |*session| session.deinit(a);
         self.sessions.deinit(a);
+        a.free(self.search_query);
+        a.free(self.shell_program);
+    }
+
+    pub fn applySettings(self: *Model, a: std.mem.Allocator, values: store.Values) !void {
+        if (!std.mem.eql(u8, self.shell_program, values.terminal_shell)) {
+            const next = try a.dupe(u8, values.terminal_shell);
+            a.free(self.shell_program);
+            self.shell_program = next;
+        }
+        self.dock = values.terminal_dock;
+        self.font_size = values.terminal_font_size;
+        self.max_scroll_history = values.terminal_max_scroll_history;
+        self.option_as_meta = values.terminal_option_as_meta;
+        self.copy_on_select = values.terminal_copy_on_select;
     }
 };
 
@@ -159,7 +210,7 @@ fn gridSize(width: f32, height: f32, cell_w: f32, cell_h: f32) struct { cols: us
 }
 
 fn cellMetrics(self: *const Shell, app: ?*ui.App) CellMetrics {
-    const font = self.editor_options.font_size;
+    const font = if (self.terminal.font_size == 0) self.editor_options.font_size else self.terminal.font_size;
     const fallback_w = @max(6.0, font * 0.6);
     const fallback_h = @max(14.0, @ceil(font * 1.35));
     const runtime_app = app orelse return .{ .w = fallback_w, .h = fallback_h, .font = font };
@@ -180,8 +231,23 @@ pub fn create(self: *Shell) !void {
 }
 
 pub fn createAt(self: *Shell, directory: []const u8) !void {
-    var session = try Session.init(self.allocator, self.terminal.next_id, directory, self.terminal.options);
+    var options = self.terminal.options;
+    if (options.command == null and self.terminal.shell_program.len != 0) options.command = self.terminal.shell_program;
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    options.extra_env = try std.mem.concat(arena.allocator(), [2][]const u8, &.{ self.shell_env.entries, options.extra_env });
+    options.max_history = self.terminal.max_scroll_history;
+    try createSession(self, directory, options, "");
+}
+
+pub fn createTask(self: *Shell, label: []const u8, directory: []const u8, options: ShellOptions) !void {
+    try createSession(self, directory, options, label);
+}
+
+fn createSession(self: *Shell, directory: []const u8, options: ShellOptions, label: []const u8) !void {
+    var session = try Session.initSession(self.allocator, self.terminal.next_id, directory, options, native or label.len != 0);
     errdefer session.deinit(self.allocator);
+    session.task_label = try self.allocator.dupe(u8, label);
     try self.terminal.sessions.append(self.allocator, session);
     self.terminal.next_id +%= 1;
     self.terminal.active = self.terminal.sessions.items.len - 1;
@@ -227,6 +293,13 @@ pub fn poll(self: *Shell, cx: *ui.Context(Shell)) !void {
             };
         }
     }
+    if (self.terminal.visible and self.terminal.search_open) {
+        const session = &self.terminal.sessions.items[self.terminal.active];
+        if (session.search_dirty) {
+            try refreshSearch(self, false);
+            any_changed = true;
+        }
+    }
     if (any_changed) cx.notify();
 }
 
@@ -242,9 +315,112 @@ fn resizeToBounds(session: *Session, a: std.mem.Allocator, bounds: ui.Rect, metr
     return geometry_changed or grid_changed;
 }
 
-fn select(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u32) void {
+pub fn hasFocus(self: *const Shell, cx: *ui.Context(Shell)) bool {
+    if (!self.terminal.visible) return false;
+    const window = cx.app.window(self.window orelse return false) catch return false;
+    const nodes = window.frames.committed.nodes.items;
+    var index = window.focus;
+    while (index) |i| : (index = nodes[i].parent) {
+        if (nodes[i].key) |key| if (key == .string and std.mem.eql(u8, key.string, "terminal-panel")) return true;
+    }
+    return false;
+}
+
+pub fn styleSearch(self: *Shell, cx: *ui.Context(Shell)) !void {
+    if (self.terminal.search_input) |handle| try field_input.appearance(cx, handle, components.inputAppearance(self.colors), false);
+}
+
+pub fn openSearch(self: *Shell, cx: *ui.Context(Shell)) !void {
+    if (self.terminal.sessions.items.len == 0) return;
+    if (self.terminal.search_input == null) {
+        const handle = try field_input.create(cx, self.allocator, .{ .placeholder = "Find in terminal…", .icon = .search, .height = 27 });
+        self.terminal.search_input = handle;
+        _ = try cx.observe(handle, onSearchQuery);
+        try styleSearch(self, cx);
+    }
+    if (!self.terminal.search_open) {
+        self.terminal.search_open = true;
+        try refreshSearch(self, true);
+    }
+    self.terminal.search_focus +%= 1;
+    cx.notify();
+}
+
+fn onSearchQuery(self: *Shell, cx: *ui.Context(Shell), handle: field_input.Handle) !void {
+    const query = try field_input.read(cx, handle, self.allocator);
+    if (std.mem.eql(u8, self.terminal.search_query, query)) {
+        self.allocator.free(query);
+        return;
+    }
+    self.allocator.free(self.terminal.search_query);
+    self.terminal.search_query = query;
+    for (self.terminal.sessions.items) |*session| session.search_dirty = true;
+    if (self.terminal.search_open and self.terminal.sessions.items.len != 0) try refreshSearch(self, true);
+    cx.notify();
+}
+
+fn refreshSearch(self: *Shell, reveal: bool) !void {
+    const session = &self.terminal.sessions.items[self.terminal.active];
+    const previous = if (reveal) null else session.search_results.current();
+    const query = self.terminal.search_query;
+    try term.search.findAll(self.allocator, session.terminal.activeScreenConst(), query, false, &session.search_results);
+    session.search_dirty = false;
+    if (previous) |old| {
+        for (session.search_results.matches.items, 0..) |match, index| {
+            if (match.abs_line == old.abs_line and match.col == old.col) {
+                session.search_results.active = index;
+                break;
+            }
+        }
+    }
+    if (reveal) if (session.search_results.current()) |match| revealAbsLine(session, match.abs_line);
+}
+
+fn revealAbsLine(session: *Session, abs_line: u64) void {
+    const screen = session.terminal.activeScreenConst();
+    const logical = screen.logicalForAbsLine(abs_line) orelse return;
+    const from_bottom: f32 = @floatFromInt(screen.len - 1 - logical);
+    const half: f32 = @floatFromInt(screen.rows / 2);
+    session.scroll_px = std.math.clamp((from_bottom - half) * session.cell_h, 0, session.maxScrollPx());
+}
+
+fn moveSearch(self: *Shell, cx: *ui.Context(Shell), forward: bool) !void {
+    const session = &self.terminal.sessions.items[self.terminal.active];
+    if (session.search_dirty) try refreshSearch(self, false);
+    if (session.search_results.step(forward)) |match| revealAbsLine(session, match.abs_line);
+    cx.notify();
+}
+
+fn onSearchInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
+    if (e.data != .key_down) return;
+    switch (e.data.key_down.key) {
+        .enter => try moveSearch(self, cx, !e.data.key_down.modifiers.shift),
+        .escape => closeSearch(self, cx),
+        else => return,
+    }
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+fn closeSearch(self: *Shell, cx: *ui.Context(Shell)) void {
+    self.terminal.search_open = false;
+    self.terminal.focus +%= 1;
+    cx.notify();
+}
+
+fn onMoveSearch(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), forward: bool) !void {
+    try moveSearch(self, cx, forward);
+    self.terminal.search_focus +%= 1;
+}
+
+fn onCloseSearch(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell)) void {
+    closeSearch(self, cx);
+}
+
+fn select(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u32) !void {
     for (self.terminal.sessions.items, 0..) |session, i| if (session.id == id) {
         self.terminal.active = i;
+        if (self.terminal.search_open) try refreshSearch(self, true);
         self.terminal.focus +%= 1;
         self.terminal.focused = true;
         break;
@@ -261,6 +437,7 @@ fn closeTab(self: *Shell, _: *ui.Event(ui.Click), cx: *ui.Context(Shell), id: u3
     };
     if (self.terminal.sessions.items.len == 0) {
         self.terminal.visible = false;
+        self.terminal.search_open = false;
         self.terminal.focused = false;
         self.editor_focus_request +%= 1;
     }
@@ -280,6 +457,85 @@ fn sendMouse(session: *Session, button_code: u8, modifiers: ui.Modifiers, col: u
     }
 }
 
+const UrlJob = struct {
+    pub const Output = void;
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []u8,
+
+    pub fn run(self: *UrlJob, cancel: *ui.tasks.Cancellation) !void {
+        try cancel.check();
+        const program = if (builtin.os.tag == .macos) "/usr/bin/open" else "xdg-open";
+        const output = try std.process.run(self.allocator, self.io, .{
+            .argv = &.{ program, self.url },
+            .stdout_limit = .limited(16 * 1024),
+            .stderr_limit = .limited(16 * 1024),
+            .timeout = .{ .duration = .{ .raw = .fromSeconds(5), .clock = .awake } },
+        });
+        defer self.allocator.free(output.stdout);
+        defer self.allocator.free(output.stderr);
+        if (!output.term.success()) return error.TerminalLinkOpenFailed;
+    }
+
+    pub fn discard(_: *UrlJob, _: void) void {}
+
+    pub fn deinit(self: *UrlJob, _: std.mem.Allocator) void {
+        self.allocator.free(self.url);
+    }
+};
+
+fn urlOpened(self: *Shell, cx: *ui.Context(Shell), result: anyerror!void) !void {
+    result catch |err| {
+        if (err != error.Canceled) try self.reportError(err);
+        cx.notify();
+    };
+}
+
+fn activateLink(self: *Shell, cx: *ui.Context(Shell), session: *const Session, link: term.links.Link) !void {
+    if (link.kind == .url) {
+        const a = std.heap.page_allocator;
+        const url = try a.dupe(u8, link.target);
+        errdefer a.free(url);
+        _ = try cx.spawn(UrlJob, .{ .allocator = a, .io = self.workspace.io, .url = url }, urlOpened);
+        return;
+    }
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const directory = if (session.terminal.cwd.len != 0) session.terminal.cwd else session.directory;
+    var path = try std.fs.path.resolve(a, &.{ directory, link.target });
+    if (!std.fs.path.isAbsolute(link.target)) {
+        const stat = std.Io.Dir.cwd().statFile(self.workspace.io, path, .{}) catch null;
+        if (stat == null or stat.?.kind != .file) path = try std.fs.path.resolve(a, &.{ self.workspace.root_path, link.target });
+    }
+    try self.openPath(path);
+    if (self.panel == .image) {
+        self.terminal.focused = false;
+        return;
+    }
+    if (self.active_pane == .secondary) self.secondary_tool = null else self.panel = .editor;
+    if (link.line) |line| {
+        const current = try actions.active(self);
+        var snapshot = try self.workspace.snapshot(current.id);
+        defer snapshot.deinit();
+        const row = @min(line -| 1, snapshot.lineCount() - 1);
+        const range = try snapshot.lineRange(row);
+        var offset = range.start + @min((link.column orelse 1) -| 1, range.end - range.start);
+        while (!snapshot.isBoundary(offset)) offset -= 1;
+        try current.editor.setSelection(snapshot, .{ .start = offset, .end = offset });
+        try actions.prepareEditor(self, cx, current.editor, snapshot, if (self.active_pane == .secondary) "secondary-editor" else "primary-editor");
+    }
+    self.terminal.focused = false;
+    self.editor_focus_request +%= 1;
+}
+
+fn copySelection(a: std.mem.Allocator, session: *const Session, e: *ui.Event(ui.Input)) !void {
+    if (session.selection.isEmpty()) return;
+    const copied = try term.selection.extractText(a, session.terminal.activeScreenConst(), session.selection);
+    defer a.free(copied);
+    if (copied.len != 0) try e.writeClipboard(copied);
+}
+
 pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void {
     if (self.terminal.sessions.items.len == 0) return;
     const session = &self.terminal.sessions.items[self.terminal.active];
@@ -295,6 +551,17 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
             self.terminal.focused = true;
             e.focus();
             const hit = session.hitTest(e.bounds, p.position);
+            if (p.button == .primary and p.modifiers.command) {
+                if (try term.links.detectAt(self.allocator, session.terminal.activeScreenConst(), hit.abs_line, hit.col)) |found| {
+                    var link = found;
+                    defer link.deinit(self.allocator);
+                    activateLink(self, cx, session, link) catch |err| try self.reportError(err);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cx.notify();
+                    return;
+                }
+            }
             // Forward mouse events to TUI apps unless Shift is held (Shift forces local selection).
             if (session.terminal.mouse_mode != .none and !p.modifiers.shift and session.scroll_px == 0) {
                 const code: u8 = switch (p.button) {
@@ -325,6 +592,14 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
         .pointer_move => |p| {
             const hit = session.hitTest(e.bounds, p.position);
             if (!session.dragging) {
+                if (p.modifiers.command) {
+                    if (session.hovered_link) |link| if (link.contains(hit.abs_line, hit.col)) return;
+                    const cleared = session.clearHover(self.allocator);
+                    session.hovered_link = try term.links.detectAt(self.allocator, session.terminal.activeScreenConst(), hit.abs_line, hit.col);
+                    if (cleared or session.hovered_link != null) cx.notify();
+                    return;
+                }
+                if (session.clearHover(self.allocator)) cx.notify();
                 const reports_motion = session.terminal.mouse_mode == .any or
                     (session.terminal.mouse_mode == .drag and session.mouse_button != null);
                 if (reports_motion and session.scroll_px == 0 and !p.modifiers.shift) {
@@ -340,6 +615,7 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
             const hit = session.hitTest(e.bounds, p.position);
             if (session.dragging) {
                 session.dragging = false;
+                if (self.terminal.copy_on_select) try copySelection(self.allocator, session, e);
                 e.releasePointer();
                 e.preventDefault();
             } else if (session.mouse_button) |code| {
@@ -349,7 +625,9 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
                 if (session.terminal.mouse_mode != .none) try sendMouse(session, code, p.modifiers, hit.col, hit.view_row, false);
             }
         },
+        .pointer_leave => if (!session.clearHover(self.allocator)) return,
         .scroll => |scroll| {
+            _ = session.clearHover(self.allocator);
             if (!std.math.isFinite(scroll.y) or scroll.y == 0) return;
             if (session.terminal.mouse_mode != .none and !scroll.modifiers.shift and (session.terminal.in_alt_screen or session.scroll_px == 0)) {
                 const hit = session.hitTest(e.bounds, scroll.position);
@@ -383,12 +661,14 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
         },
         .key_down => |key| {
             if (key.modifiers.command) {
+                if (key.key == .f) {
+                    try openSearch(self, cx);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
                 if (key.key == .c) {
-                    if (!session.selection.isEmpty()) {
-                        const copied = try term.selection.extractText(self.allocator, session.terminal.activeScreenConst(), session.selection);
-                        defer self.allocator.free(copied);
-                        if (copied.len != 0) try e.writeClipboard(copied);
-                    }
+                    try copySelection(self.allocator, session, e);
                     e.preventDefault();
                     e.stopPropagation();
                     cx.notify();
@@ -403,6 +683,8 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
                 }
                 if (key.key == .k) {
                     session.terminal.clear();
+                    _ = session.clearHover(self.allocator);
+                    session.search_dirty = true;
                     session.scroll_px = 0;
                     session.selection.clear();
                     e.preventDefault();
@@ -436,6 +718,17 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
                 return;
             }
 
+            if (self.terminal.option_as_meta and key.modifiers.alt) {
+                if (metaKey(key.key, key.modifiers)) |byte| {
+                    try session.send(&.{ 0x1b, byte });
+                    session.selection.clear();
+                    session.scroll_px = 0;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    cx.notify();
+                    return;
+                }
+            }
             const app_keys = session.terminal.app_cursor_keys;
             const bytes: []const u8 = switch (key.key) {
                 .enter => "\r",
@@ -480,6 +773,36 @@ pub fn input(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell)) !void
         else => return,
     }
     cx.notify();
+}
+
+fn metaKey(key: ui.Key, mods: ui.Modifiers) ?u8 {
+    if (@backingInt(key) >= @backingInt(ui.Key.a) and @backingInt(key) <= @backingInt(ui.Key.z)) {
+        const index: u8 = @intCast(@backingInt(key) - @backingInt(ui.Key.a));
+        if (mods.control) return index + 1;
+        return index + @as(u8, if (mods.shift) 'A' else 'a');
+    }
+    if (@backingInt(key) >= @backingInt(ui.Key.digit_0) and @backingInt(key) <= @backingInt(ui.Key.digit_9)) {
+        const index: u8 = @intCast(@backingInt(key) - @backingInt(ui.Key.digit_0));
+        return if (mods.shift) ")!@#$%^&*("[index] else '0' + index;
+    }
+    return switch (key) {
+        .left => 'b',
+        .right => 'f',
+        .backspace => 0x7f,
+        .space => ' ',
+        .slash => if (mods.shift) '?' else '/',
+        .comma => if (mods.shift) '<' else ',',
+        .period => if (mods.shift) '>' else '.',
+        .left_bracket => if (mods.shift) '{' else '[',
+        .right_bracket => if (mods.shift) '}' else ']',
+        .minus => if (mods.shift) '_' else '-',
+        .equal => if (mods.shift) '+' else '=',
+        .semicolon => if (mods.shift) ':' else ';',
+        .quote => if (mods.shift) '"' else '\'',
+        .backslash => if (mods.shift) '|' else '\\',
+        .grave => if (mods.shift) '~' else '`',
+        else => null,
+    };
 }
 
 fn paste(session: *Session, a: std.mem.Allocator, bytes: []const u8) !void {
@@ -540,6 +863,10 @@ const Canvas = struct {
     cursor_row: ?usize,
     cursor_col: usize,
     selection: term.Selection,
+    search_spans: []const term.search.Span,
+    search_active: usize,
+    hover_range: ?struct { start: term.Anchor, end: term.Anchor },
+    accent: ui.Color,
     background: ui.Color,
     foreground: ui.Color,
     selection_bg: ui.Color,
@@ -600,6 +927,31 @@ const Canvas = struct {
                     .color = bg.?,
                 });
             }
+
+            const first_span = term.search.firstSpanOnLine(self.search_spans, abs_line);
+            for (self.search_spans[first_span..]) |span| {
+                if (span.abs_line != abs_line) break;
+                const end = @min(self.cols, span.end_col);
+                if (span.start_col >= end) continue;
+                var color = ui.Color.rgb(0xe5c07b);
+                color.a = if (span.match_index == self.search_active) 0.55 else 0.25;
+                try cx.painter.fillRect(.{ .bounds = .{
+                    .x = bounds.x + pad_x + @as(f32, @floatFromInt(span.start_col)) * self.cell_w,
+                    .y = row_y,
+                    .width = @as(f32, @floatFromInt(end - span.start_col)) * self.cell_w,
+                    .height = self.cell_h,
+                }, .color = color });
+            }
+            if (self.hover_range) |link| if (abs_line >= link.start.line and abs_line <= link.end.line) {
+                const from = if (abs_line == link.start.line) @min(link.start.col, self.cols) else 0;
+                const to = if (abs_line == link.end.line) @min(link.end.col, self.cols) else self.cols;
+                if (from < to) try cx.painter.fillRect(.{ .bounds = .{
+                    .x = bounds.x + pad_x + @as(f32, @floatFromInt(from)) * self.cell_w,
+                    .y = row_y + self.cell_h - 2,
+                    .width = @as(f32, @floatFromInt(to - from)) * self.cell_w,
+                    .height = 1,
+                }, .color = self.accent });
+            };
 
             // A text command covers each run of matching cells. Wide glyphs
             // start a separate command so fallback fonts cannot shift the next run.
@@ -701,7 +1053,7 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
     const c = self.colors;
     var tabs: std.ArrayList(ui.Element) = .empty;
     for (self.terminal.sessions.items, 0..) |session, i| {
-        const dynamic = session.titleSlice();
+        const dynamic = if (session.task_label.len != 0) session.task_label else session.titleSlice();
         const name = if (dynamic.len > 0)
             try std.fmt.allocPrint(b.allocator(), "{s}{s}", .{ dynamic, if (session.exited) " · exited" else "" })
         else
@@ -741,7 +1093,8 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
     const metrics = cellMetrics(self, b.frame.app);
     const session = &self.terminal.sessions.items[self.terminal.active];
     const screen = session.terminal.activeScreenConst();
-    const visible_grid = gridSize(width, height - 32, metrics.w, metrics.h);
+    const search_height: f32 = if (self.terminal.search_open) 34 else 0;
+    const visible_grid = gridSize(width, height - 32 - search_height, metrics.w, metrics.h);
     const view_cols = @min(screen.cols, visible_grid.cols);
     const view_rows = visible_grid.rows;
 
@@ -772,6 +1125,12 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
     var sel_bg = c.accent;
     sel_bg.a = 0.28;
 
+    const search_spans: []const term.search.Span = if (self.terminal.search_open and !session.search_dirty) blk: {
+        const spans = session.search_results.spans.items;
+        const first = term.search.firstSpanOnLine(spans, screen.absLineForLogical(start));
+        const last = term.search.firstSpanOnLine(spans, screen.absLineForLogical(end));
+        break :blk try b.allocator().dupe(term.search.Span, spans[first..last]);
+    } else &.{};
     const canvas = try b.custom(Canvas, .{
         .cells = cells,
         .cols = view_cols,
@@ -786,6 +1145,10 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         .cursor_row = cursor_row,
         .cursor_col = @min(session.terminal.col, view_cols - 1),
         .selection = session.selection,
+        .search_spans = search_spans,
+        .search_active = session.search_results.active,
+        .hover_range = if (session.hovered_link) |link| .{ .start = link.start, .end = link.end } else null,
+        .accent = c.accent,
         .background = c.document,
         .foreground = c.text,
         .selection_bg = sel_bg,
@@ -795,10 +1158,23 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
 
     const surface = try b.fluent().adopt(canvas)
         .id(.{ .string = "terminal-canvas" })
+        .cursor(if (session.hovered_link != null) .pointing_hand else .text)
         .listeners(.{ .focusable = true, .on_input = b.onInput(input) })
         .request_focus(self.terminal.focus)
         .build();
 
+    const tab_row = try b.fluent().div()
+        .h(.{ .px = 32 })
+        .shrink_0()
+        .background(c.tab_bar)
+        .overflow_hidden()
+        .flex()
+        .children(tabs.items)
+        .build();
+    var content: std.ArrayList(ui.Element) = .empty;
+    try content.append(b.allocator(), tab_row);
+    if (self.terminal.search_open) try content.append(b.allocator(), try searchBar(self, b, session));
+    try content.append(b.allocator(), surface);
     return b.fluent().div()
         .w(.{ .px = width })
         .h(.{ .px = height })
@@ -807,16 +1183,48 @@ pub fn render(self: *const Shell, b: *ui.Ui, width: f32, height: f32) !ui.Elemen
         .min_h(.{ .px = 0 })
         .overflow_hidden()
         .flex_col()
+        .children(content.items)
+        .id(.{ .string = "terminal-panel" })
+        .build();
+}
+
+fn searchBar(self: *const Shell, b: *ui.Ui, session: *const Session) !ui.Element {
+    const query = self.terminal.search_input orelse return error.MissingTerminalSearch;
+    const c = self.colors;
+    const count = session.search_results.count();
+    const label = if (count == 0)
+        if (self.terminal.search_query.len == 0) "" else "No matches"
+    else
+        try std.fmt.allocPrint(b.allocator(), "{d} of {d}{s}", .{ session.search_results.active + 1, count, if (session.search_results.truncated) "+" else "" });
+    return b.fluent().div()
+        .h_px(34)
+        .shrink_0()
+        .padding(.{ .left = 8, .right = 8 })
+        .gap_px(5)
+        .flex()
+        .items_center()
+        .background(c.tab_bar)
+        .listeners(.{ .on_capture = b.onInput(onSearchInput) })
         .children(.{
-            b.fluent().div()
-                .h(.{ .px = 32 })
-                .shrink_0()
-                .background(c.tab_bar)
-                .overflow_hidden()
-                .flex()
-                .children(tabs.items),
-            surface,
-        }).id(.{ .string = "terminal-panel" }).build();
+            b.fluent().view(query).id(.{ .string = "terminal-search" }).grow().min_w_px(0).request_focus(self.terminal.search_focus),
+            components.text(b, label, c.muted, 11),
+            searchButton(b, "Previous match", .arrow_up, b.onClickWith(onMoveSearch, false), c),
+            searchButton(b, "Next match", .arrow_down, b.onClickWith(onMoveSearch, true), c),
+            searchButton(b, "Close terminal search", .close, b.onClick(onCloseSearch), c),
+        }).build();
+}
+
+fn searchButton(b: *ui.Ui, label: []const u8, icon: ui.controls.icons.Name, handler: anytype, c: components.Palette) !ui.Element {
+    return b.fluent().button(.{ .label = label })
+        .w_px(23)
+        .h_px(26)
+        .shrink_0()
+        .justify_center()
+        .items_center()
+        .hover_background(c.hover)
+        .on_click(handler)
+        .children(.{components.icon(b, icon, c.text, 12)})
+        .build();
 }
 
 pub fn closeActive(self: *Shell, cx: *ui.Context(Shell)) !void {

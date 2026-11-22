@@ -5,6 +5,7 @@ const ui = @import("zircon_ui");
 const store = @import("store.zig");
 pub const Patch = store.Patch;
 pub const Values = store.Values;
+pub const TerminalDock = store.TerminalDock;
 pub const Scope = store.Scope;
 pub const BufferSettings = store.BufferSettings;
 pub const FormatOnSave = store.FormatOnSave;
@@ -53,9 +54,12 @@ pub const Settings = struct {
         const theme = try a.dupe(u8, value.theme);
         errdefer a.free(theme);
         const icon_theme = try a.dupe(u8, value.icon_theme);
+        errdefer a.free(icon_theme);
+        const terminal_shell = try a.dupe(u8, value.terminal_shell);
         output.* = value;
         output.theme = theme;
         output.icon_theme = icon_theme;
+        output.terminal_shell = terminal_shell;
     }
 
     pub fn bufferSettings(self: *const Settings, root: []const u8, id: []const u8, name: []const u8) BufferSettings {

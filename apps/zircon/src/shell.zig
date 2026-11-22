@@ -29,7 +29,9 @@ const services_project = @import("services/project.zig");
 const services_recovery = @import("services/recovery.zig");
 const services_save = @import("services/save.zig");
 const services_search = @import("services/search.zig");
+const services_shell_env = @import("services/shell_env.zig");
 const symbol_hover = @import("services/symbol_hover.zig");
+const terminal_tasks = @import("services/tasks.zig");
 const model = @import("settings/model.zig");
 const settings_store = @import("settings/store.zig");
 const terminal_module = @import("terminal.zig");
@@ -51,6 +53,7 @@ pub const Overlay = enum {
     open_project,
     palette,
     quick_open,
+    task_picker,
     open_path,
     save_as,
     extension_path,
@@ -93,6 +96,8 @@ pub const Shell = struct {
     language_stopped: bool = false,
     layout_setting: settings_store.PanelLayout = .classic,
     terminal: terminal_module.Model = .{},
+    shell_env: services_shell_env.Model = .{},
+    tasks: terminal_tasks.Model = .{},
     image_zoom: f32 = 1,
     image_scroll: ui.Point = .{},
 
@@ -171,6 +176,8 @@ pub const Shell = struct {
         panes.cancel(self);
         self.recent.deinit(self.allocator);
         self.terminal.deinit(self.allocator);
+        self.shell_env.deinit();
+        self.tasks.deinit(self.allocator);
         for (self.tabs.items) |*tab| {
             tab.editor.deinit();
             if (tab.secondary_state) |*state| state.deinit();
@@ -238,6 +245,7 @@ pub const Shell = struct {
         cx.notify();
     }
     pub const configureAgents = services_agents.configure;
+    pub const captureTerminalEnvironment = services_shell_env.start;
     pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         return view_module.render(self, b);
     }
@@ -292,7 +300,7 @@ pub const Shell = struct {
         var values: preferences.Values = undefined;
         try cx.read(settings, preferences.Settings.copyResolved, .{ self.workspace.root_path, arena.allocator(), &values });
         self.key_bindings = values.key_bindings;
-        self.terminal.dock = values.terminal_dock;
+        try self.terminal.applySettings(self.allocator, values);
         self.agent_mode = false;
         self.layout_setting = .classic;
         if (values.project_panel_width != self.project_default_width) {
@@ -380,6 +388,7 @@ pub const Shell = struct {
             view.editor.synchronize(snapshot);
         };
         search_editing.refreshMetrics(self);
+        try terminal_module.styleSearch(self, cx);
         try self.styleInputs(cx);
         cx.notify();
     }

@@ -4,6 +4,7 @@ const std = @import("std");
 const ui = @import("zircon_ui");
 const actions = @import("../actions.zig");
 const catalogue = @import("../commands.zig");
+const terminal_tasks = @import("../services/tasks.zig");
 const shell = @import("../shell.zig");
 const components = @import("components.zig");
 const field_input = @import("input.zig");
@@ -35,12 +36,13 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (self.overlay == .open_project) return views_open_project.render(self, b);
     const colors = self.colors;
     const fields = self.fields.?;
-    const width = @min(if (self.overlay == .palette or self.overlay == .quick_open) @as(f32, 560) else 580, @max(0, b.viewport().width - 48));
+    const width = @min(if (self.overlay == .palette or self.overlay == .quick_open or self.overlay == .task_picker) @as(f32, 560) else 580, @max(0, b.viewport().width - 48));
     var children: std.ArrayList(ui.Element) = .empty;
     const title: []const u8 = switch (self.overlay) {
         .open_project => unreachable,
         .palette => "Commands",
         .quick_open => "Go to file",
+        .task_picker => "Run task",
         .open_path => "Open file",
         .extension_path => "Install development extension",
         .project_search => "Search project",
@@ -51,7 +53,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
         .dirty => "Save your changes?",
         .none => unreachable,
     };
-    const picker = self.overlay == .palette or self.overlay == .quick_open;
+    const picker = self.overlay == .palette or self.overlay == .quick_open or self.overlay == .task_picker;
     const title_row = try b.fluent().div().h(.{ .px = 26 }).items_center().gap_px(12).flex().children(.{
         b.fluent().adopt(try label(b, colors, title, colors.text, 15))
             .style(.{ .flex_grow = 1, .text = .{ .size = 15, .color = colors.text } }),
@@ -60,7 +62,7 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     if (!picker) try children.append(b.allocator(), title_row);
     switch (self.overlay) {
         .open_project => unreachable,
-        .palette, .quick_open => {
+        .palette, .quick_open, .task_picker => {
             try children.append(b.allocator(), try b.fluent().adopt(try inputField(b, fields.workspace.query, "query", true))
                 .style(.{ .height = .{ .px = 38 }, .flex_shrink = 0 })
                 .build());
@@ -75,6 +77,17 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
                     try children.append(b.allocator(), try components.menuRow(b, colors, entry.command, entry.label, try self.key_bindings.shortcut(b.allocator(), entry.command), visible == self.overlay_index));
                 }
                 if (filtered.len == 0) try children.append(b.allocator(), try label(b, colors, "No matching commands.", colors.muted, 12));
+            } else if (self.overlay == .task_picker) {
+                const filtered = try filteredTasks(self, b, query);
+                const limit = resultCapacity(self, b);
+                const start = resultStart(filtered.len, self.overlay_index, limit);
+                for (filtered[start..@min(start + limit, filtered.len)], start..) |index, shown| {
+                    try children.append(b.allocator(), try b.fluent().button(.{ .label = self.tasks.available[index].label })
+                        .style(resultStyle(colors, shown == self.overlay_index))
+                        .on_click(b.onClickWith(terminal_tasks.onTask, @as(u32, @intCast(index))))
+                        .build());
+                }
+                if (filtered.len == 0) try children.append(b.allocator(), try label(b, colors, if (self.tasks.available.len == 0) "No tasks configured." else "No matching tasks.", colors.muted, 12));
             } else {
                 const filtered = try filteredFiles(self, b, query);
                 const limit = resultCapacity(self, b);
@@ -168,9 +181,13 @@ fn overlayHeight(self: *const Shell, b: *ui.Ui) !f32 {
     const error_height: f32 = if (self.status.len > 0 and self.status_is_error) 30 else 0;
     return error_height + switch (self.overlay) {
         .open_project => 432,
-        .palette, .quick_open => blk: {
+        .palette, .quick_open, .task_picker => blk: {
             const query = try field_input.text(b, self.fields.?.workspace.query);
-            const count = if (self.overlay == .palette) (try filteredCommands(b, query)).len else (try filteredFiles(self, b, query)).len;
+            const count = switch (self.overlay) {
+                .palette => (try filteredCommands(b, query)).len,
+                .task_picker => (try filteredTasks(self, b, query)).len,
+                else => (try filteredFiles(self, b, query)).len,
+            };
             break :blk 84 + @as(f32, @floatFromInt(@max(@as(usize, 1), @min(count, resultCapacity(self, b))))) * 30;
         },
         .open_path, .save_as, .extension_path => 204,
@@ -242,12 +259,25 @@ pub fn filteredFiles(self: *const Shell, b: *ui.Ui, query: []const u8) ![]usize 
     return indices.toOwnedSlice(b.allocator());
 }
 
+fn filteredTasks(self: *const Shell, b: *ui.Ui, query: []const u8) ![]usize {
+    var indices: std.ArrayList(usize) = .empty;
+    for (self.tasks.available, 0..) |task, i| if (matches(query, task.label)) try indices.append(b.allocator(), i);
+    return indices.toOwnedSlice(b.allocator());
+}
+
 pub fn show(self: *Shell, cx: *ui.Context(Shell), which: shell.Overlay) !void {
     self.overlay = which;
     self.overlay_index = 0;
     if (self.fields) |fields| switch (which) {
         .palette => try field_input.reset(cx, fields.workspace.query, "", .{
             .placeholder = "Search commands…",
+            .height = 38,
+            .font_size = 14,
+            .borderless = true,
+            .transparent_background = true,
+        }),
+        .task_picker => try field_input.reset(cx, fields.workspace.query, "", .{
+            .placeholder = "Run a task…",
             .height = 38,
             .font_size = 14,
             .borderless = true,
@@ -281,6 +311,10 @@ pub fn filteredCount(self: *Shell, cx: *ui.Context(Shell)) !usize {
         for (catalogue.commands) |entry| {
             if (matches(query, entry.label)) count += 1;
         }
+    } else if (self.overlay == .task_picker) {
+        for (self.tasks.available) |task| if (matches(query, task.label)) {
+            count += 1;
+        };
     } else {
         for (self.file_index.items) |entry| {
             if (matches(query, entry.label)) count += 1;
@@ -301,6 +335,12 @@ pub fn activateSelected(self: *Shell, cx: *ui.Context(Shell)) !void {
                 actions.execute(self, cx, entry.command, null) catch |err| try self.reportError(err);
                 return;
             }
+            n += 1;
+        }
+    } else if (self.overlay == .task_picker) {
+        for (self.tasks.available, 0..) |task, index| {
+            if (!matches(query, task.label)) continue;
+            if (n == self.overlay_index) return terminal_tasks.execute(self, cx, index);
             n += 1;
         }
     } else {

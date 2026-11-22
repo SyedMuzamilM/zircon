@@ -1,6 +1,7 @@
 //! Application commands and file policy. Editing is delegated to zircon_editor;
 //! persistence is delegated to zircon_workspace. Errors leave the view usable.
 const std = @import("std");
+const builtin = @import("builtin");
 const editing = @import("zircon_editor");
 const text = @import("zircon_text");
 const ui = @import("zircon_ui");
@@ -23,6 +24,7 @@ const services_recovery = @import("services/recovery.zig");
 const services_save = @import("services/save.zig");
 const services_search = @import("services/search.zig");
 const symbol_hover = @import("services/symbol_hover.zig");
+const terminal_tasks = @import("services/tasks.zig");
 const settings_model = @import("settings/model.zig");
 const settings_view = @import("settings/view.zig");
 const model = @import("shell.zig");
@@ -64,6 +66,7 @@ pub fn bootstrap(self: *Shell, cx: *ui.Context(Shell), window: ui.WindowHandle) 
     try self.styleInputs(cx);
     try project_index.start(self, cx);
     try services_git.start(self, cx, .refresh);
+    if (!builtin.is_test) self.captureTerminalEnvironment(cx) catch {};
     try cx.app.watchExternal(cx.owner, Shell.pollLanguage);
     cx.notify();
 }
@@ -646,7 +649,11 @@ pub fn execute(self: *Shell, cx: *ui.Context(Shell), which: Command, event: ?*ui
         .open_path => try overlays.show(self, cx, .open_path),
         .quick_open => try overlays.show(self, cx, .quick_open),
         .palette => try overlays.show(self, cx, .palette),
-        .find => try buffer_find.open(self, cx, false),
+        .run_task => try terminal_tasks.show(self, cx),
+        .rerun_last_task => try terminal_tasks.rerunLast(self, cx),
+        .find => if (terminal_module.hasFocus(self, cx)) {
+            try terminal_module.openSearch(self, cx);
+        } else try buffer_find.open(self, cx, false),
         .replace => try buffer_find.open(self, cx, true),
         .toggle_sidebar => self.sidebar_visible = !self.sidebar_visible,
         .split_menu => self.split_menu_open = !self.split_menu_open,
@@ -915,8 +922,14 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
         }
     }
     if (try workspace_controls.input(self, e, cx)) return;
-    if (self.popup == .none and self.overlay == .none and self.terminal.visible and self.terminal.focused and e.data == .key_down) {
+    if (self.popup == .none and self.overlay == .none and e.data == .key_down and terminal_module.hasFocus(self, cx)) {
         const key = e.data.key_down;
+        if (key.modifiers.command and key.key == .f) {
+            try terminal_module.openSearch(self, cx);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         if (!key.modifiers.command or key.key == .v or key.key == .c or key.key == .a or key.key == .k) return;
         if (key.modifiers.command and key.key == .w) {
             try terminal_module.closeActive(self, cx);
@@ -1003,7 +1016,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
                 .project_search => .run_project_search,
                 else => .dismiss,
             };
-            if (self.overlay == .palette or self.overlay == .quick_open) try overlays.activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
+            if (self.overlay == .palette or self.overlay == .quick_open or self.overlay == .task_picker) try overlays.activateSelected(self, cx) else execute(self, cx, which, e) catch |err| try self.reportError(err);
             if (self.vim_find_pending and self.overlay == .find) {
                 self.vim_find_pending = false;
                 self.overlay = .none;
@@ -1014,7 +1027,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
             cx.notify();
             return;
         }
-        if ((key.key == .down or key.key == .up) and (self.overlay == .palette or self.overlay == .quick_open)) {
+        if ((key.key == .down or key.key == .up) and (self.overlay == .palette or self.overlay == .quick_open or self.overlay == .task_picker)) {
             const count = try overlays.filteredCount(self, cx);
             if (count > 0) self.overlay_index = if (key.key == .down) (self.overlay_index + 1) % count else (self.overlay_index + count - 1) % count;
             e.preventDefault();

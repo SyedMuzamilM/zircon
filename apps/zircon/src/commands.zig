@@ -132,6 +132,8 @@ pub const Command = enum {
     show_signature_help,
     code_actions,
     show_diagnostics,
+    run_task,
+    rerun_last_task,
 };
 pub const Entry = struct { command: Command, label: []const u8, shortcut: []const u8 = "" };
 pub const commands = [_]Entry{
@@ -158,6 +160,8 @@ pub const commands = [_]Entry{
     .{ .command = .layout_classic, .label = "Panel layout: Classic" },
     .{ .command = .toggle_terminal, .label = "Terminal: toggle panel" },
     .{ .command = .new_terminal, .label = "Terminal: new tab" },
+    .{ .command = .run_task, .label = "Tasks: run task…" },
+    .{ .command = .rerun_last_task, .label = "Tasks: rerun last task" },
     .{ .command = .terminal_bottom, .label = "Terminal: dock at bottom" },
     .{ .command = .terminal_right, .label = "Terminal: dock at right" },
     .{ .command = .toggle_comment, .label = "Editor: toggle line comments", .shortcut = "⌘/" },
