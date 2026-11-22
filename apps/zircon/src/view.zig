@@ -73,7 +73,6 @@ pub fn render(self: *const Shell, b: *ui.Ui) !ui.Element {
     var layers: std.ArrayList(ui.Element) = .empty;
     try layers.append(b.allocator(), base);
     if (try hover_popover.render(self, b)) |popover| try layers.append(b.allocator(), popover);
-    if (self.terminal.sessions.items.len > 0) try layers.append(b.allocator(), try terminal_module.wakeElement(b));
     if (self.git.menu != .none) try layers.append(b.allocator(), try git_controls.render(self, b));
     if (self.split_menu_open) try layers.append(b.allocator(), try chrome.splitMenu(self, b));
     if (self.popup != .none) try layers.append(b.allocator(), try workspace_controls.render(self, b));

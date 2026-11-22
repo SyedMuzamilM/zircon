@@ -541,7 +541,9 @@ test "native terminal executes a command in a PTY and paints its output" {
     try app.dispatch(h, .{ .key_down = .{ .key = .enter } });
     const Read = struct {
         fn output(self: *const zircon.Shell) bool {
-            for (self.terminal.sessions.items[0].lines.items) |line| {
+            const screen = self.terminal.sessions.items[0].terminal.activeScreenConst();
+            for (0..screen.len) |row| {
+                const line = screen.rowConst(row);
                 for (0..line.cells.len -| 4) |i| if (line.cells[i].code == 'P' and line.cells[i + 1].code == 'T' and line.cells[i + 2].code == 'Y' and line.cells[i + 3].code == 'O' and line.cells[i + 4].code == 'K') return true;
             }
             return false;
@@ -564,7 +566,9 @@ test "native terminal executes a command in a PTY and paints its output" {
     const Check = struct {
         fn interrupted(self: *const zircon.Shell) bool {
             const marker = "INTERRUPTED";
-            for (self.terminal.sessions.items[0].lines.items) |line| {
+            const screen = self.terminal.sessions.items[0].terminal.activeScreenConst();
+            for (0..screen.len) |row| {
+                const line = screen.rowConst(row);
                 for (0..line.cells.len -| (marker.len - 1)) |i| {
                     var matches = true;
                     for (marker, 0..) |c, j| if (line.cells[i + j].code != c) {
@@ -835,4 +839,60 @@ fn statusHas(app: *ui.App, h: ui.WindowHandle, label: []const u8) bool {
     const window = app.window(h) catch return false;
     for (window.frames.committed.scene.items) |item| if (item.kind == .text and std.mem.eql(u8, item.text, label)) return true;
     return false;
+}
+
+test "terminal dock paints text runs and supports fractional scrolling and smart copy" {
+    var app = try ui.App.init(.{ .allocator = t.allocator });
+    defer app.deinit();
+    const h = try open(&app, null);
+    const owner = try app.windowEntity(zircon.Shell, h);
+    const Setup = struct {
+        fn configure(self: *zircon.Shell, _: *ui.Context(zircon.Shell)) void {
+            self.terminal.options = .{ .command = "/bin/sh", .args = &.{ "-c", ":" } };
+        }
+        fn output(self: *zircon.Shell, cx: *ui.Context(zircon.Shell)) !void {
+            const session = &self.terminal.sessions.items[0];
+            for (0..40) |_| try session.feed(self.allocator, "scrollback\r\n");
+            try session.feed(self.allocator, "one  two three");
+            cx.notify();
+        }
+        fn scrollPx(self: *const zircon.Shell) f32 {
+            return self.terminal.sessions.items[0].scroll_px;
+        }
+    };
+    try app.update(owner, Setup.configure, .{});
+    try app.update(owner, Ops.command, .{.toggle_terminal});
+    _ = try app.step(0);
+    _ = try app.step(0.01);
+    try app.update(owner, Setup.output, .{});
+    _ = try app.step(0.02);
+
+    const window = try app.window(h);
+    var batched = false;
+    for (window.frames.committed.scene.items) |item| {
+        if (item.kind == .text and std.mem.eql(u8, item.text, "one  two three")) batched = true;
+    }
+    try t.expect(batched);
+
+    const terminal = try bounds(&app, h, "terminal-canvas");
+    const position: ui.Point = .{ .x = terminal.x + 16, .y = terminal.y + 14 };
+    try app.dispatch(h, .{ .pointer_down = .{ .position = position } });
+    try app.dispatch(h, .{ .pointer_up = .{ .position = position } });
+    try app.dispatch(h, .{ .scroll = .{ .position = position, .x = 0, .y = 2.5 } });
+    try t.expectEqual(@as(f32, 2.5), try app.read(owner, Setup.scrollPx, .{}));
+
+    try app.dispatch(h, .{ .key_down = .{ .key = .a, .modifiers = .{ .command = true } } });
+    try app.dispatch(h, .{ .key_down = .{ .key = .c, .modifiers = .{ .command = true } } });
+    const surface = window.surface.?;
+    const text = try surface.ops.clipboard_read(surface.context, t.allocator);
+    defer t.allocator.free(text);
+    try t.expect(std.mem.startsWith(u8, text, "scrollback\n"));
+    try t.expect(std.mem.endsWith(u8, text, "\none  two three"));
+
+    try app.dispatch(h, .{ .key_down = .{ .key = .k, .modifiers = .{ .command = true } } });
+    try t.expectEqual(@as(f32, 0), try app.read(owner, Setup.scrollPx, .{}));
+    _ = try app.step(0.03);
+    for (window.frames.committed.scene.items) |item| {
+        if (item.kind == .text) try t.expect(!std.mem.eql(u8, item.text, "one  two three"));
+    }
 }

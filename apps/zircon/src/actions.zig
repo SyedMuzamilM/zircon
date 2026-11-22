@@ -917,7 +917,7 @@ pub fn globalInput(self: *Shell, e: *ui.Event(ui.Input), cx: *ui.Context(Shell))
     if (try workspace_controls.input(self, e, cx)) return;
     if (self.popup == .none and self.overlay == .none and self.terminal.visible and self.terminal.focused and e.data == .key_down) {
         const key = e.data.key_down;
-        if (!key.modifiers.command or key.key == .v or key.key == .c or key.key == .a) return;
+        if (!key.modifiers.command or key.key == .v or key.key == .c or key.key == .a or key.key == .k) return;
         if (key.modifiers.command and key.key == .w) {
             try terminal_module.closeActive(self, cx);
             e.preventDefault();
